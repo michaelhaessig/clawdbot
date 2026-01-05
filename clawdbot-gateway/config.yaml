@@ -1,0 +1,53 @@
+name: Clawdbot Gateway
+version: "1.0.0"
+slug: clawdbot-gateway
+description: WhatsApp gateway with AI agent capabilities
+url: https://github.com/michaelhaessig/clawdbot
+
+# Pre-built image (HA pulls this instead of building)
+image: ghcr.io/michaelhaessig/clawdbot-gateway-{arch}
+
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: true
+
+# Ingress allows accessing the web UI through Home Assistant
+ingress: true
+ingress_port: 18789
+ingress_stream: true
+
+ports:
+  18789/tcp: 18789
+  18790/tcp: 18790
+
+ports_description:
+  18789/tcp: Gateway API / Web UI
+  18790/tcp: Bridge WebSocket
+
+map:
+  - config:rw
+  - share:rw
+
+options:
+  gateway_bind: "0.0.0.0"
+  gateway_port: 18789
+  bridge_port: 18790
+  gateway_token: ""
+  workspace: "/share/clawdbot"
+
+schema:
+  gateway_bind: str
+  gateway_port: port
+  bridge_port: port
+  gateway_token: str?
+  workspace: str
+
+environment:
+  CLAWDBOT_STATE_DIR: /config/clawdbot
+  CLAWDBOT_WORKSPACE_DIR: /share/clawdbot
+
+panel_icon: mdi:whatsapp
+panel_title: Clawdbot
