@@ -26,6 +26,7 @@
         "group": "Getting Started",
         "pages": [
           "index",
+          "hubs",
           "onboarding",
           "clawd",
           "faq"
@@ -70,8 +71,9 @@
           "mac/dev-setup",
           "mac/menu-bar",
           "mac/voicewake",
-          "ios/connect",
-          "android/connect",
+          "macos",
+          "ios",
+          "android",
           "webchat",
           "web"
         ]
