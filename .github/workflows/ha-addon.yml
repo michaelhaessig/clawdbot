@@ -5,6 +5,7 @@ on:
     branches: [main, home-assistant]
     paths:
       - 'clawdbot-gateway/**'
+      - 'Dockerfile.ha-addon'
       - 'src/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
