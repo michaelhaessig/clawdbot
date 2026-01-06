@@ -87,6 +87,8 @@ const ReplyToModeSchema = z.union([
 //   - .default("open") ensures runtime always resolves to "open" if not provided
 const GroupPolicySchema = z.enum(["open", "disabled", "allowlist"]);
 
+const DmPolicySchema = z.enum(["pairing", "allowlist", "open", "disabled"]);
+
 const QueueModeBySurfaceSchema = z
   .object({
     whatsapp: QueueModeSchema.optional(),
@@ -128,7 +130,7 @@ const SessionSchema = z
               action: z.union([z.literal("allow"), z.literal("deny")]),
               match: z
                 .object({
-                  surface: z.string().optional(),
+                  provider: z.string().optional(),
                   chatType: z
                     .union([
                       z.literal("direct"),
@@ -238,8 +240,8 @@ const RoutingSchema = z
         z.object({
           agentId: z.string(),
           match: z.object({
-            surface: z.string(),
-            surfaceAccountId: z.string().optional(),
+            provider: z.string(),
+            accountId: z.string().optional(),
             peer: z
               .object({
                 kind: z.union([
@@ -259,7 +261,7 @@ const RoutingSchema = z
     queue: z
       .object({
         mode: QueueModeSchema.optional(),
-        bySurface: QueueModeBySurfaceSchema,
+        byProvider: QueueModeBySurfaceSchema,
         debounceMs: z.number().int().nonnegative().optional(),
         cap: z.number().int().positive().optional(),
         drop: QueueDropSchema.optional(),
@@ -286,7 +288,7 @@ const HookMappingSchema = z
     messageTemplate: z.string().optional(),
     textTemplate: z.string().optional(),
     deliver: z.boolean().optional(),
-    channel: z
+    provider: z
       .union([
         z.literal("last"),
         z.literal("whatsapp"),
@@ -477,6 +479,7 @@ export const ClawdbotSchema = z.object({
         )
         .optional(),
       workspace: z.string().optional(),
+      skipBootstrap: z.boolean().optional(),
       userTimezone: z.string().optional(),
       contextTokens: z.number().int().positive().optional(),
       tools: z
@@ -674,6 +677,7 @@ export const ClawdbotSchema = z.object({
               enabled: z.boolean().optional(),
               /** Override auth directory for this WhatsApp account (Baileys multi-file auth state). */
               authDir: z.string().optional(),
+              dmPolicy: DmPolicySchema.optional().default("pairing"),
               allowFrom: z.array(z.string()).optional(),
               groupAllowFrom: z.array(z.string()).optional(),
               groupPolicy: GroupPolicySchema.optional().default("open"),
@@ -689,9 +693,23 @@ export const ClawdbotSchema = z.object({
                 )
                 .optional(),
             })
+            .superRefine((value, ctx) => {
+              if (value.dmPolicy !== "open") return;
+              const allow = (value.allowFrom ?? [])
+                .map((v) => String(v).trim())
+                .filter(Boolean);
+              if (allow.includes("*")) return;
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["allowFrom"],
+                message:
+                  'whatsapp.accounts.*.dmPolicy="open" requires allowFrom to include "*"',
+              });
+            })
             .optional(),
         )
         .optional(),
+      dmPolicy: DmPolicySchema.optional().default("pairing"),
       allowFrom: z.array(z.string()).optional(),
       groupAllowFrom: z.array(z.string()).optional(),
       groupPolicy: GroupPolicySchema.optional().default("open"),
@@ -707,10 +725,24 @@ export const ClawdbotSchema = z.object({
         )
         .optional(),
     })
+    .superRefine((value, ctx) => {
+      if (value.dmPolicy !== "open") return;
+      const allow = (value.allowFrom ?? [])
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      if (allow.includes("*")) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allowFrom"],
+        message:
+          'whatsapp.dmPolicy="open" requires whatsapp.allowFrom to include "*"',
+      });
+    })
     .optional(),
   telegram: z
     .object({
       enabled: z.boolean().optional(),
+      dmPolicy: DmPolicySchema.optional().default("pairing"),
       botToken: z.string().optional(),
       tokenFile: z.string().optional(),
       replyToMode: ReplyToModeSchema.optional(),
@@ -733,6 +765,19 @@ export const ClawdbotSchema = z.object({
       webhookUrl: z.string().optional(),
       webhookSecret: z.string().optional(),
       webhookPath: z.string().optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.dmPolicy !== "open") return;
+      const allow = (value.allowFrom ?? [])
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      if (allow.includes("*")) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allowFrom"],
+        message:
+          'telegram.dmPolicy="open" requires telegram.allowFrom to include "*"',
+      });
     })
     .optional(),
   discord: z
@@ -774,9 +819,23 @@ export const ClawdbotSchema = z.object({
       dm: z
         .object({
           enabled: z.boolean().optional(),
+          policy: DmPolicySchema.optional().default("pairing"),
           allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
           groupEnabled: z.boolean().optional(),
           groupChannels: z.array(z.union([z.string(), z.number()])).optional(),
+        })
+        .superRefine((value, ctx) => {
+          if (value.policy !== "open") return;
+          const allow = (value.allowFrom ?? [])
+            .map((v) => String(v).trim())
+            .filter(Boolean);
+          if (allow.includes("*")) return;
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["allowFrom"],
+            message:
+              'discord.dm.policy="open" requires discord.dm.allowFrom to include "*"',
+          });
         })
         .optional(),
       guilds: z
@@ -842,9 +901,23 @@ export const ClawdbotSchema = z.object({
       dm: z
         .object({
           enabled: z.boolean().optional(),
+          policy: DmPolicySchema.optional().default("pairing"),
           allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
           groupEnabled: z.boolean().optional(),
           groupChannels: z.array(z.union([z.string(), z.number()])).optional(),
+        })
+        .superRefine((value, ctx) => {
+          if (value.policy !== "open") return;
+          const allow = (value.allowFrom ?? [])
+            .map((v) => String(v).trim())
+            .filter(Boolean);
+          if (allow.includes("*")) return;
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["allowFrom"],
+            message:
+              'slack.dm.policy="open" requires slack.dm.allowFrom to include "*"',
+          });
         })
         .optional(),
       channels: z
@@ -875,11 +948,25 @@ export const ClawdbotSchema = z.object({
       ignoreAttachments: z.boolean().optional(),
       ignoreStories: z.boolean().optional(),
       sendReadReceipts: z.boolean().optional(),
+      dmPolicy: DmPolicySchema.optional().default("pairing"),
       allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
       groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
       groupPolicy: GroupPolicySchema.optional().default("open"),
       textChunkLimit: z.number().int().positive().optional(),
-      mediaMaxMb: z.number().positive().optional(),
+      mediaMaxMb: z.number().int().positive().optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.dmPolicy !== "open") return;
+      const allow = (value.allowFrom ?? [])
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      if (allow.includes("*")) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allowFrom"],
+        message:
+          'signal.dmPolicy="open" requires signal.allowFrom to include "*"',
+      });
     })
     .optional(),
   imessage: z
@@ -891,11 +978,12 @@ export const ClawdbotSchema = z.object({
         .union([z.literal("imessage"), z.literal("sms"), z.literal("auto")])
         .optional(),
       region: z.string().optional(),
+      dmPolicy: DmPolicySchema.optional().default("pairing"),
       allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
       groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
       groupPolicy: GroupPolicySchema.optional().default("open"),
       includeAttachments: z.boolean().optional(),
-      mediaMaxMb: z.number().positive().optional(),
+      mediaMaxMb: z.number().int().positive().optional(),
       textChunkLimit: z.number().int().positive().optional(),
       groups: z
         .record(
@@ -907,6 +995,19 @@ export const ClawdbotSchema = z.object({
             .optional(),
         )
         .optional(),
+    })
+    .superRefine((value, ctx) => {
+      if (value.dmPolicy !== "open") return;
+      const allow = (value.allowFrom ?? [])
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      if (allow.includes("*")) return;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["allowFrom"],
+        message:
+          'imessage.dmPolicy="open" requires imessage.allowFrom to include "*"',
+      });
     })
     .optional(),
   bridge: z

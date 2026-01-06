@@ -5,12 +5,21 @@
 ## Unreleased
 
 ### Breaking
+- **SECURITY (update ASAP):** inbound DMs are now **locked down by default** on Telegram/WhatsApp/Signal/iMessage/Discord/Slack.
+  - Previously, if you didn’t configure an allowlist, your bot could be **open to anyone** (especially discoverable Telegram bots).
+  - New default: DM pairing (`dmPolicy="pairing"` / `discord.dm.policy="pairing"` / `slack.dm.policy="pairing"`).
+  - To keep old “open to everyone” behavior: set `dmPolicy="open"` and include `"*"` in the relevant `allowFrom` (Discord/Slack: `discord.dm.allowFrom` / `slack.dm.allowFrom`).
+  - Approve requests via `clawdbot pairing list --provider <provider>` + `clawdbot pairing approve --provider <provider> <code>` (Telegram also supports `clawdbot telegram pairing ...`).
 - Timestamps in agent envelopes are now UTC (compact `YYYY-MM-DDTHH:mmZ`); removed `messages.timestampPrefix`. Add `agent.userTimezone` to tell the model the user’s local time (system prompt only).
 - Model config schema changes (auth profiles + model lists); doctor auto-migrates and the gateway rewrites legacy configs on startup.
 - Commands: gate all slash commands to authorized senders; add `/compact` to manually compact session context.
 - Groups: `whatsapp.groups`, `telegram.groups`, and `imessage.groups` now act as allowlists when set. Add `"*"` to keep allow-all behavior.
 
 ### Fixes
+- Docs: add missing `ui:install` setup step in the README. Thanks @hugobarauna for PR #300.
+- Build: import tool-display JSON as a module instead of runtime file reads. Thanks @mukhtharcm for PR #312.
+- Browser: fix `browser snapshot`/`browser act` timeouts under Bun by patching Playwright’s CDP WebSocket selection. Thanks @azade-c for PR #307.
+- Telegram: stop typing after tool results. Thanks @AbhisekBasu1 for PR #322.
 - Messages: stop defaulting ack reactions to 👀 when identity emoji is missing.
 - Auto-reply: require slash for control commands to avoid false triggers in normal text.
 - Auto-reply: treat steer during compaction as a follow-up, queued until compaction completes.
@@ -19,6 +28,8 @@
 - Onboarding: prompt immediately for OpenAI Codex redirect URL on remote/headless logins.
 - Configure: add OpenAI Codex (ChatGPT OAuth) auth choice (align with onboarding).
 - Doctor: suggest adding the workspace memory system when missing (opt-out via `--no-workspace-suggestions`).
+- Doctor: normalize default workspace path to `~/clawd` (avoid `~/clawdbot`).
+- Workspace: only create `BOOTSTRAP.md` for brand-new workspaces (don’t recreate after deletion).
 - Build: fix duplicate protocol export, align Codex OAuth options, and add proper-lockfile typings.
 - Build: install Bun in the Dockerfile so `pnpm build` can run Bun scripts. Thanks @loukotal for PR #284.
 - Typing indicators: stop typing once the reply dispatcher drains to prevent stuck typing across Discord/Telegram/WhatsApp.
@@ -42,6 +53,7 @@
 - TUI: migrate key handling to the updated pi-tui Key matcher API.
 - TUI: add `/elev` alias for `/elevated`.
 - Logging: redact sensitive tokens in verbose tool summaries by default (configurable patterns).
+- macOS: keep app connection settings local in remote mode to avoid overwriting gateway config. Thanks @ngutman for PR #310.
 - macOS: prefer gateway config reads/writes in local mode (fall back to disk if the gateway is unavailable).
 - macOS: local gateway now connects via tailnet IP when bind mode is `tailnet`/`auto`.
 - macOS: Connections settings now use a custom sidebar to avoid toolbar toggle issues, with rounded styling and full-width row hit targets.
@@ -61,9 +73,11 @@
 - Control UI: let config-form enums select empty-string values. Thanks @sreekaransrinath for PR #268.
 - Control UI: scroll chat to bottom on initial load. Thanks @kiranjd for PR #274.
 - Control UI: add Chat focus mode toggle to collapse header + sidebar.
+- Control UI: tighten focus mode spacing (reduce top padding, add comfortable compose inset).
 - Control UI: standardize UI build instructions on `bun run ui:*` (fallback supported).
 - Status: show runtime (docker/direct) and move shortcuts to `/help`.
 - Status: show model auth source (api-key/oauth).
+- Status: fix zero token counters for Anthropic (Opus) sessions by normalizing usage fields and ignoring empty usage updates.
 - Block streaming: avoid splitting Markdown fenced blocks and reopen fences when forced to split.
 - Block streaming: preserve leading indentation in block replies (lists, indented fences).
 - Docs: document systemd lingering and logged-in session requirements on macOS/Windows.
@@ -86,10 +100,14 @@
 - Telegram/WhatsApp: parse shared locations (pins, places, live) and expose structured ctx fields. Thanks @nachoiacovino for PR #194.
 - Auto-reply: block unauthorized `/reset` and infer WhatsApp senders from E.164 inputs.
 - Auto-reply: track compaction count in session status; verbose mode announces auto-compactions.
+- Telegram: notify users when inbound media exceeds size limits. Thanks @jarvis-medmatic for PR #283.
 - Telegram: send GIF media as animations (auto-play) and improve filename sniffing.
 - Bash tool: inherit gateway PATH so Nix-provided tools resolve during commands. Thanks @joshp123 for PR #202.
+- Delivery chunking: keep Markdown fenced code blocks valid when splitting long replies (close + reopen fences).
 
 ### Maintenance
+- Agent: add `skipBootstrap` config option. Thanks @onutc for PR #292.
+- UI: add favicon.ico derived from the macOS app icon. Thanks @jeffersonwarrior for PR #305.
 - Tooling: replace tsx with bun for TypeScript execution. Thanks @obviyus for PR #278.
 - Deps: bump pi-* stack, Slack SDK, discord-api-types, file-type, zod, and Biome.
 - Skills: add CodexBar model usage helper with macOS requirement metadata.
