@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.5
+
+- Explicitly set `init: false` to ensure s6-overlay runs as PID 1
+
 ## 1.0.4
 
 - Add hac CLI for Home Assistant vacuum control
