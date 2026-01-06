@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4
+
+- Add hac CLI for Home Assistant vacuum control
+- Add vacuum_entity configuration option
+- Restore bashio for proper s6-overlay integration
+
 ## 1.0.3
 
 - Fix startup crash: remove `init: true` to let s6-overlay run as PID 1

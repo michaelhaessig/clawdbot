@@ -8,6 +8,7 @@ GATEWAY_PORT=$(bashio::config 'gateway_port')
 BRIDGE_PORT=$(bashio::config 'bridge_port')
 GATEWAY_TOKEN=$(bashio::config 'gateway_token')
 WORKSPACE=$(bashio::config 'workspace')
+VACUUM_ENTITY=$(bashio::config 'vacuum_entity' || true)
 
 # Set up directories
 mkdir -p /config/clawdbot
@@ -15,10 +16,14 @@ mkdir -p /config/clawdbot/credentials
 mkdir -p "${WORKSPACE}"
 
 # Export environment variables
-# CLAWDBOT_STATE_DIR is the correct env var (not CLAWDBOT_CONFIG_DIR)
 export CLAWDBOT_STATE_DIR=/config/clawdbot
 export CLAWDBOT_WORKSPACE_DIR="${WORKSPACE}"
 export HOME=/config/clawdbot
+
+# Export vacuum entity for hac CLI (if configured)
+if [ -n "${VACUUM_ENTITY:-}" ]; then
+    export HAC_VACUUM_ENTITY="${VACUUM_ENTITY}"
+fi
 
 # Generate token if not provided
 if [ -z "${GATEWAY_TOKEN}" ]; then
@@ -68,6 +73,9 @@ bashio::log.info "  Gateway Port: ${GATEWAY_PORT}"
 bashio::log.info "  Bridge Port: ${BRIDGE_PORT}"
 bashio::log.info "  State Dir: ${CLAWDBOT_STATE_DIR}"
 bashio::log.info "  Workspace Dir: ${WORKSPACE}"
+if [ -n "${VACUUM_ENTITY:-}" ]; then
+    bashio::log.info "  Vacuum Entity: ${VACUUM_ENTITY}"
+fi
 bashio::log.info ""
 bashio::log.info "Access the web UI through Home Assistant's sidebar or at:"
 bashio::log.info "  http://<your-ha-ip>:${GATEWAY_PORT}"

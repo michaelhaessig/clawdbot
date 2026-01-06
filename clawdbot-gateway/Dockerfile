@@ -35,6 +35,9 @@ RUN pnpm build
 RUN pnpm ui:install
 RUN pnpm ui:build
 
+# Build hac CLI
+RUN cd tools/hac && bun build src/index.ts --outfile=dist/index.js --target=node --minify
+
 # Prune dev dependencies
 RUN pnpm prune --prod
 
@@ -60,6 +63,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/ui/dist ./ui/dist
+
+# Copy hac CLI and make it available in PATH
+COPY --from=builder /app/tools/hac/dist/index.js /usr/local/bin/hac.js
+RUN printf '#!/bin/sh\nexec node /usr/local/bin/hac.js "$@"\n' > /usr/local/bin/hac && chmod +x /usr/local/bin/hac
 
 # Copy run script from add-on build context
 COPY run.sh /run.sh

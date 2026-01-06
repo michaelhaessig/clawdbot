@@ -39,10 +39,14 @@ RUN pnpm install --frozen-lockfile
 COPY src ./src
 COPY tsconfig.json ./
 COPY ui ./ui
+COPY tools ./tools
 
 RUN pnpm build
 RUN pnpm ui:install
 RUN pnpm ui:build
+
+# Build hac CLI
+RUN cd tools/hac && bun build src/index.ts --outfile=dist/index.js --target=node --minify
 
 # Prune dev dependencies
 RUN pnpm prune --prod
@@ -67,6 +71,10 @@ WORKDIR /app
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+
+# Copy hac CLI and make it available in PATH
+COPY --from=builder /app/tools/hac/dist/index.js /usr/local/bin/hac.js
+RUN printf '#!/bin/sh\nexec node /usr/local/bin/hac.js "$@"\n' > /usr/local/bin/hac && chmod +x /usr/local/bin/hac
 
 # Copy run script
 COPY clawdbot-gateway/run.sh /run.sh
