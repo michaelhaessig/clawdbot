@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- Sync with upstream (Telegram typing fix, markdown chunking, Playwright Bun patch)
+- Various stability improvements
+
 ## 1.0.1
 
 - Switch from Alpine to Debian base image for better binary compatibility (glibc)
