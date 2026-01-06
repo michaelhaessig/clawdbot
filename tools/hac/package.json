@@ -1,0 +1,25 @@
+{
+  "name": "hac",
+  "version": "0.1.0",
+  "description": "Home Assistant CLI for controlling devices via the Supervisor/REST API",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "hac": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "bun src/index.ts",
+    "build": "bun build src/index.ts --outfile=dist/index.js --target=node --minify",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

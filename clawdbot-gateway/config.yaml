@@ -13,6 +13,10 @@ arch:
 startup: services
 boot: auto
 
+# Enable Home Assistant API access (injects SUPERVISOR_TOKEN)
+hassio_api: true
+homeassistant_api: true
+
 # Ingress allows accessing the web UI through Home Assistant
 ingress: true
 ingress_port: 18789
@@ -36,6 +40,7 @@ options:
   bridge_port: 18790
   gateway_token: ""
   workspace: "/share/clawdbot"
+  vacuum_entity: ""
 
 schema:
   gateway_bind: str
@@ -43,6 +48,7 @@ schema:
   bridge_port: port
   gateway_token: str?
   workspace: str
+  vacuum_entity: str?
 
 environment:
   CLAWDBOT_STATE_DIR: /config/clawdbot
