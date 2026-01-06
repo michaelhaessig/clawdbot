@@ -12,7 +12,13 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    vips-dev
+    vips-dev \
+    bash \
+    curl
+
+# Install bun (required for build scripts)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 RUN corepack enable
 
