@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips-dev \
     git \
     curl \
+    unzip \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
