@@ -8,8 +8,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     libvips-dev \
     git \
+    curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install bun (required for build scripts)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 RUN corepack enable
 
