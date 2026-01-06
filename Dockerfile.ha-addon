@@ -21,13 +21,13 @@ WORKDIR /app
 # Copy dependency files first for better caching
 COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
+COPY scripts ./scripts
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile
 
 # Copy source and build
 COPY src ./src
-COPY scripts ./scripts
 COPY tsconfig.json ./
 COPY ui ./ui
 
