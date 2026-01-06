@@ -1,13 +1,15 @@
-# Build stage - use Alpine to match runtime
-FROM node:22-alpine AS builder
+# Build stage - use Debian to match runtime (glibc compatibility)
+FROM node:22-bookworm-slim AS builder
 
 # Install build dependencies for native modules
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
-    vips-dev \
-    git
+    libvips-dev \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
 
@@ -32,16 +34,18 @@ RUN pnpm prune --prod
 
 # Runtime stage
 ARG BUILD_FROM
-FROM ${BUILD_FROM:-ghcr.io/home-assistant/aarch64-base:3.19}
+FROM ${BUILD_FROM:-ghcr.io/home-assistant/aarch64-base-debian:bookworm}
 
 # Install Node.js and runtime dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
-    vips \
+    libvips42 \
     xxd \
     lsof \
-    curl
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
