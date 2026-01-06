@@ -58,6 +58,10 @@ jobs:
       - name: Extract version
         id: version
         run: |
+          # Get version from config.yaml for HA compatibility
+          CONFIG_VERSION=$(grep '^version:' clawdbot-gateway/config.yaml | sed 's/version: *"\?\([^"]*\)"\?/\1/')
+          echo "config_version=${CONFIG_VERSION}" >> $GITHUB_OUTPUT
+
           if [[ "${{ github.event_name }}" == "release" ]]; then
             echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           elif [[ -n "${{ github.event.inputs.version }}" && "${{ github.event.inputs.version }}" != "latest" ]]; then
@@ -75,6 +79,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/clawdbot-gateway-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/clawdbot-gateway-${{ matrix.arch }}:${{ steps.version.outputs.config_version }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/clawdbot-gateway-${{ matrix.arch }}:latest
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base:3.19
