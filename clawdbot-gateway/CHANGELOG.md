@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Switch from Alpine to Debian base image for better binary compatibility (glibc)
+- Pre-compiled Go binaries and other tools now work out of the box
+- Improved compatibility with third-party integrations
+
 ## 1.0.0
 
 - Initial release
