@@ -12,7 +12,13 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    vips-dev
+    vips-dev \
+    bash \
+    curl
+
+# Install bun (required for build scripts)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:$PATH"
 
 RUN corepack enable
 
@@ -31,10 +37,7 @@ COPY src ./src
 COPY tsconfig.json ./
 COPY ui ./ui
 
-# Build TypeScript (skip bun, not supported on Alpine musl)
-RUN npx tsc -p tsconfig.json
-# Copy canvas-host a2ui files (replaces bun scripts/canvas-a2ui-copy.ts)
-RUN mkdir -p dist/canvas-host && cp -r src/canvas-host/a2ui dist/canvas-host/
+RUN pnpm build
 RUN pnpm ui:install
 RUN pnpm ui:build
 
