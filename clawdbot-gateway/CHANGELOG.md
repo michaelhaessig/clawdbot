@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Fix startup crash: remove `init: true` to let s6-overlay run as PID 1
+
 ## 1.0.2
 
 - Sync with upstream (Telegram typing fix, markdown chunking, Playwright Bun patch)
