@@ -7,8 +7,10 @@ export function buildAgentSystemPromptAppend(params: {
   ownerNumbers?: string[];
   reasoningTagHint?: boolean;
   toolNames?: string[];
+  modelAliasLines?: string[];
   userTimezone?: string;
   userTime?: string;
+  heartbeatPrompt?: string;
   runtimeInfo?: {
     host?: string;
     os?: string;
@@ -19,6 +21,8 @@ export function buildAgentSystemPromptAppend(params: {
   sandboxInfo?: {
     enabled: boolean;
     workspaceDir?: string;
+    workspaceAccess?: "none" | "ro" | "rw";
+    agentWorkspaceMount?: string;
     browserControlUrl?: string;
     browserNoVncUrl?: string;
   };
@@ -44,6 +48,8 @@ export function buildAgentSystemPromptAppend(params: {
     image: "Analyze an image with the configured image model",
     discord: "Send Discord reactions/messages and manage threads",
     slack: "Send Slack messages and manage channels",
+    telegram: "Send Telegram reactions",
+    whatsapp: "Send WhatsApp reactions",
   };
 
   const toolOrder = [
@@ -67,6 +73,8 @@ export function buildAgentSystemPromptAppend(params: {
     "image",
     "discord",
     "slack",
+    "telegram",
+    "whatsapp",
   ];
 
   const normalizedTools = (params.toolNames ?? [])
@@ -77,7 +85,6 @@ export function buildAgentSystemPromptAppend(params: {
     new Set(normalizedTools.filter((tool) => !toolOrder.includes(tool))),
   );
   const enabledTools = toolOrder.filter((tool) => availableTools.has(tool));
-  const disabledTools = toolOrder.filter((tool) => !availableTools.has(tool));
   const toolLines = enabledTools.map((tool) => {
     const summary = toolSummaries[tool];
     return summary ? `- ${tool}: ${summary}` : `- ${tool}`;
@@ -113,6 +120,10 @@ export function buildAgentSystemPromptAppend(params: {
     : undefined;
   const userTimezone = params.userTimezone?.trim();
   const userTime = params.userTime?.trim();
+  const heartbeatPrompt = params.heartbeatPrompt?.trim();
+  const heartbeatPromptLine = heartbeatPrompt
+    ? `Heartbeat prompt: ${heartbeatPrompt}`
+    : "Heartbeat prompt: (configured)";
   const runtimeInfo = params.runtimeInfo;
   const runtimeLines: string[] = [];
   if (runtimeInfo?.host) runtimeLines.push(`Host: ${runtimeInfo.host}`);
@@ -148,11 +159,18 @@ export function buildAgentSystemPromptAppend(params: {
           "- sessions_history: fetch session history",
           "- sessions_send: send to another session",
         ].join("\n"),
-    disabledTools.length > 0
-      ? `Unavailable tools (do not call): ${disabledTools.join(", ")}`
-      : "",
     "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
     "",
+    params.modelAliasLines && params.modelAliasLines.length > 0
+      ? "## Model Aliases"
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0
+      ? "Prefer aliases when specifying model overrides; full provider/model is also accepted."
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0
+      ? params.modelAliasLines.join("\n")
+      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0 ? "" : "",
     "## Workspace",
     `Your working directory is: ${params.workspaceDir}`,
     "Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.",
@@ -164,6 +182,13 @@ export function buildAgentSystemPromptAppend(params: {
           "Some tools may be unavailable due to sandbox policy.",
           params.sandboxInfo.workspaceDir
             ? `Sandbox workspace: ${params.sandboxInfo.workspaceDir}`
+            : "",
+          params.sandboxInfo.workspaceAccess
+            ? `Agent workspace access: ${params.sandboxInfo.workspaceAccess}${
+                params.sandboxInfo.agentWorkspaceMount
+                  ? ` (mounted at ${params.sandboxInfo.agentWorkspaceMount})`
+                  : ""
+              }`
             : "",
           params.sandboxInfo.browserControlUrl
             ? `Sandbox browser control URL: ${params.sandboxInfo.browserControlUrl}`
@@ -207,7 +232,8 @@ export function buildAgentSystemPromptAppend(params: {
 
   lines.push(
     "## Heartbeats",
-    'If you receive a heartbeat poll (a user message containing just "HEARTBEAT"), and there is nothing that needs attention, reply exactly:',
+    heartbeatPromptLine,
+    "If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
     "HEARTBEAT_OK",
     'Clawdbot treats a leading/trailing "HEARTBEAT_OK" as a heartbeat ack (and may discard it).',
     'If something needs attention, do NOT include "HEARTBEAT_OK"; reply with the alert text instead.',

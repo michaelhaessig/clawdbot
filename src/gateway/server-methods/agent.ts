@@ -82,11 +82,14 @@ export const agentHandlers: GatewayRequestHandlers = {
         updatedAt: now,
         thinkingLevel: entry?.thinkingLevel,
         verboseLevel: entry?.verboseLevel,
+        reasoningLevel: entry?.reasoningLevel,
         systemSent: entry?.systemSent,
         sendPolicy: entry?.sendPolicy,
         skillsSnapshot: entry?.skillsSnapshot,
         lastProvider: entry?.lastProvider,
         lastTo: entry?.lastTo,
+        modelOverride: entry?.modelOverride,
+        providerOverride: entry?.providerOverride,
       };
       sessionEntry = nextEntry;
       const sendPolicy = resolveSendPolicy({
@@ -241,6 +244,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         message,
         to: sanitizedTo,
         sessionId: resolvedSessionId,
+        sessionKey: requestedSessionKey,
         thinking: request.thinking,
         deliver,
         provider: resolvedProvider,

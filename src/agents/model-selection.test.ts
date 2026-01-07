@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { ClawdbotConfig } from "../config/config.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
-import { resolveConfiguredModelRef } from "./model-selection.js";
+import {
+  normalizeProviderId,
+  resolveConfiguredModelRef,
+} from "./model-selection.js";
 
 describe("resolveConfiguredModelRef", () => {
   it("parses provider/model from agent.model.primary", () => {
@@ -73,9 +76,37 @@ describe("resolveConfiguredModelRef", () => {
     });
   });
 
-  it("still resolves legacy agent.model string", () => {
+  it("normalizes z.ai provider in agent.model", () => {
     const cfg = {
-      agent: { model: "openai/gpt-4.1-mini" },
+      agent: { model: "z.ai/glm-4.7" },
+    } satisfies ClawdbotConfig;
+
+    const resolved = resolveConfiguredModelRef({
+      cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+      defaultModel: DEFAULT_MODEL,
+    });
+
+    expect(resolved).toEqual({ provider: "zai", model: "glm-4.7" });
+  });
+
+  it("normalizes z-ai provider in agent.model", () => {
+    const cfg = {
+      agent: { model: "z-ai/glm-4.7" },
+    } satisfies ClawdbotConfig;
+
+    const resolved = resolveConfiguredModelRef({
+      cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+      defaultModel: DEFAULT_MODEL,
+    });
+
+    expect(resolved).toEqual({ provider: "zai", model: "glm-4.7" });
+  });
+
+  it("normalizes provider casing in agent.model", () => {
+    const cfg = {
+      agent: { model: "OpenAI/gpt-4.1-mini" },
     } satisfies ClawdbotConfig;
 
     const resolved = resolveConfiguredModelRef({
@@ -85,5 +116,31 @@ describe("resolveConfiguredModelRef", () => {
     });
 
     expect(resolved).toEqual({ provider: "openai", model: "gpt-4.1-mini" });
+  });
+
+  it("normalizes z.ai casing in agent.model", () => {
+    const cfg = {
+      agent: { model: "Z.AI/glm-4.7" },
+    } satisfies ClawdbotConfig;
+
+    const resolved = resolveConfiguredModelRef({
+      cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+      defaultModel: DEFAULT_MODEL,
+    });
+
+    expect(resolved).toEqual({ provider: "zai", model: "glm-4.7" });
+  });
+});
+
+describe("normalizeProviderId", () => {
+  it("normalizes z.ai aliases to canonical zai", () => {
+    expect(normalizeProviderId("z.ai")).toBe("zai");
+    expect(normalizeProviderId("z-ai")).toBe("zai");
+  });
+
+  it("normalizes provider casing", () => {
+    expect(normalizeProviderId("OpenAI")).toBe("openai");
+    expect(normalizeProviderId("Z.AI")).toBe("zai");
   });
 });

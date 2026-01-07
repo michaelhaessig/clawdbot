@@ -1,11 +1,14 @@
 import { Type } from "@sinclair/typebox";
 
+import { createReactionSchema } from "./reaction-schema.js";
+
 export const SlackToolSchema = Type.Union([
-  Type.Object({
-    action: Type.Literal("react"),
-    channelId: Type.String(),
-    messageId: Type.String(),
-    emoji: Type.String(),
+  createReactionSchema({
+    ids: {
+      channelId: Type.String(),
+      messageId: Type.String(),
+    },
+    includeRemove: true,
   }),
   Type.Object({
     action: Type.Literal("reactions"),

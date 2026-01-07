@@ -32,7 +32,11 @@ import {
   deriveDefaultBridgePort,
   deriveDefaultCanvasHostPort,
 } from "../config/port-defaults.js";
-import { loadSessionStore, resolveStorePath } from "../config/sessions.js";
+import {
+  loadSessionStore,
+  resolveMainSessionKey,
+  resolveStorePath,
+} from "../config/sessions.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { appendCronRunLog, resolveCronRunLogPath } from "../cron/run-log.js";
 import { CronService } from "../cron/service.js";
@@ -54,6 +58,7 @@ import { startHeartbeatRunner } from "../infra/heartbeat-runner.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
 import { ensureClawdbotCliOnPath } from "../infra/path-env.js";
+import { autoMigrateLegacyState } from "../infra/state-migrations.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import {
   listSystemPresence,
@@ -200,6 +205,7 @@ const METHODS = [
   "health",
   "providers.status",
   "status",
+  "usage.status",
   "config.get",
   "config.set",
   "config.schema",
@@ -388,6 +394,7 @@ export async function startGatewayServer(
   }
 
   const cfgAtStart = loadConfig();
+  await autoMigrateLegacyState({ cfg: cfgAtStart, log });
   const bindMode = opts.bind ?? cfgAtStart.gateway?.bind ?? "loopback";
   const bindHost = opts.host ?? resolveGatewayBindHost(bindMode);
   if (!bindHost) {
@@ -687,7 +694,9 @@ export async function startGatewayServer(
     const cron = new CronService({
       storePath,
       cronEnabled,
-      enqueueSystemEvent,
+      enqueueSystemEvent: (text) => {
+        enqueueSystemEvent(text, { sessionKey: resolveMainSessionKey(cfg) });
+      },
       requestHeartbeatNow,
       runIsolatedAgentJob: async ({ job, message }) => {
         const runtimeConfig = loadConfig();

@@ -26,27 +26,46 @@ describe("buildStatusMessage", () => {
       },
       sessionKey: "agent:main:main",
       sessionScope: "per-sender",
-      storePath: "/tmp/sessions.json",
       resolvedThink: "medium",
       resolvedVerbose: "off",
+      queue: { mode: "collect", depth: 0 },
       now: 10 * 60_000, // 10 minutes later
-      webLinked: true,
-      webAuthAgeMs: 5 * 60_000,
-      heartbeatSeconds: 45,
     });
 
-    expect(text).toContain("⚙️ Status");
-    expect(text).toContain("Agent: embedded pi");
+    expect(text).toContain("🦞 ClawdBot");
+    expect(text).toContain("🧠 Model:");
     expect(text).toContain("Runtime: direct");
     expect(text).toContain("Context: 16k/32k (50%)");
+    expect(text).toContain("🧹 Compactions: 2");
     expect(text).toContain("Session: agent:main:main");
-    expect(text).toContain("compactions 2");
-    expect(text).toContain("Web: linked");
-    expect(text).toContain("heartbeat 45s");
-    expect(text).toContain("thinking=medium");
-    expect(text).toContain("verbose=off");
-    expect(text).not.toContain("Shortcuts:");
-    expect(text).not.toContain("set with");
+    expect(text).toContain("updated 10m ago");
+    expect(text).toContain("Think: medium");
+    expect(text).toContain("Verbose: off");
+    expect(text).toContain("Elevated: on");
+    expect(text).toContain("Queue: collect");
+  });
+
+  it("prefers model overrides over last-run model", () => {
+    const text = buildStatusMessage({
+      agent: {
+        model: "anthropic/claude-opus-4-5",
+        contextTokens: 32_000,
+      },
+      sessionEntry: {
+        sessionId: "override-1",
+        updatedAt: 0,
+        providerOverride: "openai",
+        modelOverride: "gpt-4.1-mini",
+        modelProvider: "anthropic",
+        model: "claude-haiku-4-5",
+        contextTokens: 32_000,
+      },
+      sessionKey: "agent:main:main",
+      sessionScope: "per-sender",
+      queue: { mode: "collect", depth: 0 },
+    });
+
+    expect(text).toContain("🧠 Model: openai/gpt-4.1-mini");
   });
 
   it("handles missing agent config gracefully", () => {
@@ -56,9 +75,9 @@ describe("buildStatusMessage", () => {
       webLinked: false,
     });
 
-    expect(text).toContain("Agent: embedded pi");
+    expect(text).toContain("🧠 Model:");
     expect(text).toContain("Context:");
-    expect(text).toContain("Web: not linked");
+    expect(text).toContain("Queue:");
   });
 
   it("includes group activation for group sessions", () => {
@@ -72,10 +91,47 @@ describe("buildStatusMessage", () => {
       },
       sessionKey: "agent:main:whatsapp:group:123@g.us",
       sessionScope: "per-sender",
-      webLinked: true,
+      queue: { mode: "collect", depth: 0 },
     });
 
-    expect(text).toContain("Group activation: always");
+    expect(text).toContain("Activation: always");
+  });
+
+  it("shows queue details when overridden", () => {
+    const text = buildStatusMessage({
+      agent: {},
+      sessionEntry: { sessionId: "q1", updatedAt: 0 },
+      sessionKey: "agent:main:main",
+      sessionScope: "per-sender",
+      queue: {
+        mode: "collect",
+        depth: 3,
+        debounceMs: 2000,
+        cap: 5,
+        dropPolicy: "old",
+        showDetails: true,
+      },
+    });
+
+    expect(text).toContain(
+      "Queue: collect (depth 3 · debounce 2s · cap 5 · drop old)",
+    );
+  });
+
+  it("inserts usage summary beneath context line", () => {
+    const text = buildStatusMessage({
+      agent: { model: "anthropic/claude-opus-4-5", contextTokens: 32_000 },
+      sessionEntry: { sessionId: "u1", updatedAt: 0, totalTokens: 1000 },
+      sessionKey: "agent:main:main",
+      sessionScope: "per-sender",
+      queue: { mode: "collect", depth: 0 },
+      usageLine: "📊 Usage: Claude 80% left (5h)",
+    });
+
+    const lines = text.split("\n");
+    const contextIndex = lines.findIndex((line) => line.startsWith("📚 "));
+    expect(contextIndex).toBeGreaterThan(-1);
+    expect(lines[contextIndex + 1]).toBe("📊 Usage: Claude 80% left (5h)");
   });
 
   it("prefers cached prompt tokens from the session log", async () => {
@@ -88,14 +144,6 @@ describe("buildStatusMessage", () => {
         "./status.js"
       );
 
-      const storePath = path.join(
-        dir,
-        ".clawdbot",
-        "agents",
-        "main",
-        "sessions",
-        "sessions.json",
-      );
       const sessionId = "sess-1";
       const logPath = path.join(
         dir,
@@ -141,8 +189,8 @@ describe("buildStatusMessage", () => {
         },
         sessionKey: "agent:main:main",
         sessionScope: "per-sender",
-        storePath,
-        webLinked: true,
+        queue: { mode: "collect", depth: 0 },
+        includeTranscriptUsage: true,
       });
 
       expect(text).toContain("Context: 1.0k/32k");

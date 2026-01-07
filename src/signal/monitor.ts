@@ -336,33 +336,33 @@ export async function monitorSignalProvider(
         if (!dmAllowed) {
           if (dmPolicy === "pairing") {
             const senderId = normalizeE164(sender);
-            const { code } = await upsertProviderPairingRequest({
+            const { code, created } = await upsertProviderPairingRequest({
               provider: "signal",
               id: senderId,
               meta: {
                 name: envelope.sourceName ?? undefined,
               },
             });
-            logVerbose(
-              `signal pairing request sender=${senderId} code=${code}`,
-            );
-            try {
-              await sendMessageSignal(
-                senderId,
-                [
-                  "Clawdbot: access not configured.",
-                  "",
-                  `Pairing code: ${code}`,
-                  "",
-                  "Ask the bot owner to approve with:",
-                  "clawdbot pairing approve --provider signal <code>",
-                ].join("\n"),
-                { baseUrl, account, maxBytes: mediaMaxBytes },
-              );
-            } catch (err) {
-              logVerbose(
-                `signal pairing reply failed for ${senderId}: ${String(err)}`,
-              );
+            if (created) {
+              logVerbose(`signal pairing request sender=${senderId}`);
+              try {
+                await sendMessageSignal(
+                  senderId,
+                  [
+                    "Clawdbot: access not configured.",
+                    "",
+                    `Pairing code: ${code}`,
+                    "",
+                    "Ask the bot owner to approve with:",
+                    "clawdbot pairing approve --provider signal <code>",
+                  ].join("\n"),
+                  { baseUrl, account, maxBytes: mediaMaxBytes },
+                );
+              } catch (err) {
+                logVerbose(
+                  `signal pairing reply failed for ${senderId}: ${String(err)}`,
+                );
+              }
             }
           } else {
             logVerbose(
@@ -451,10 +451,11 @@ export async function monitorSignalProvider(
           id: isGroup ? (groupId ?? "unknown") : normalizeE164(sender),
         },
       });
+      const signalTo = isGroup ? `group:${groupId}` : `signal:${sender}`;
       const ctxPayload = {
         Body: body,
         From: isGroup ? `group:${groupId ?? "unknown"}` : `signal:${sender}`,
-        To: isGroup ? `group:${groupId ?? "unknown"}` : `signal:${sender}`,
+        To: signalTo,
         SessionKey: route.sessionKey,
         AccountId: route.accountId,
         ChatType: isGroup ? "group" : "direct",
@@ -462,12 +463,16 @@ export async function monitorSignalProvider(
         SenderName: envelope.sourceName ?? sender,
         SenderId: sender,
         Provider: "signal" as const,
+        Surface: "signal" as const,
         MessageSid: envelope.timestamp ? String(envelope.timestamp) : undefined,
         Timestamp: envelope.timestamp ?? undefined,
         MediaPath: mediaPath,
         MediaType: mediaType,
         MediaUrl: mediaPath,
         CommandAuthorized: commandAuthorized,
+        // Originating channel for reply routing.
+        OriginatingChannel: "signal" as const,
+        OriginatingTo: signalTo,
       };
 
       if (!isGroup) {

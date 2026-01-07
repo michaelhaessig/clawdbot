@@ -1,7 +1,13 @@
 import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type {
+  AgentMessage,
+  AgentTool,
+  ThinkingLevel,
+} from "@mariozechner/pi-agent-core";
 import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
 import {
   buildSystemPrompt,
@@ -12,7 +18,13 @@ import {
   SettingsManager,
   type Skill,
 } from "@mariozechner/pi-coding-agent";
-import type { ThinkLevel, VerboseLevel } from "../auto-reply/thinking.js";
+import type { TSchema } from "@sinclair/typebox";
+import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
+import type {
+  ReasoningLevel,
+  ThinkLevel,
+  VerboseLevel,
+} from "../auto-reply/thinking.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
@@ -30,7 +42,11 @@ import {
   markAuthProfileUsed,
 } from "./auth-profiles.js";
 import type { BashElevatedDefaults } from "./bash-tools.js";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
+import {
+  DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
+} from "./defaults.js";
 import {
   ensureAuthProfileStore,
   getApiKeyForModel,
@@ -43,6 +59,7 @@ import {
   formatAssistantErrorText,
   isAuthAssistantError,
   isAuthErrorMessage,
+  isContextOverflowError,
   isRateLimitAssistantError,
   isRateLimitErrorMessage,
   pickFallbackThinkingLevel,
@@ -52,7 +69,14 @@ import {
   type BlockReplyChunking,
   subscribeEmbeddedPiSession,
 } from "./pi-embedded-subscribe.js";
-import { extractAssistantText } from "./pi-embedded-utils.js";
+import {
+  extractAssistantText,
+  extractAssistantThinking,
+  formatReasoningMarkdown,
+} from "./pi-embedded-utils.js";
+import { setContextPruningRuntime } from "./pi-extensions/context-pruning/runtime.js";
+import { computeEffectiveSettings } from "./pi-extensions/context-pruning/settings.js";
+import { makeToolPrunablePredicate } from "./pi-extensions/context-pruning/tools.js";
 import { toToolDefinitions } from "./pi-tool-definition-adapter.js";
 import { createClawdbotCodingTools } from "./pi-tools.js";
 import { resolveSandboxContext } from "./sandbox.js";
@@ -67,6 +91,84 @@ import {
 import { buildAgentSystemPromptAppend } from "./system-prompt.js";
 import { normalizeUsage, type UsageLike } from "./usage.js";
 import { loadWorkspaceBootstrapFiles } from "./workspace.js";
+
+// Optional features can be implemented as Pi extensions that run in the same Node process.
+// We configure context pruning per-session via a WeakMap registry keyed by the SessionManager instance.
+
+function resolvePiExtensionPath(id: string): string {
+  const self = fileURLToPath(import.meta.url);
+  const dir = path.dirname(self);
+  // In dev this file is `.ts` (tsx), in production it's `.js`.
+  const ext = path.extname(self) === ".ts" ? "ts" : "js";
+  return path.join(dir, "pi-extensions", `${id}.${ext}`);
+}
+
+function resolveContextWindowTokens(params: {
+  cfg: ClawdbotConfig | undefined;
+  provider: string;
+  modelId: string;
+  model: Model<Api> | undefined;
+}): number {
+  const fromModel =
+    typeof params.model?.contextWindow === "number" &&
+    Number.isFinite(params.model.contextWindow) &&
+    params.model.contextWindow > 0
+      ? params.model.contextWindow
+      : undefined;
+  if (fromModel) return fromModel;
+
+  const fromModelsConfig = (() => {
+    const providers = params.cfg?.models?.providers as
+      | Record<
+          string,
+          { models?: Array<{ id?: string; contextWindow?: number }> }
+        >
+      | undefined;
+    const providerEntry = providers?.[params.provider];
+    const models = Array.isArray(providerEntry?.models)
+      ? providerEntry.models
+      : [];
+    const match = models.find((m) => m?.id === params.modelId);
+    return typeof match?.contextWindow === "number" && match.contextWindow > 0
+      ? match.contextWindow
+      : undefined;
+  })();
+  if (fromModelsConfig) return fromModelsConfig;
+
+  const fromAgentConfig =
+    typeof params.cfg?.agent?.contextTokens === "number" &&
+    Number.isFinite(params.cfg.agent.contextTokens) &&
+    params.cfg.agent.contextTokens > 0
+      ? Math.floor(params.cfg.agent.contextTokens)
+      : undefined;
+  if (fromAgentConfig) return fromAgentConfig;
+
+  return DEFAULT_CONTEXT_TOKENS;
+}
+
+function buildContextPruningExtension(params: {
+  cfg: ClawdbotConfig | undefined;
+  sessionManager: SessionManager;
+  provider: string;
+  modelId: string;
+  model: Model<Api> | undefined;
+}): { additionalExtensionPaths?: string[] } {
+  const raw = params.cfg?.agent?.contextPruning;
+  if (raw?.mode !== "adaptive" && raw?.mode !== "aggressive") return {};
+
+  const settings = computeEffectiveSettings(raw);
+  if (!settings) return {};
+
+  setContextPruningRuntime(params.sessionManager, {
+    settings,
+    contextWindowTokens: resolveContextWindowTokens(params),
+    isToolPrunable: makeToolPrunablePredicate(settings.tools),
+  });
+
+  return {
+    additionalExtensionPaths: [resolvePiExtensionPath("context-pruning")],
+  };
+}
 
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
@@ -87,6 +189,23 @@ export type EmbeddedPiRunMeta = {
   aborted?: boolean;
 };
 
+function buildModelAliasLines(cfg?: ClawdbotConfig) {
+  const models = cfg?.agent?.models ?? {};
+  const entries: Array<{ alias: string; model: string }> = [];
+  for (const [keyRaw, entryRaw] of Object.entries(models)) {
+    const model = String(keyRaw ?? "").trim();
+    if (!model) continue;
+    const alias = String(
+      (entryRaw as { alias?: string } | undefined)?.alias ?? "",
+    ).trim();
+    if (!alias) continue;
+    entries.push({ alias, model });
+  }
+  return entries
+    .sort((a, b) => a.alias.localeCompare(b.alias))
+    .map((entry) => `- ${entry.alias}: ${entry.model}`);
+}
+
 type ApiKeyInfo = {
   apiKey: string;
   profileId?: string;
@@ -99,6 +218,7 @@ export type EmbeddedPiRunResult = {
     mediaUrl?: string;
     mediaUrls?: string[];
     replyToId?: string;
+    isError?: boolean;
   }>;
   meta: EmbeddedPiRunMeta;
 };
@@ -131,9 +251,22 @@ type EmbeddedRunWaiter = {
 };
 const EMBEDDED_RUN_WAITERS = new Map<string, Set<EmbeddedRunWaiter>>();
 
+const isAbortError = (err: unknown): boolean => {
+  if (!err || typeof err !== "object") return false;
+  const name = "name" in err ? String(err.name) : "";
+  if (name === "AbortError") return true;
+  const message =
+    "message" in err && typeof err.message === "string"
+      ? err.message.toLowerCase()
+      : "";
+  return message.includes("aborted");
+};
+
 type EmbeddedSandboxInfo = {
   enabled: boolean;
   workspaceDir?: string;
+  workspaceAccess?: "none" | "ro" | "rw";
+  agentWorkspaceMount?: string;
   browserControlUrl?: string;
   browserNoVncUrl?: string;
 };
@@ -168,6 +301,7 @@ function formatUserTime(date: Date, timeZone: string): string | undefined {
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone,
+      weekday: "long",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -179,10 +313,17 @@ function formatUserTime(date: Date, timeZone: string): string | undefined {
     for (const part of parts) {
       if (part.type !== "literal") map[part.type] = part.value;
     }
-    if (!map.year || !map.month || !map.day || !map.hour || !map.minute) {
+    if (
+      !map.weekday ||
+      !map.year ||
+      !map.month ||
+      !map.day ||
+      !map.hour ||
+      !map.minute
+    ) {
       return undefined;
     }
-    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`;
+    return `${map.weekday} ${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`;
   } catch {
     return undefined;
   }
@@ -206,8 +347,38 @@ export function buildEmbeddedSandboxInfo(
   return {
     enabled: true,
     workspaceDir: sandbox.workspaceDir,
+    workspaceAccess: sandbox.workspaceAccess,
+    agentWorkspaceMount:
+      sandbox.workspaceAccess === "ro" ? "/agent" : undefined,
     browserControlUrl: sandbox.browser?.controlUrl,
     browserNoVncUrl: sandbox.browser?.noVncUrl,
+  };
+}
+
+const BUILT_IN_TOOL_NAMES = new Set(["read", "bash", "edit", "write"]);
+
+type AnyAgentTool = AgentTool<TSchema, unknown>;
+
+export function splitSdkTools(options: {
+  tools: AnyAgentTool[];
+  sandboxEnabled: boolean;
+}): {
+  builtInTools: AnyAgentTool[];
+  customTools: ReturnType<typeof toToolDefinitions>;
+} {
+  // SDK rebuilds built-ins from cwd; route sandboxed versions as custom tools.
+  const { tools, sandboxEnabled } = options;
+  if (sandboxEnabled) {
+    return {
+      builtInTools: [],
+      customTools: toToolDefinitions(tools),
+    };
+  }
+  return {
+    builtInTools: tools.filter((tool) => BUILT_IN_TOOL_NAMES.has(tool.name)),
+    customTools: toToolDefinitions(
+      tools.filter((tool) => !BUILT_IN_TOOL_NAMES.has(tool.name)),
+    ),
   };
 }
 
@@ -396,32 +567,38 @@ export async function compactEmbeddedPiSession(params: {
       }
 
       await fs.mkdir(resolvedWorkspace, { recursive: true });
+      const sandboxSessionKey = params.sessionKey?.trim() || params.sessionId;
+      const sandbox = await resolveSandboxContext({
+        config: params.config,
+        sessionKey: sandboxSessionKey,
+        workspaceDir: resolvedWorkspace,
+      });
+      const effectiveWorkspace = sandbox?.enabled
+        ? sandbox.workspaceAccess === "rw"
+          ? resolvedWorkspace
+          : sandbox.workspaceDir
+        : resolvedWorkspace;
+      await fs.mkdir(effectiveWorkspace, { recursive: true });
       await ensureSessionHeader({
         sessionFile: params.sessionFile,
         sessionId: params.sessionId,
-        cwd: resolvedWorkspace,
+        cwd: effectiveWorkspace,
       });
 
       let restoreSkillEnv: (() => void) | undefined;
-      process.chdir(resolvedWorkspace);
+      process.chdir(effectiveWorkspace);
       try {
         const shouldLoadSkillEntries =
           !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
         const skillEntries = shouldLoadSkillEntries
-          ? loadWorkspaceSkillEntries(resolvedWorkspace)
+          ? loadWorkspaceSkillEntries(effectiveWorkspace)
           : [];
         const skillsSnapshot =
           params.skillsSnapshot ??
-          buildWorkspaceSkillSnapshot(resolvedWorkspace, {
+          buildWorkspaceSkillSnapshot(effectiveWorkspace, {
             config: params.config,
             entries: skillEntries,
           });
-        const sandboxSessionKey = params.sessionKey?.trim() || params.sessionId;
-        const sandbox = await resolveSandboxContext({
-          config: params.config,
-          sessionKey: sandboxSessionKey,
-          workspaceDir: resolvedWorkspace,
-        });
         restoreSkillEnv = params.skillsSnapshot
           ? applySkillEnvOverridesFromSnapshot({
               snapshot: params.skillsSnapshot,
@@ -433,7 +610,7 @@ export async function compactEmbeddedPiSession(params: {
             });
 
         const bootstrapFiles =
-          await loadWorkspaceBootstrapFiles(resolvedWorkspace);
+          await loadWorkspaceBootstrapFiles(effectiveWorkspace);
         const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
         const promptSkills = resolvePromptSkills(skillsSnapshot, skillEntries);
         const tools = createClawdbotCodingTools({
@@ -463,36 +640,48 @@ export async function compactEmbeddedPiSession(params: {
         const userTime = formatUserTime(new Date(), userTimezone);
         const systemPrompt = buildSystemPrompt({
           appendPrompt: buildAgentSystemPromptAppend({
-            workspaceDir: resolvedWorkspace,
+            workspaceDir: effectiveWorkspace,
             defaultThinkLevel: params.thinkLevel,
             extraSystemPrompt: params.extraSystemPrompt,
             ownerNumbers: params.ownerNumbers,
             reasoningTagHint,
+            heartbeatPrompt: resolveHeartbeatPrompt(
+              params.config?.agent?.heartbeat?.prompt,
+            ),
             runtimeInfo,
             sandboxInfo,
             toolNames: tools.map((tool) => tool.name),
+            modelAliasLines: buildModelAliasLines(params.config),
             userTimezone,
             userTime,
           }),
           contextFiles,
           skills: promptSkills,
-          cwd: resolvedWorkspace,
+          cwd: effectiveWorkspace,
           tools,
         });
 
         const sessionManager = SessionManager.open(params.sessionFile);
         const settingsManager = SettingsManager.create(
-          resolvedWorkspace,
+          effectiveWorkspace,
           agentDir,
         );
+        const pruning = buildContextPruningExtension({
+          cfg: params.config,
+          sessionManager,
+          provider,
+          modelId,
+          model,
+        });
+        const additionalExtensionPaths = pruning.additionalExtensionPaths;
 
-        const builtInToolNames = new Set(["read", "bash", "edit", "write"]);
-        const builtInTools = tools.filter((t) => builtInToolNames.has(t.name));
-        const customTools = toToolDefinitions(
-          tools.filter((t) => !builtInToolNames.has(t.name)),
-        );
+        const { builtInTools, customTools } = splitSdkTools({
+          tools,
+          sandboxEnabled: !!sandbox?.enabled,
+        });
 
-        const { session } = await createAgentSession({
+        let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
+        ({ session } = await createAgentSession({
           cwd: resolvedWorkspace,
           agentDir,
           authStorage,
@@ -506,7 +695,8 @@ export async function compactEmbeddedPiSession(params: {
           settingsManager,
           skills: promptSkills,
           contextFiles,
-        });
+          additionalExtensionPaths,
+        }));
 
         try {
           const prior = await sanitizeSessionMessagesImages(
@@ -559,6 +749,7 @@ export async function runEmbeddedPiAgent(params: {
   authProfileId?: string;
   thinkLevel?: ThinkLevel;
   verboseLevel?: VerboseLevel;
+  reasoningLevel?: ReasoningLevel;
   bashElevated?: BashElevatedDefaults;
   timeoutMs: number;
   runId: string;
@@ -574,6 +765,10 @@ export async function runEmbeddedPiAgent(params: {
   }) => void | Promise<void>;
   blockReplyBreak?: "text_end" | "message_end";
   blockReplyChunking?: BlockReplyChunking;
+  onReasoningStream?: (payload: {
+    text?: string;
+    mediaUrls?: string[];
+  }) => void | Promise<void>;
   onToolResult?: (payload: {
     text?: string;
     mediaUrls?: string[];
@@ -686,33 +881,38 @@ export async function runEmbeddedPiAgent(params: {
         );
 
         await fs.mkdir(resolvedWorkspace, { recursive: true });
+        const sandboxSessionKey = params.sessionKey?.trim() || params.sessionId;
+        const sandbox = await resolveSandboxContext({
+          config: params.config,
+          sessionKey: sandboxSessionKey,
+          workspaceDir: resolvedWorkspace,
+        });
+        const effectiveWorkspace = sandbox?.enabled
+          ? sandbox.workspaceAccess === "rw"
+            ? resolvedWorkspace
+            : sandbox.workspaceDir
+          : resolvedWorkspace;
+        await fs.mkdir(effectiveWorkspace, { recursive: true });
         await ensureSessionHeader({
           sessionFile: params.sessionFile,
           sessionId: params.sessionId,
-          cwd: resolvedWorkspace,
+          cwd: effectiveWorkspace,
         });
 
         let restoreSkillEnv: (() => void) | undefined;
-        process.chdir(resolvedWorkspace);
+        process.chdir(effectiveWorkspace);
         try {
           const shouldLoadSkillEntries =
             !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
           const skillEntries = shouldLoadSkillEntries
-            ? loadWorkspaceSkillEntries(resolvedWorkspace)
+            ? loadWorkspaceSkillEntries(effectiveWorkspace)
             : [];
           const skillsSnapshot =
             params.skillsSnapshot ??
-            buildWorkspaceSkillSnapshot(resolvedWorkspace, {
+            buildWorkspaceSkillSnapshot(effectiveWorkspace, {
               config: params.config,
               entries: skillEntries,
             });
-          const sandboxSessionKey =
-            params.sessionKey?.trim() || params.sessionId;
-          const sandbox = await resolveSandboxContext({
-            config: params.config,
-            sessionKey: sandboxSessionKey,
-            workspaceDir: resolvedWorkspace,
-          });
           restoreSkillEnv = params.skillsSnapshot
             ? applySkillEnvOverridesFromSnapshot({
                 snapshot: params.skillsSnapshot,
@@ -724,7 +924,7 @@ export async function runEmbeddedPiAgent(params: {
               });
 
           const bootstrapFiles =
-            await loadWorkspaceBootstrapFiles(resolvedWorkspace);
+            await loadWorkspaceBootstrapFiles(effectiveWorkspace);
           const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
           const promptSkills = resolvePromptSkills(
             skillsSnapshot,
@@ -759,39 +959,50 @@ export async function runEmbeddedPiAgent(params: {
           const userTime = formatUserTime(new Date(), userTimezone);
           const systemPrompt = buildSystemPrompt({
             appendPrompt: buildAgentSystemPromptAppend({
-              workspaceDir: resolvedWorkspace,
+              workspaceDir: effectiveWorkspace,
               defaultThinkLevel: thinkLevel,
               extraSystemPrompt: params.extraSystemPrompt,
               ownerNumbers: params.ownerNumbers,
               reasoningTagHint,
+              heartbeatPrompt: resolveHeartbeatPrompt(
+                params.config?.agent?.heartbeat?.prompt,
+              ),
               runtimeInfo,
               sandboxInfo,
               toolNames: tools.map((tool) => tool.name),
+              modelAliasLines: buildModelAliasLines(params.config),
               userTimezone,
               userTime,
             }),
             contextFiles,
             skills: promptSkills,
-            cwd: resolvedWorkspace,
+            cwd: effectiveWorkspace,
             tools,
           });
 
           const sessionManager = SessionManager.open(params.sessionFile);
           const settingsManager = SettingsManager.create(
-            resolvedWorkspace,
+            effectiveWorkspace,
             agentDir,
           );
+          const pruning = buildContextPruningExtension({
+            cfg: params.config,
+            sessionManager,
+            provider,
+            modelId,
+            model,
+          });
+          const additionalExtensionPaths = pruning.additionalExtensionPaths;
 
-          // Split tools into built-in (recognized by pi-coding-agent SDK) and custom (clawdbot-specific)
-          const builtInToolNames = new Set(["read", "bash", "edit", "write"]);
-          const builtInTools = tools.filter((t) =>
-            builtInToolNames.has(t.name),
-          );
-          const customTools = toToolDefinitions(
-            tools.filter((t) => !builtInToolNames.has(t.name)),
-          );
+          const { builtInTools, customTools } = splitSdkTools({
+            tools,
+            sandboxEnabled: !!sandbox?.enabled,
+          });
 
-          const { session } = await createAgentSession({
+          let session: Awaited<
+            ReturnType<typeof createAgentSession>
+          >["session"];
+          ({ session } = await createAgentSession({
             cwd: resolvedWorkspace,
             agentDir,
             authStorage,
@@ -807,14 +1018,20 @@ export async function runEmbeddedPiAgent(params: {
             settingsManager,
             skills: promptSkills,
             contextFiles,
-          });
+            additionalExtensionPaths,
+          }));
 
-          const prior = await sanitizeSessionMessagesImages(
-            session.messages,
-            "session:history",
-          );
-          if (prior.length > 0) {
-            session.agent.replaceMessages(prior);
+          try {
+            const prior = await sanitizeSessionMessagesImages(
+              session.messages,
+              "session:history",
+            );
+            if (prior.length > 0) {
+              session.agent.replaceMessages(prior);
+            }
+          } catch (err) {
+            session.dispose();
+            throw err;
           }
           let aborted = Boolean(params.abortSignal?.aborted);
           let timedOut = false;
@@ -823,19 +1040,27 @@ export async function runEmbeddedPiAgent(params: {
             if (isTimeout) timedOut = true;
             void session.abort();
           };
-          const subscription = subscribeEmbeddedPiSession({
-            session,
-            runId: params.runId,
-            verboseLevel: params.verboseLevel,
-            shouldEmitToolResult: params.shouldEmitToolResult,
-            onToolResult: params.onToolResult,
-            onBlockReply: params.onBlockReply,
-            blockReplyBreak: params.blockReplyBreak,
-            blockReplyChunking: params.blockReplyChunking,
-            onPartialReply: params.onPartialReply,
-            onAgentEvent: params.onAgentEvent,
-            enforceFinalTag: params.enforceFinalTag,
-          });
+          let subscription: ReturnType<typeof subscribeEmbeddedPiSession>;
+          try {
+            subscription = subscribeEmbeddedPiSession({
+              session,
+              runId: params.runId,
+              verboseLevel: params.verboseLevel,
+              reasoningMode: params.reasoningLevel ?? "off",
+              shouldEmitToolResult: params.shouldEmitToolResult,
+              onToolResult: params.onToolResult,
+              onReasoningStream: params.onReasoningStream,
+              onBlockReply: params.onBlockReply,
+              blockReplyBreak: params.blockReplyBreak,
+              blockReplyChunking: params.blockReplyChunking,
+              onPartialReply: params.onPartialReply,
+              onAgentEvent: params.onAgentEvent,
+              enforceFinalTag: params.enforceFinalTag,
+            });
+          } catch (err) {
+            session.dispose();
+            throw err;
+          }
           const {
             assistantTexts,
             toolMetas,
@@ -901,7 +1126,16 @@ export async function runEmbeddedPiAgent(params: {
                 `embedded run prompt end: runId=${params.runId} sessionId=${params.sessionId} durationMs=${Date.now() - promptStartedAt}`,
               );
             }
-            await waitForCompactionRetry();
+            try {
+              await waitForCompactionRetry();
+            } catch (err) {
+              // Capture AbortError from waitForCompactionRetry to enable fallback/rotation.
+              if (isAbortError(err)) {
+                if (!promptError) promptError = err;
+              } else {
+                throw err;
+              }
+            }
             messagesSnapshot = session.messages.slice();
             sessionIdUsed = session.sessionId;
           } finally {
@@ -920,6 +1154,26 @@ export async function runEmbeddedPiAgent(params: {
           }
           if (promptError && !aborted) {
             const errorText = describeUnknownError(promptError);
+            if (isContextOverflowError(errorText)) {
+              return {
+                payloads: [
+                  {
+                    text:
+                      "Context overflow: the conversation history is too large for the model. " +
+                      "Use /new or /reset to start a fresh session, or try a model with a larger context window.",
+                    isError: true,
+                  },
+                ],
+                meta: {
+                  durationMs: Date.now() - started,
+                  agentMeta: {
+                    sessionId: sessionIdUsed,
+                    provider,
+                    model: model.id,
+                  },
+                },
+              };
+            }
             if (
               (isAuthErrorMessage(errorText) ||
                 isRateLimitErrorMessage(errorText)) &&
@@ -972,7 +1226,7 @@ export async function runEmbeddedPiAgent(params: {
           if (shouldRotate) {
             // Mark current profile for cooldown before rotating
             if (lastProfileId) {
-              markAuthProfileCooldown({
+              await markAuthProfileCooldown({
                 store: authStore,
                 profileId: lastProfileId,
               });
@@ -1009,12 +1263,17 @@ export async function runEmbeddedPiAgent(params: {
             usage,
           };
 
-          const replyItems: Array<{ text: string; media?: string[] }> = [];
+          const replyItems: Array<{
+            text: string;
+            media?: string[];
+            isError?: boolean;
+          }> = [];
 
           const errorText = lastAssistant
             ? formatAssistantErrorText(lastAssistant)
             : undefined;
-          if (errorText) replyItems.push({ text: errorText });
+
+          if (errorText) replyItems.push({ text: errorText, isError: true });
 
           const inlineToolResults =
             params.verboseLevel === "on" &&
@@ -1031,10 +1290,22 @@ export async function runEmbeddedPiAgent(params: {
             }
           }
 
+          const fallbackText = lastAssistant
+            ? (() => {
+                const base = extractAssistantText(lastAssistant);
+                if (params.reasoningLevel !== "on") return base;
+                const thinking = extractAssistantThinking(lastAssistant);
+                const formatted = thinking
+                  ? formatReasoningMarkdown(thinking)
+                  : "";
+                if (!formatted) return base;
+                return base ? `${formatted}\n\n${base}` : formatted;
+              })()
+            : "";
           for (const text of assistantTexts.length
             ? assistantTexts
-            : lastAssistant
-              ? [extractAssistantText(lastAssistant)]
+            : fallbackText
+              ? [fallbackText]
               : []) {
             const { text: cleanedText, mediaUrls } = splitMediaFromOutput(text);
             if (!cleanedText && (!mediaUrls || mediaUrls.length === 0))
@@ -1047,6 +1318,7 @@ export async function runEmbeddedPiAgent(params: {
               text: item.text?.trim() ? item.text.trim() : undefined,
               mediaUrls: item.media?.length ? item.media : undefined,
               mediaUrl: item.media?.[0],
+              isError: item.isError,
             }))
             .filter(
               (p) =>
@@ -1057,13 +1329,16 @@ export async function runEmbeddedPiAgent(params: {
             `embedded run done: runId=${params.runId} sessionId=${params.sessionId} durationMs=${Date.now() - started} aborted=${aborted}`,
           );
           if (lastProfileId) {
-            markAuthProfileGood({
+            await markAuthProfileGood({
               store: authStore,
               provider,
               profileId: lastProfileId,
             });
             // Track usage for round-robin rotation
-            markAuthProfileUsed({ store: authStore, profileId: lastProfileId });
+            await markAuthProfileUsed({
+              store: authStore,
+              profileId: lastProfileId,
+            });
           }
           return {
             payloads: payloads.length ? payloads : undefined,

@@ -19,17 +19,21 @@ vi.mock("../config/config.js", async (importOriginal) => {
   };
 });
 
+import { emitAgentEvent } from "../infra/agent-events.js";
 import { createClawdbotTools } from "./clawdbot-tools.js";
+import { resetSubagentRegistryForTests } from "./subagent-registry.js";
 
 describe("subagents", () => {
   it("sessions_spawn announces back to the requester group provider", async () => {
+    resetSubagentRegistryForTests();
     callGatewayMock.mockReset();
     const calls: Array<{ method?: string; params?: unknown }> = [];
     let agentCallCount = 0;
-    let lastWaitedRunId: string | undefined;
-    const replyByRunId = new Map<string, string>();
     let sendParams: { to?: string; provider?: string; message?: string } = {};
     let deletedKey: string | undefined;
+    let childRunId: string | undefined;
+    let childSessionKey: string | undefined;
+    const sessionLastAssistantText = new Map<string, string>();
 
     callGatewayMock.mockImplementation(async (opts: unknown) => {
       const request = opts as { method?: string; params?: unknown };
@@ -37,13 +41,21 @@ describe("subagents", () => {
       if (request.method === "agent") {
         agentCallCount += 1;
         const runId = `run-${agentCallCount}`;
-        const params = request.params as
-          | { message?: string; sessionKey?: string }
-          | undefined;
+        const params = request.params as {
+          message?: string;
+          sessionKey?: string;
+          timeout?: number;
+        };
         const message = params?.message ?? "";
-        const reply =
-          message === "Sub-agent announce step." ? "announce now" : "result";
-        replyByRunId.set(runId, reply);
+        const sessionKey = params?.sessionKey ?? "";
+        if (message === "Sub-agent announce step.") {
+          sessionLastAssistantText.set(sessionKey, "announce now");
+        } else {
+          childRunId = runId;
+          childSessionKey = sessionKey;
+          sessionLastAssistantText.set(sessionKey, "result");
+          expect(params?.timeout).toBe(1);
+        }
         return {
           runId,
           status: "accepted",
@@ -51,13 +63,28 @@ describe("subagents", () => {
         };
       }
       if (request.method === "agent.wait") {
-        const params = request.params as { runId?: string } | undefined;
-        lastWaitedRunId = params?.runId;
+        const params = request.params as
+          | { runId?: string; timeoutMs?: number }
+          | undefined;
+        if (
+          params?.runId &&
+          params.runId === childRunId &&
+          typeof params.timeoutMs === "number" &&
+          params.timeoutMs > 0
+        ) {
+          throw new Error(
+            "sessions_spawn must not wait for sub-agent completion",
+          );
+        }
+        if (params?.timeoutMs === 0) {
+          return { runId: params?.runId ?? "run-1", status: "timeout" };
+        }
         return { runId: params?.runId ?? "run-1", status: "ok" };
       }
       if (request.method === "chat.history") {
+        const params = request.params as { sessionKey?: string } | undefined;
         const text =
-          (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "";
+          sessionLastAssistantText.get(params?.sessionKey ?? "") ?? "";
         return {
           messages: [{ role: "assistant", content: [{ type: "text", text }] }],
         };
@@ -89,10 +116,26 @@ describe("subagents", () => {
 
     const result = await tool.execute("call1", {
       task: "do thing",
-      timeoutSeconds: 1,
+      runTimeoutSeconds: 1,
+      cleanup: "delete",
     });
-    expect(result.details).toMatchObject({ status: "ok", reply: "result" });
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      runId: "run-1",
+    });
 
+    if (!childRunId) throw new Error("missing child runId");
+    emitAgentEvent({
+      runId: childRunId,
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 1234,
+        endedAt: 2345,
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -104,22 +147,24 @@ describe("subagents", () => {
     expect(first?.lane).toBe("subagent");
     expect(first?.deliver).toBe(false);
     expect(first?.sessionKey?.startsWith("agent:main:subagent:")).toBe(true);
+    expect(childSessionKey?.startsWith("agent:main:subagent:")).toBe(true);
 
-    expect(sendParams).toMatchObject({
-      provider: "discord",
-      to: "channel:req",
-      message: "announce now",
-    });
+    expect(sendParams.provider).toBe("discord");
+    expect(sendParams.to).toBe("channel:req");
+    expect(sendParams.message ?? "").toContain("announce now");
+    expect(sendParams.message ?? "").toContain("Stats:");
     expect(deletedKey?.startsWith("agent:main:subagent:")).toBe(true);
   });
 
   it("sessions_spawn resolves main announce target from sessions.list", async () => {
+    resetSubagentRegistryForTests();
     callGatewayMock.mockReset();
     const calls: Array<{ method?: string; params?: unknown }> = [];
     let agentCallCount = 0;
-    let lastWaitedRunId: string | undefined;
-    const replyByRunId = new Map<string, string>();
     let sendParams: { to?: string; provider?: string; message?: string } = {};
+    let childRunId: string | undefined;
+    let childSessionKey: string | undefined;
+    const sessionLastAssistantText = new Map<string, string>();
 
     callGatewayMock.mockImplementation(async (opts: unknown) => {
       const request = opts as { method?: string; params?: unknown };
@@ -138,13 +183,19 @@ describe("subagents", () => {
       if (request.method === "agent") {
         agentCallCount += 1;
         const runId = `run-${agentCallCount}`;
-        const params = request.params as
-          | { message?: string; sessionKey?: string }
-          | undefined;
+        const params = request.params as {
+          message?: string;
+          sessionKey?: string;
+        };
         const message = params?.message ?? "";
-        const reply =
-          message === "Sub-agent announce step." ? "hello from sub" : "done";
-        replyByRunId.set(runId, reply);
+        const sessionKey = params?.sessionKey ?? "";
+        if (message === "Sub-agent announce step.") {
+          sessionLastAssistantText.set(sessionKey, "hello from sub");
+        } else {
+          childRunId = runId;
+          childSessionKey = sessionKey;
+          sessionLastAssistantText.set(sessionKey, "done");
+        }
         return {
           runId,
           status: "accepted",
@@ -152,13 +203,18 @@ describe("subagents", () => {
         };
       }
       if (request.method === "agent.wait") {
-        const params = request.params as { runId?: string } | undefined;
-        lastWaitedRunId = params?.runId;
+        const params = request.params as
+          | { runId?: string; timeoutMs?: number }
+          | undefined;
+        if (params?.timeoutMs === 0) {
+          return { runId: params?.runId ?? "run-1", status: "timeout" };
+        }
         return { runId: params?.runId ?? "run-1", status: "ok" };
       }
       if (request.method === "chat.history") {
+        const params = request.params as { sessionKey?: string } | undefined;
         const text =
-          (lastWaitedRunId && replyByRunId.get(lastWaitedRunId)) ?? "";
+          sessionLastAssistantText.get(params?.sessionKey ?? "") ?? "";
         return {
           messages: [{ role: "assistant", content: [{ type: "text", text }] }],
         };
@@ -188,17 +244,180 @@ describe("subagents", () => {
 
     const result = await tool.execute("call2", {
       task: "do thing",
-      timeoutSeconds: 1,
+      runTimeoutSeconds: 1,
     });
-    expect(result.details).toMatchObject({ status: "ok", reply: "done" });
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      runId: "run-1",
+    });
+
+    if (!childRunId) throw new Error("missing child runId");
+    emitAgentEvent({
+      runId: childRunId,
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        startedAt: 1000,
+        endedAt: 2000,
+      },
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(sendParams).toMatchObject({
-      provider: "whatsapp",
-      to: "+123",
-      message: "hello from sub",
+    expect(sendParams.provider).toBe("whatsapp");
+    expect(sendParams.to).toBe("+123");
+    expect(sendParams.message ?? "").toContain("hello from sub");
+    expect(sendParams.message ?? "").toContain("Stats:");
+    expect(childSessionKey?.startsWith("agent:main:subagent:")).toBe(true);
+  });
+
+  it("sessions_spawn applies a model to the child session", async () => {
+    resetSubagentRegistryForTests();
+    callGatewayMock.mockReset();
+    const calls: Array<{ method?: string; params?: unknown }> = [];
+    let agentCallCount = 0;
+
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string; params?: unknown };
+      calls.push(request);
+      if (request.method === "sessions.patch") {
+        return { ok: true };
+      }
+      if (request.method === "agent") {
+        agentCallCount += 1;
+        const runId = `run-${agentCallCount}`;
+        return {
+          runId,
+          status: "accepted",
+          acceptedAt: 3000 + agentCallCount,
+        };
+      }
+      if (request.method === "agent.wait") {
+        const params = request.params as { timeoutMs?: number } | undefined;
+        if (params?.timeoutMs === 0) return { status: "timeout" };
+        return { status: "ok" };
+      }
+      if (request.method === "sessions.delete") {
+        return { ok: true };
+      }
+      return {};
     });
+
+    const tool = createClawdbotTools({
+      agentSessionKey: "discord:group:req",
+      agentSurface: "discord",
+    }).find((candidate) => candidate.name === "sessions_spawn");
+    if (!tool) throw new Error("missing sessions_spawn tool");
+
+    const result = await tool.execute("call3", {
+      task: "do thing",
+      runTimeoutSeconds: 1,
+      model: "claude-haiku-4-5",
+      cleanup: "keep",
+    });
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      modelApplied: true,
+    });
+
+    const patchIndex = calls.findIndex(
+      (call) => call.method === "sessions.patch",
+    );
+    const agentIndex = calls.findIndex((call) => call.method === "agent");
+    expect(patchIndex).toBeGreaterThan(-1);
+    expect(agentIndex).toBeGreaterThan(-1);
+    expect(patchIndex).toBeLessThan(agentIndex);
+    const patchCall = calls[patchIndex];
+    expect(patchCall?.params).toMatchObject({
+      key: expect.stringContaining("subagent:"),
+      model: "claude-haiku-4-5",
+    });
+  });
+
+  it("sessions_spawn skips invalid model overrides and continues", async () => {
+    resetSubagentRegistryForTests();
+    callGatewayMock.mockReset();
+    const calls: Array<{ method?: string; params?: unknown }> = [];
+    let agentCallCount = 0;
+
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string; params?: unknown };
+      calls.push(request);
+      if (request.method === "sessions.patch") {
+        throw new Error("invalid model: bad-model");
+      }
+      if (request.method === "agent") {
+        agentCallCount += 1;
+        const runId = `run-${agentCallCount}`;
+        return {
+          runId,
+          status: "accepted",
+          acceptedAt: 4000 + agentCallCount,
+        };
+      }
+      if (request.method === "agent.wait") {
+        const params = request.params as { timeoutMs?: number } | undefined;
+        if (params?.timeoutMs === 0) return { status: "timeout" };
+        return { status: "ok" };
+      }
+      if (request.method === "sessions.delete") {
+        return { ok: true };
+      }
+      return {};
+    });
+
+    const tool = createClawdbotTools({
+      agentSessionKey: "main",
+      agentProvider: "whatsapp",
+    }).find((candidate) => candidate.name === "sessions_spawn");
+    if (!tool) throw new Error("missing sessions_spawn tool");
+
+    const result = await tool.execute("call4", {
+      task: "do thing",
+      runTimeoutSeconds: 1,
+      model: "bad-model",
+    });
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      modelApplied: false,
+    });
+    expect(
+      String((result.details as { warning?: string }).warning ?? ""),
+    ).toContain("invalid model");
+    expect(calls.some((call) => call.method === "agent")).toBe(true);
+  });
+
+  it("sessions_spawn supports legacy timeoutSeconds alias", async () => {
+    resetSubagentRegistryForTests();
+    callGatewayMock.mockReset();
+    let spawnedTimeout: number | undefined;
+
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string; params?: unknown };
+      if (request.method === "agent") {
+        const params = request.params as { timeout?: number } | undefined;
+        spawnedTimeout = params?.timeout;
+        return { runId: "run-1", status: "accepted", acceptedAt: 1000 };
+      }
+      return {};
+    });
+
+    const tool = createClawdbotTools({
+      agentSessionKey: "main",
+      agentProvider: "whatsapp",
+    }).find((candidate) => candidate.name === "sessions_spawn");
+    if (!tool) throw new Error("missing sessions_spawn tool");
+
+    const result = await tool.execute("call5", {
+      task: "do thing",
+      timeoutSeconds: 2,
+    });
+    expect(result.details).toMatchObject({
+      status: "accepted",
+      runId: "run-1",
+    });
+    expect(spawnedTimeout).toBe(2);
   });
 });

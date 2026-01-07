@@ -26,6 +26,52 @@ function normalizeSlackSlug(raw?: string | null) {
   return cleaned.replace(/-{2,}/g, "-").replace(/^[-.]+|[-.]+$/g, "");
 }
 
+function parseTelegramGroupId(value?: string | null) {
+  const raw = value?.trim() ?? "";
+  if (!raw) return { chatId: undefined, topicId: undefined };
+  const parts = raw.split(":").filter(Boolean);
+  if (
+    parts.length >= 3 &&
+    parts[1] === "topic" &&
+    /^-?\d+$/.test(parts[0]) &&
+    /^\d+$/.test(parts[2])
+  ) {
+    return { chatId: parts[0], topicId: parts[2] };
+  }
+  if (parts.length >= 2 && /^-?\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    return { chatId: parts[0], topicId: parts[1] };
+  }
+  return { chatId: raw, topicId: undefined };
+}
+
+function resolveTelegramRequireMention(params: {
+  cfg: ClawdbotConfig;
+  chatId?: string;
+  topicId?: string;
+}): boolean | undefined {
+  const { cfg, chatId, topicId } = params;
+  if (!chatId) return undefined;
+  const groupConfig = cfg.telegram?.groups?.[chatId];
+  const groupDefault = cfg.telegram?.groups?.["*"];
+  const topicConfig =
+    topicId && groupConfig?.topics ? groupConfig.topics[topicId] : undefined;
+  const defaultTopicConfig =
+    topicId && groupDefault?.topics ? groupDefault.topics[topicId] : undefined;
+  if (typeof topicConfig?.requireMention === "boolean") {
+    return topicConfig.requireMention;
+  }
+  if (typeof defaultTopicConfig?.requireMention === "boolean") {
+    return defaultTopicConfig.requireMention;
+  }
+  if (typeof groupConfig?.requireMention === "boolean") {
+    return groupConfig.requireMention;
+  }
+  if (typeof groupDefault?.requireMention === "boolean") {
+    return groupDefault.requireMention;
+  }
+  return undefined;
+}
+
 function resolveDiscordGuildEntry(
   guilds: NonNullable<ClawdbotConfig["discord"]>["guilds"],
   groupSpace?: string,
@@ -55,11 +101,21 @@ export function resolveGroupRequireMention(params: {
   const groupId = groupResolution?.id ?? ctx.From?.replace(/^group:/, "");
   const groupRoom = ctx.GroupRoom?.trim() ?? ctx.GroupSubject?.trim();
   const groupSpace = ctx.GroupSpace?.trim();
-  if (
-    provider === "telegram" ||
-    provider === "whatsapp" ||
-    provider === "imessage"
-  ) {
+  if (provider === "telegram") {
+    const { chatId, topicId } = parseTelegramGroupId(groupId);
+    const requireMention = resolveTelegramRequireMention({
+      cfg,
+      chatId,
+      topicId,
+    });
+    if (typeof requireMention === "boolean") return requireMention;
+    return resolveProviderGroupRequireMention({
+      cfg,
+      provider,
+      groupId: chatId ?? groupId,
+    });
+  }
+  if (provider === "whatsapp" || provider === "imessage") {
     return resolveProviderGroupRequireMention({
       cfg,
       provider,
@@ -161,10 +217,10 @@ export function buildGroupIntro(params: {
       : undefined;
   const cautionLine =
     activation === "always"
-      ? "Be extremely selective: reply only when you are directly addressed, asked a question, or can add clear value. Otherwise stay silent."
+      ? "Be extremely selective: reply only when directly addressed or clearly helpful. Otherwise stay silent."
       : undefined;
   const lurkLine =
-    "Be a good group participant: lurk and follow the conversation, but only chime in when you have something genuinely helpful or relevant to add. Don't feel obligated to respond to every message — quality over quantity. Even when lurking silently, you can use emoji reactions to acknowledge messages, show support, or react to humor — reactions are always appreciated and don't clutter the chat.";
+    "Be a good group participant: mostly lurk and follow the conversation; reply only when directly addressed or you can add clear value. Emoji reactions are welcome when available.";
   return [
     subjectLine,
     membersLine,

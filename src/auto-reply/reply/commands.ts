@@ -14,19 +14,23 @@ import {
 } from "../../agents/pi-embedded.js";
 import type { ClawdbotConfig } from "../../config/config.js";
 import {
-  resolveSessionTranscriptPath,
+  resolveSessionFilePath,
   type SessionEntry,
   type SessionScope,
   saveSessionStore,
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
+import {
+  formatUsageSummaryLine,
+  loadProviderUsageSummary,
+} from "../../infra/provider-usage.js";
 import { triggerClawdbotRestart } from "../../infra/restart.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
+import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { normalizeE164 } from "../../utils.js";
-import { resolveHeartbeatSeconds } from "../../web/reconnect.js";
-import { getWebAuthAgeMs, webAuthExists } from "../../web/session.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
+import { shouldHandleTextCommands } from "../commands-registry.js";
 import {
   normalizeGroupActivation,
   parseActivationCommand,
@@ -39,14 +43,36 @@ import {
   formatTokenCount,
 } from "../status.js";
 import type { MsgContext } from "../templating.js";
-import type { ElevatedLevel, ThinkLevel, VerboseLevel } from "../thinking.js";
+import type {
+  ElevatedLevel,
+  ReasoningLevel,
+  ThinkLevel,
+  VerboseLevel,
+} from "../thinking.js";
 import type { ReplyPayload } from "../types.js";
 import { isAbortTrigger, setAbortMemory } from "./abort.js";
 import type { InlineDirectives } from "./directive-handling.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
+import { getFollowupQueueDepth, resolveQueueSettings } from "./queue.js";
 import { incrementCompactionCount } from "./session-updates.js";
 
+function resolveSessionEntryForKey(
+  store: Record<string, SessionEntry> | undefined,
+  sessionKey: string | undefined,
+) {
+  if (!store || !sessionKey) return {};
+  const direct = store[sessionKey];
+  if (direct) return { entry: direct, key: sessionKey };
+  const parsed = parseAgentSessionKey(sessionKey);
+  const legacyKey = parsed?.rest;
+  if (legacyKey && store[legacyKey]) {
+    return { entry: store[legacyKey], key: legacyKey };
+  }
+  return {};
+}
+
 export type CommandContext = {
+  surface: string;
   provider: string;
   isWhatsAppProvider: boolean;
   ownerList: string[];
@@ -123,7 +149,8 @@ export function buildCommandContext(params: {
     cfg,
     commandAuthorized: params.commandAuthorized,
   });
-  const provider = (ctx.Provider ?? "").trim().toLowerCase();
+  const surface = (ctx.Surface ?? ctx.Provider ?? "").trim().toLowerCase();
+  const provider = (ctx.Provider ?? surface).trim().toLowerCase();
   const abortKey =
     sessionKey ?? (auth.from || undefined) ?? (auth.to || undefined);
   const rawBodyNormalized = triggerBodyNormalized;
@@ -132,6 +159,7 @@ export function buildCommandContext(params: {
     : rawBodyNormalized;
 
   return {
+    surface,
     provider,
     isWhatsAppProvider: auth.isWhatsAppProvider,
     ownerList: auth.ownerList,
@@ -143,6 +171,29 @@ export function buildCommandContext(params: {
     from: auth.from,
     to: auth.to,
   };
+}
+
+function resolveAbortTarget(params: {
+  ctx: MsgContext;
+  sessionKey?: string;
+  sessionEntry?: SessionEntry;
+  sessionStore?: Record<string, SessionEntry>;
+}) {
+  const targetSessionKey =
+    params.ctx.CommandTargetSessionKey?.trim() || params.sessionKey;
+  const { entry, key } = resolveSessionEntryForKey(
+    params.sessionStore,
+    targetSessionKey,
+  );
+  if (entry && key) return { entry, key, sessionId: entry.sessionId };
+  if (params.sessionEntry && params.sessionKey) {
+    return {
+      entry: params.sessionEntry,
+      key: params.sessionKey,
+      sessionId: params.sessionEntry.sessionId,
+    };
+  }
+  return { entry: undefined, key: targetSessionKey, sessionId: undefined };
 }
 
 export async function handleCommands(params: {
@@ -159,6 +210,7 @@ export async function handleCommands(params: {
   defaultGroupActivation: () => "always" | "mention";
   resolvedThinkLevel?: ThinkLevel;
   resolvedVerboseLevel: VerboseLevel;
+  resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel?: ElevatedLevel;
   resolveDefaultThinkingLevel: () => Promise<ThinkLevel | undefined>;
   provider: string;
@@ -183,6 +235,7 @@ export async function handleCommands(params: {
     defaultGroupActivation,
     resolvedThinkLevel,
     resolvedVerboseLevel,
+    resolvedReasoningLevel,
     resolvedElevatedLevel,
     resolveDefaultThinkingLevel,
     provider,
@@ -207,8 +260,13 @@ export async function handleCommands(params: {
   const sendPolicyCommand = parseSendPolicyCommand(
     command.commandBodyNormalized,
   );
+  const allowTextCommands = shouldHandleTextCommands({
+    cfg,
+    surface: command.surface,
+    commandSource: ctx.CommandSource,
+  });
 
-  if (activationCommand.hasCommand) {
+  if (allowTextCommands && activationCommand.hasCommand) {
     if (!isGroup) {
       return {
         shouldContinue: false,
@@ -255,7 +313,7 @@ export async function handleCommands(params: {
     };
   }
 
-  if (sendPolicyCommand.hasCommand) {
+  if (allowTextCommands && sendPolicyCommand.hasCommand) {
     if (!command.isAuthorizedSender) {
       logVerbose(
         `Ignoring /send from unauthorized sender: ${command.senderE164 || "<unknown>"}`,
@@ -292,10 +350,7 @@ export async function handleCommands(params: {
     };
   }
 
-  if (
-    command.commandBodyNormalized === "/restart" ||
-    command.commandBodyNormalized.startsWith("/restart ")
-  ) {
+  if (allowTextCommands && command.commandBodyNormalized === "/restart") {
     if (!command.isAuthorizedSender) {
       logVerbose(
         `Ignoring /restart from unauthorized sender: ${command.senderE164 || "<unknown>"}`,
@@ -311,10 +366,8 @@ export async function handleCommands(params: {
     };
   }
 
-  const helpRequested =
-    command.commandBodyNormalized === "/help" ||
-    /(?:^|\s)\/help(?=$|\s|:)\b/i.test(command.commandBodyNormalized);
-  if (helpRequested) {
+  const helpRequested = command.commandBodyNormalized === "/help";
+  if (allowTextCommands && helpRequested) {
     if (!command.isAuthorizedSender) {
       logVerbose(
         `Ignoring /help from unauthorized sender: ${command.senderE164 || "<unknown>"}`,
@@ -326,18 +379,35 @@ export async function handleCommands(params: {
 
   const statusRequested =
     directives.hasStatusDirective ||
-    command.commandBodyNormalized === "/status" ||
-    command.commandBodyNormalized.startsWith("/status ");
-  if (statusRequested) {
+    command.commandBodyNormalized === "/status";
+  if (allowTextCommands && statusRequested) {
     if (!command.isAuthorizedSender) {
       logVerbose(
         `Ignoring /status from unauthorized sender: ${command.senderE164 || "<unknown>"}`,
       );
       return { shouldContinue: false };
     }
-    const webLinked = await webAuthExists();
-    const webAuthAgeMs = getWebAuthAgeMs();
-    const heartbeatSeconds = resolveHeartbeatSeconds(cfg, undefined);
+    let usageLine: string | null = null;
+    try {
+      const usageSummary = await loadProviderUsageSummary({
+        timeoutMs: 3500,
+      });
+      usageLine = formatUsageSummaryLine(usageSummary, { now: Date.now() });
+    } catch {
+      usageLine = null;
+    }
+    const queueSettings = resolveQueueSettings({
+      cfg,
+      provider: command.provider,
+      sessionEntry,
+    });
+    const queueKey = sessionKey ?? sessionEntry?.sessionId;
+    const queueDepth = queueKey ? getFollowupQueueDepth(queueKey) : 0;
+    const queueOverrides = Boolean(
+      sessionEntry?.queueDebounceMs ??
+        sessionEntry?.queueCap ??
+        sessionEntry?.queueDrop,
+    );
     const groupActivation = isGroup
       ? (normalizeGroupActivation(sessionEntry?.groupActivation) ??
         defaultGroupActivation())
@@ -354,22 +424,58 @@ export async function handleCommands(params: {
         verboseDefault: cfg.agent?.verboseDefault,
         elevatedDefault: cfg.agent?.elevatedDefault,
       },
-      workspaceDir,
       sessionEntry,
       sessionKey,
       sessionScope,
-      storePath,
       groupActivation,
       resolvedThink:
         resolvedThinkLevel ?? (await resolveDefaultThinkingLevel()),
       resolvedVerbose: resolvedVerboseLevel,
+      resolvedReasoning: resolvedReasoningLevel,
       resolvedElevated: resolvedElevatedLevel,
       modelAuth: resolveModelAuthLabel(provider, cfg),
-      webLinked,
-      webAuthAgeMs,
-      heartbeatSeconds,
+      usageLine: usageLine ?? undefined,
+      queue: {
+        mode: queueSettings.mode,
+        depth: queueDepth,
+        debounceMs: queueSettings.debounceMs,
+        cap: queueSettings.cap,
+        dropPolicy: queueSettings.dropPolicy,
+        showDetails: queueOverrides,
+      },
+      includeTranscriptUsage: false,
     });
     return { shouldContinue: false, reply: { text: statusText } };
+  }
+
+  const stopRequested = command.commandBodyNormalized === "/stop";
+  if (allowTextCommands && stopRequested) {
+    if (!command.isAuthorizedSender) {
+      logVerbose(
+        `Ignoring /stop from unauthorized sender: ${command.senderE164 || "<unknown>"}`,
+      );
+      return { shouldContinue: false };
+    }
+    const abortTarget = resolveAbortTarget({
+      ctx,
+      sessionKey,
+      sessionEntry,
+      sessionStore,
+    });
+    if (abortTarget.sessionId) {
+      abortEmbeddedPiRun(abortTarget.sessionId);
+    }
+    if (abortTarget.entry && sessionStore && abortTarget.key) {
+      abortTarget.entry.abortedLastRun = true;
+      abortTarget.entry.updatedAt = Date.now();
+      sessionStore[abortTarget.key] = abortTarget.entry;
+      if (storePath) {
+        await saveSessionStore(storePath, sessionStore);
+      }
+    } else if (command.abortKey) {
+      setAbortMemory(command.abortKey, true);
+    }
+    return { shouldContinue: false, reply: { text: "⚙️ Agent was aborted." } };
   }
 
   const compactRequested =
@@ -403,7 +509,7 @@ export async function handleCommands(params: {
       sessionId,
       sessionKey,
       messageProvider: command.provider,
-      sessionFile: resolveSessionTranscriptPath(sessionId),
+      sessionFile: resolveSessionFilePath(sessionId, sessionEntry),
       workspaceDir,
       config: cfg,
       skillsSnapshot: sessionEntry.skillsSnapshot,
@@ -451,11 +557,20 @@ export async function handleCommands(params: {
   }
 
   const abortRequested = isAbortTrigger(command.rawBodyNormalized);
-  if (abortRequested) {
-    if (sessionEntry && sessionStore && sessionKey) {
-      sessionEntry.abortedLastRun = true;
-      sessionEntry.updatedAt = Date.now();
-      sessionStore[sessionKey] = sessionEntry;
+  if (allowTextCommands && abortRequested) {
+    const abortTarget = resolveAbortTarget({
+      ctx,
+      sessionKey,
+      sessionEntry,
+      sessionStore,
+    });
+    if (abortTarget.sessionId) {
+      abortEmbeddedPiRun(abortTarget.sessionId);
+    }
+    if (abortTarget.entry && sessionStore && abortTarget.key) {
+      abortTarget.entry.abortedLastRun = true;
+      abortTarget.entry.updatedAt = Date.now();
+      sessionStore[abortTarget.key] = abortTarget.entry;
       if (storePath) {
         await saveSessionStore(storePath, sessionStore);
       }

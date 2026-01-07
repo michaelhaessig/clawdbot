@@ -1,4 +1,5 @@
 import { resolveClawdbotAgentDir } from "../../agents/agent-paths.js";
+import { resolveAgentConfig } from "../../agents/agent-scope.js";
 import {
   resolveAuthProfileDisplayLabel,
   resolveAuthStorePathForDisplay,
@@ -32,9 +33,11 @@ import type { ReplyPayload } from "../types.js";
 import {
   type ElevatedLevel,
   extractElevatedDirective,
+  extractReasoningDirective,
   extractStatusDirective,
   extractThinkDirective,
   extractVerboseDirective,
+  type ReasoningLevel,
   type ThinkLevel,
   type VerboseLevel,
 } from "./directives.js";
@@ -155,6 +158,9 @@ export type InlineDirectives = {
   hasVerboseDirective: boolean;
   verboseLevel?: VerboseLevel;
   rawVerboseLevel?: string;
+  hasReasoningDirective: boolean;
+  reasoningLevel?: ReasoningLevel;
+  rawReasoningLevel?: string;
   hasElevatedDirective: boolean;
   elevatedLevel?: ElevatedLevel;
   rawElevatedLevel?: string;
@@ -189,11 +195,17 @@ export function parseInlineDirectives(body: string): InlineDirectives {
     hasDirective: hasVerboseDirective,
   } = extractVerboseDirective(thinkCleaned);
   const {
+    cleaned: reasoningCleaned,
+    reasoningLevel,
+    rawLevel: rawReasoningLevel,
+    hasDirective: hasReasoningDirective,
+  } = extractReasoningDirective(verboseCleaned);
+  const {
     cleaned: elevatedCleaned,
     elevatedLevel,
     rawLevel: rawElevatedLevel,
     hasDirective: hasElevatedDirective,
-  } = extractElevatedDirective(verboseCleaned);
+  } = extractElevatedDirective(reasoningCleaned);
   const { cleaned: statusCleaned, hasDirective: hasStatusDirective } =
     extractStatusDirective(elevatedCleaned);
   const {
@@ -225,6 +237,9 @@ export function parseInlineDirectives(body: string): InlineDirectives {
     hasVerboseDirective,
     verboseLevel,
     rawVerboseLevel,
+    hasReasoningDirective,
+    reasoningLevel,
+    rawReasoningLevel,
     hasElevatedDirective,
     elevatedLevel,
     rawElevatedLevel,
@@ -257,6 +272,7 @@ export function isDirectiveOnly(params: {
   if (
     !directives.hasThinkDirective &&
     !directives.hasVerboseDirective &&
+    !directives.hasReasoningDirective &&
     !directives.hasElevatedDirective &&
     !directives.hasModelDirective &&
     !directives.hasQueueDirective
@@ -365,6 +381,11 @@ export async function handleDirectiveOnly(params: {
   if (directives.hasVerboseDirective && !directives.verboseLevel) {
     return {
       text: `Unrecognized verbose level "${directives.rawVerboseLevel ?? ""}". Valid levels: off, on.`,
+    };
+  }
+  if (directives.hasReasoningDirective && !directives.reasoningLevel) {
+    return {
+      text: `Unrecognized reasoning level "${directives.rawReasoningLevel ?? ""}". Valid levels: on, off, stream.`,
     };
   }
   if (directives.hasElevatedDirective && !directives.elevatedLevel) {
@@ -476,6 +497,11 @@ export async function handleDirectiveOnly(params: {
       if (directives.verboseLevel === "off") delete sessionEntry.verboseLevel;
       else sessionEntry.verboseLevel = directives.verboseLevel;
     }
+    if (directives.hasReasoningDirective && directives.reasoningLevel) {
+      if (directives.reasoningLevel === "off")
+        delete sessionEntry.reasoningLevel;
+      else sessionEntry.reasoningLevel = directives.reasoningLevel;
+    }
     if (directives.hasElevatedDirective && directives.elevatedLevel) {
       if (directives.elevatedLevel === "off") delete sessionEntry.elevatedLevel;
       else sessionEntry.elevatedLevel = directives.elevatedLevel;
@@ -531,6 +557,15 @@ export async function handleDirectiveOnly(params: {
       directives.verboseLevel === "off"
         ? `${SYSTEM_MARK} Verbose logging disabled.`
         : `${SYSTEM_MARK} Verbose logging enabled.`,
+    );
+  }
+  if (directives.hasReasoningDirective && directives.reasoningLevel) {
+    parts.push(
+      directives.reasoningLevel === "off"
+        ? `${SYSTEM_MARK} Reasoning visibility disabled.`
+        : directives.reasoningLevel === "stream"
+          ? `${SYSTEM_MARK} Reasoning stream enabled (Telegram only).`
+          : `${SYSTEM_MARK} Reasoning visibility enabled.`,
     );
   }
   if (directives.hasElevatedDirective && directives.elevatedLevel) {
@@ -634,6 +669,14 @@ export async function persistInlineDirectives(params: {
       }
       updated = true;
     }
+    if (directives.hasReasoningDirective && directives.reasoningLevel) {
+      if (directives.reasoningLevel === "off") {
+        delete sessionEntry.reasoningLevel;
+      } else {
+        sessionEntry.reasoningLevel = directives.reasoningLevel;
+      }
+      updated = true;
+    }
     if (
       directives.hasElevatedDirective &&
       directives.elevatedLevel &&
@@ -728,20 +771,41 @@ export async function persistInlineDirectives(params: {
   };
 }
 
-export function resolveDefaultModel(params: { cfg: ClawdbotConfig }): {
+export function resolveDefaultModel(params: {
+  cfg: ClawdbotConfig;
+  agentId?: string;
+}): {
   defaultProvider: string;
   defaultModel: string;
   aliasIndex: ModelAliasIndex;
 } {
+  const agentModelOverride = params.agentId
+    ? resolveAgentConfig(params.cfg, params.agentId)?.model?.trim()
+    : undefined;
+  const cfg =
+    agentModelOverride && agentModelOverride.length > 0
+      ? {
+          ...params.cfg,
+          agent: {
+            ...params.cfg.agent,
+            model: {
+              ...(typeof params.cfg.agent?.model === "object"
+                ? params.cfg.agent.model
+                : undefined),
+              primary: agentModelOverride,
+            },
+          },
+        }
+      : params.cfg;
   const mainModel = resolveConfiguredModelRef({
-    cfg: params.cfg,
+    cfg,
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
   });
   const defaultProvider = mainModel.provider;
   const defaultModel = mainModel.model;
   const aliasIndex = buildModelAliasIndex({
-    cfg: params.cfg,
+    cfg,
     defaultProvider,
   });
   return { defaultProvider, defaultModel, aliasIndex };

@@ -1,4 +1,4 @@
-import { ChannelType, PermissionsBitField, REST, Routes } from "discord.js";
+import { RequestClient } from "@buape/carbon";
 import { PollLayoutType } from "discord-api-types/payloads/v10";
 import type { RESTAPIPoll } from "discord-api-types/rest/v10";
 import type {
@@ -11,9 +11,19 @@ import type {
   APIVoiceState,
   RESTPostAPIGuildScheduledEventJSONBody,
 } from "discord-api-types/v10";
+import {
+  ChannelType,
+  PermissionFlagsBits,
+  Routes,
+} from "discord-api-types/v10";
 
 import { chunkMarkdownText } from "../auto-reply/chunk.js";
 import { loadConfig } from "../config/config.js";
+import type { RetryConfig } from "../infra/retry.js";
+import {
+  createDiscordRetryRunner,
+  type RetryRunner,
+} from "../infra/retry-policy.js";
 import {
   normalizePollDurationHours,
   normalizePollInput,
@@ -30,6 +40,7 @@ const DISCORD_POLL_MAX_ANSWERS = 10;
 const DISCORD_POLL_MAX_DURATION_HOURS = 32 * 24;
 const DISCORD_MISSING_PERMISSIONS = 50013;
 const DISCORD_CANNOT_DM = 50007;
+type DiscordRequest = RetryRunner;
 
 export class DiscordSendError extends Error {
   kind?: "missing-permissions" | "dm-blocked";
@@ -47,6 +58,10 @@ export class DiscordSendError extends Error {
   }
 }
 
+const PERMISSION_ENTRIES = Object.entries(PermissionFlagsBits).filter(
+  ([, value]) => typeof value === "bigint",
+) as Array<[string, bigint]>;
+
 type DiscordRecipient =
   | {
       kind: "user";
@@ -61,8 +76,9 @@ type DiscordSendOpts = {
   token?: string;
   mediaUrl?: string;
   verbose?: boolean;
-  rest?: REST;
+  rest?: RequestClient;
   replyTo?: string;
+  retry?: RetryConfig;
 };
 
 export type DiscordSendResult = {
@@ -72,7 +88,9 @@ export type DiscordSendResult = {
 
 export type DiscordReactOpts = {
   token?: string;
-  rest?: REST;
+  rest?: RequestClient;
+  verbose?: boolean;
+  retry?: RetryConfig;
 };
 
 export type DiscordReactionUser = {
@@ -174,6 +192,28 @@ function resolveToken(explicit?: string) {
   return token;
 }
 
+function resolveRest(token: string, rest?: RequestClient) {
+  return rest ?? new RequestClient(token);
+}
+
+type DiscordClientOpts = {
+  token?: string;
+  rest?: RequestClient;
+  retry?: RetryConfig;
+  verbose?: boolean;
+};
+
+function createDiscordClient(opts: DiscordClientOpts, cfg = loadConfig()) {
+  const token = resolveToken(opts.token);
+  const rest = resolveRest(token, opts.rest);
+  const request = createDiscordRetryRunner({
+    retry: opts.retry,
+    configRetry: cfg.discord?.retry,
+    verbose: opts.verbose,
+  });
+  return { token, rest, request };
+}
+
 function normalizeReactionEmoji(raw: string) {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -252,6 +292,22 @@ function normalizeDiscordPollInput(input: PollInput): RESTAPIPoll {
   };
 }
 
+function addPermissionBits(base: bigint, add?: string) {
+  if (!add) return base;
+  return base | BigInt(add);
+}
+
+function removePermissionBits(base: bigint, deny?: string) {
+  if (!deny) return base;
+  return base & ~BigInt(deny);
+}
+
+function bitfieldToPermissions(bitfield: bigint) {
+  return PERMISSION_ENTRIES.filter(([, value]) => (bitfield & value) === value)
+    .map(([name]) => name)
+    .sort();
+}
+
 function getDiscordErrorCode(err: unknown) {
   if (!err || typeof err !== "object") return undefined;
   const candidate =
@@ -279,7 +335,7 @@ async function buildDiscordSendError(
   err: unknown,
   ctx: {
     channelId: string;
-    rest: REST;
+    rest: RequestClient;
     token: string;
     hasMedia: boolean;
   },
@@ -327,15 +383,20 @@ async function buildDiscordSendError(
 }
 
 async function resolveChannelId(
-  rest: REST,
+  rest: RequestClient,
   recipient: DiscordRecipient,
+  request: DiscordRequest,
 ): Promise<{ channelId: string; dm?: boolean }> {
   if (recipient.kind === "channel") {
     return { channelId: recipient.id };
   }
-  const dmChannel = (await rest.post(Routes.userChannels(), {
-    body: { recipient_id: recipient.id },
-  })) as { id: string };
+  const dmChannel = (await request(
+    () =>
+      rest.post(Routes.userChannels(), {
+        body: { recipient_id: recipient.id },
+      }) as Promise<{ id: string }>,
+    "dm-channel",
+  )) as { id: string };
   if (!dmChannel?.id) {
     throw new Error("Failed to create Discord DM channel");
   }
@@ -343,10 +404,11 @@ async function resolveChannelId(
 }
 
 async function sendDiscordText(
-  rest: REST,
+  rest: RequestClient,
   channelId: string,
   text: string,
-  replyTo?: string,
+  replyTo: string | undefined,
+  request: DiscordRequest,
 ) {
   if (!text.trim()) {
     throw new Error("Message must be non-empty for Discord sends");
@@ -355,21 +417,29 @@ async function sendDiscordText(
     ? { message_id: replyTo, fail_if_not_exists: false }
     : undefined;
   if (text.length <= DISCORD_TEXT_LIMIT) {
-    const res = (await rest.post(Routes.channelMessages(channelId), {
-      body: { content: text, message_reference: messageReference },
-    })) as { id: string; channel_id: string };
+    const res = (await request(
+      () =>
+        rest.post(Routes.channelMessages(channelId), {
+          body: { content: text, message_reference: messageReference },
+        }) as Promise<{ id: string; channel_id: string }>,
+      "text",
+    )) as { id: string; channel_id: string };
     return res;
   }
   const chunks = chunkMarkdownText(text, DISCORD_TEXT_LIMIT);
   let last: { id: string; channel_id: string } | null = null;
   let isFirst = true;
   for (const chunk of chunks) {
-    last = (await rest.post(Routes.channelMessages(channelId), {
-      body: {
-        content: chunk,
-        message_reference: isFirst ? messageReference : undefined,
-      },
-    })) as { id: string; channel_id: string };
+    last = (await request(
+      () =>
+        rest.post(Routes.channelMessages(channelId), {
+          body: {
+            content: chunk,
+            message_reference: isFirst ? messageReference : undefined,
+          },
+        }) as Promise<{ id: string; channel_id: string }>,
+      "text",
+    )) as { id: string; channel_id: string };
     isFirst = false;
   }
   if (!last) {
@@ -379,11 +449,12 @@ async function sendDiscordText(
 }
 
 async function sendDiscordMedia(
-  rest: REST,
+  rest: RequestClient,
   channelId: string,
   text: string,
   mediaUrl: string,
-  replyTo?: string,
+  replyTo: string | undefined,
+  request: DiscordRequest,
 ) {
   const media = await loadWebMedia(mediaUrl);
   const caption =
@@ -391,22 +462,26 @@ async function sendDiscordMedia(
   const messageReference = replyTo
     ? { message_id: replyTo, fail_if_not_exists: false }
     : undefined;
-  const res = (await rest.post(Routes.channelMessages(channelId), {
-    body: {
-      content: caption || undefined,
-      message_reference: messageReference,
-    },
-    files: [
-      {
-        data: media.buffer,
-        name: media.fileName ?? "upload",
-      },
-    ],
-  })) as { id: string; channel_id: string };
+  const res = (await request(
+    () =>
+      rest.post(Routes.channelMessages(channelId), {
+        body: {
+          content: caption || undefined,
+          message_reference: messageReference,
+          files: [
+            {
+              data: media.buffer,
+              name: media.fileName ?? "upload",
+            },
+          ],
+        },
+      }) as Promise<{ id: string; channel_id: string }>,
+    "media",
+  )) as { id: string; channel_id: string };
   if (text.length > DISCORD_TEXT_LIMIT) {
     const remaining = text.slice(DISCORD_TEXT_LIMIT).trim();
     if (remaining) {
-      await sendDiscordText(rest, channelId, remaining);
+      await sendDiscordText(rest, channelId, remaining, undefined, request);
     }
   }
   return res;
@@ -429,7 +504,7 @@ function formatReactionEmoji(emoji: {
   return buildReactionIdentifier(emoji);
 }
 
-async function fetchBotUserId(rest: REST) {
+async function fetchBotUserId(rest: RequestClient) {
   const me = (await rest.get(Routes.user("@me"))) as { id?: string };
   if (!me?.id) {
     throw new Error("Failed to resolve bot user id");
@@ -442,10 +517,10 @@ export async function sendMessageDiscord(
   text: string,
   opts: DiscordSendOpts = {},
 ): Promise<DiscordSendResult> {
-  const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const cfg = loadConfig();
+  const { token, rest, request } = createDiscordClient(opts, cfg);
   const recipient = parseRecipient(to);
-  const { channelId } = await resolveChannelId(rest, recipient);
+  const { channelId } = await resolveChannelId(rest, recipient, request);
   let result:
     | { id: string; channel_id: string }
     | { id: string | null; channel_id: string };
@@ -457,9 +532,16 @@ export async function sendMessageDiscord(
         text,
         opts.mediaUrl,
         opts.replyTo,
+        request,
       );
     } else {
-      result = await sendDiscordText(rest, channelId, text, opts.replyTo);
+      result = await sendDiscordText(
+        rest,
+        channelId,
+        text,
+        opts.replyTo,
+        request,
+      );
     }
   } catch (err) {
     throw await buildDiscordSendError(err, {
@@ -481,18 +563,22 @@ export async function sendStickerDiscord(
   stickerIds: string[],
   opts: DiscordSendOpts & { content?: string } = {},
 ): Promise<DiscordSendResult> {
-  const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const cfg = loadConfig();
+  const { rest, request } = createDiscordClient(opts, cfg);
   const recipient = parseRecipient(to);
-  const { channelId } = await resolveChannelId(rest, recipient);
+  const { channelId } = await resolveChannelId(rest, recipient, request);
   const content = opts.content?.trim();
   const stickers = normalizeStickerIds(stickerIds);
-  const res = (await rest.post(Routes.channelMessages(channelId), {
-    body: {
-      content: content || undefined,
-      sticker_ids: stickers,
-    },
-  })) as { id: string; channel_id: string };
+  const res = (await request(
+    () =>
+      rest.post(Routes.channelMessages(channelId), {
+        body: {
+          content: content || undefined,
+          sticker_ids: stickers,
+        },
+      }) as Promise<{ id: string; channel_id: string }>,
+    "sticker",
+  )) as { id: string; channel_id: string };
   return {
     messageId: res.id ? String(res.id) : "unknown",
     channelId: String(res.channel_id ?? channelId),
@@ -504,18 +590,22 @@ export async function sendPollDiscord(
   poll: PollInput,
   opts: DiscordSendOpts & { content?: string } = {},
 ): Promise<DiscordSendResult> {
-  const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const cfg = loadConfig();
+  const { rest, request } = createDiscordClient(opts, cfg);
   const recipient = parseRecipient(to);
-  const { channelId } = await resolveChannelId(rest, recipient);
+  const { channelId } = await resolveChannelId(rest, recipient, request);
   const content = opts.content?.trim();
   const payload = normalizeDiscordPollInput(poll);
-  const res = (await rest.post(Routes.channelMessages(channelId), {
-    body: {
-      content: content || undefined,
-      poll: payload,
-    },
-  })) as { id: string; channel_id: string };
+  const res = (await request(
+    () =>
+      rest.post(Routes.channelMessages(channelId), {
+        body: {
+          content: content || undefined,
+          poll: payload,
+        },
+      }) as Promise<{ id: string; channel_id: string }>,
+    "poll",
+  )) as { id: string; channel_id: string };
   return {
     messageId: res.id ? String(res.id) : "unknown",
     channelId: String(res.channel_id ?? channelId),
@@ -528,13 +618,64 @@ export async function reactMessageDiscord(
   emoji: string,
   opts: DiscordReactOpts = {},
 ) {
-  const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const cfg = loadConfig();
+  const { rest, request } = createDiscordClient(opts, cfg);
   const encoded = normalizeReactionEmoji(emoji);
-  await rest.put(
+  await request(
+    () =>
+      rest.put(Routes.channelMessageOwnReaction(channelId, messageId, encoded)),
+    "react",
+  );
+  return { ok: true };
+}
+
+export async function removeReactionDiscord(
+  channelId: string,
+  messageId: string,
+  emoji: string,
+  opts: DiscordReactOpts = {},
+) {
+  const token = resolveToken(opts.token);
+  const rest = resolveRest(token, opts.rest);
+  const encoded = normalizeReactionEmoji(emoji);
+  await rest.delete(
     Routes.channelMessageOwnReaction(channelId, messageId, encoded),
   );
   return { ok: true };
+}
+
+export async function removeOwnReactionsDiscord(
+  channelId: string,
+  messageId: string,
+  opts: DiscordReactOpts = {},
+): Promise<{ ok: true; removed: string[] }> {
+  const token = resolveToken(opts.token);
+  const rest = resolveRest(token, opts.rest);
+  const message = (await rest.get(
+    Routes.channelMessage(channelId, messageId),
+  )) as {
+    reactions?: Array<{ emoji: { id?: string | null; name?: string | null } }>;
+  };
+  const identifiers = new Set<string>();
+  for (const reaction of message.reactions ?? []) {
+    const identifier = buildReactionIdentifier(reaction.emoji);
+    if (identifier) identifiers.add(identifier);
+  }
+  if (identifiers.size === 0) return { ok: true, removed: [] };
+  const removed: string[] = [];
+  await Promise.allSettled(
+    Array.from(identifiers, (identifier) => {
+      removed.push(identifier);
+      return rest.delete(
+        Routes.channelMessageOwnReaction(
+          channelId,
+          messageId,
+          normalizeReactionEmoji(identifier),
+        ),
+      );
+    }),
+  );
+  return { ok: true, removed };
 }
 
 export async function fetchReactionsDiscord(
@@ -543,7 +684,7 @@ export async function fetchReactionsDiscord(
   opts: DiscordReactOpts & { limit?: number } = {},
 ): Promise<DiscordReactionSummary[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const message = (await rest.get(
     Routes.channelMessage(channelId, messageId),
   )) as {
@@ -566,7 +707,7 @@ export async function fetchReactionsDiscord(
     const encoded = encodeURIComponent(identifier);
     const users = (await rest.get(
       Routes.channelMessageReaction(channelId, messageId, encoded),
-      { query: new URLSearchParams({ limit: String(limit) }) },
+      { limit },
     )) as Array<{ id: string; username?: string; discriminator?: string }>;
     summaries.push({
       emoji: {
@@ -593,7 +734,7 @@ export async function fetchChannelPermissionsDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<DiscordPermissionsSummary> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const channel = (await rest.get(Routes.channel(channelId))) as APIChannel;
   const channelType = "type" in channel ? channel.type : undefined;
   const guildId = "guild_id" in channel ? channel.guild_id : undefined;
@@ -616,47 +757,47 @@ export async function fetchChannelPermissionsDiscord(
   const rolesById = new Map<string, APIRole>(
     (guild.roles ?? []).map((role) => [role.id, role]),
   );
-  const base = new PermissionsBitField();
   const everyoneRole = rolesById.get(guildId);
+  let base = 0n;
   if (everyoneRole?.permissions) {
-    base.add(BigInt(everyoneRole.permissions));
+    base = addPermissionBits(base, everyoneRole.permissions);
   }
   for (const roleId of member.roles ?? []) {
     const role = rolesById.get(roleId);
     if (role?.permissions) {
-      base.add(BigInt(role.permissions));
+      base = addPermissionBits(base, role.permissions);
     }
   }
 
-  const permissions = new PermissionsBitField(base);
+  let permissions = base;
   const overwrites =
     "permission_overwrites" in channel
       ? (channel.permission_overwrites ?? [])
       : [];
   for (const overwrite of overwrites) {
     if (overwrite.id === guildId) {
-      permissions.remove(BigInt(overwrite.deny ?? "0"));
-      permissions.add(BigInt(overwrite.allow ?? "0"));
+      permissions = removePermissionBits(permissions, overwrite.deny ?? "0");
+      permissions = addPermissionBits(permissions, overwrite.allow ?? "0");
     }
   }
   for (const overwrite of overwrites) {
     if (member.roles?.includes(overwrite.id)) {
-      permissions.remove(BigInt(overwrite.deny ?? "0"));
-      permissions.add(BigInt(overwrite.allow ?? "0"));
+      permissions = removePermissionBits(permissions, overwrite.deny ?? "0");
+      permissions = addPermissionBits(permissions, overwrite.allow ?? "0");
     }
   }
   for (const overwrite of overwrites) {
     if (overwrite.id === botId) {
-      permissions.remove(BigInt(overwrite.deny ?? "0"));
-      permissions.add(BigInt(overwrite.allow ?? "0"));
+      permissions = removePermissionBits(permissions, overwrite.deny ?? "0");
+      permissions = addPermissionBits(permissions, overwrite.allow ?? "0");
     }
   }
 
   return {
     channelId,
     guildId,
-    permissions: permissions.toArray(),
-    raw: permissions.bitfield.toString(),
+    permissions: bitfieldToPermissions(permissions),
+    raw: permissions.toString(),
     isDm: false,
     channelType,
   };
@@ -668,19 +809,20 @@ export async function readMessagesDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIMessage[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const limit =
     typeof query.limit === "number" && Number.isFinite(query.limit)
       ? Math.min(Math.max(Math.floor(query.limit), 1), 100)
       : undefined;
-  const params = new URLSearchParams();
-  if (limit) params.set("limit", String(limit));
-  if (query.before) params.set("before", query.before);
-  if (query.after) params.set("after", query.after);
-  if (query.around) params.set("around", query.around);
-  return (await rest.get(Routes.channelMessages(channelId), {
-    query: params,
-  })) as APIMessage[];
+  const params: Record<string, string | number> = {};
+  if (limit) params.limit = limit;
+  if (query.before) params.before = query.before;
+  if (query.after) params.after = query.after;
+  if (query.around) params.around = query.around;
+  return (await rest.get(
+    Routes.channelMessages(channelId),
+    params,
+  )) as APIMessage[];
 }
 
 export async function editMessageDiscord(
@@ -690,7 +832,7 @@ export async function editMessageDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIMessage> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.patch(Routes.channelMessage(channelId, messageId), {
     body: { content: payload.content },
   })) as APIMessage;
@@ -702,7 +844,7 @@ export async function deleteMessageDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.delete(Routes.channelMessage(channelId, messageId));
   return { ok: true };
 }
@@ -713,7 +855,7 @@ export async function pinMessageDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.put(Routes.channelPin(channelId, messageId));
   return { ok: true };
 }
@@ -724,7 +866,7 @@ export async function unpinMessageDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.delete(Routes.channelPin(channelId, messageId));
   return { ok: true };
 }
@@ -734,7 +876,7 @@ export async function listPinsDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIMessage[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(Routes.channelPins(channelId))) as APIMessage[];
 }
 
@@ -744,7 +886,7 @@ export async function createThreadDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const body: Record<string, unknown> = { name: payload.name };
   if (payload.autoArchiveMinutes) {
     body.auto_archive_duration = payload.autoArchiveMinutes;
@@ -758,17 +900,18 @@ export async function listThreadsDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   if (payload.includeArchived) {
     if (!payload.channelId) {
       throw new Error("channelId required to list archived threads");
     }
-    const params = new URLSearchParams();
-    if (payload.before) params.set("before", payload.before);
-    if (payload.limit) params.set("limit", String(payload.limit));
-    return await rest.get(Routes.channelThreads(payload.channelId, "public"), {
-      query: params,
-    });
+    const params: Record<string, string | number> = {};
+    if (payload.before) params.before = payload.before;
+    if (payload.limit) params.limit = payload.limit;
+    return await rest.get(
+      Routes.channelThreads(payload.channelId, "public"),
+      params,
+    );
   }
   return await rest.get(Routes.guildActiveThreads(payload.guildId));
 }
@@ -778,7 +921,7 @@ export async function searchMessagesDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const params = new URLSearchParams();
   params.set("content", query.content);
   if (query.channelIds?.length) {
@@ -795,9 +938,9 @@ export async function searchMessagesDiscord(
     const limit = Math.min(Math.max(Math.floor(query.limit), 1), 25);
     params.set("limit", String(limit));
   }
-  return await rest.get(`/guilds/${query.guildId}/messages/search`, {
-    query: params,
-  });
+  return await rest.get(
+    `/guilds/${query.guildId}/messages/search?${params.toString()}`,
+  );
 }
 
 export async function listGuildEmojisDiscord(
@@ -805,7 +948,7 @@ export async function listGuildEmojisDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return await rest.get(Routes.guildEmojis(guildId));
 }
 
@@ -814,7 +957,7 @@ export async function uploadEmojiDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const media = await loadWebMediaRaw(
     payload.mediaUrl,
     DISCORD_MAX_EMOJI_BYTES,
@@ -844,7 +987,7 @@ export async function uploadStickerDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const media = await loadWebMediaRaw(
     payload.mediaUrl,
     DISCORD_MAX_STICKER_BYTES,
@@ -866,14 +1009,14 @@ export async function uploadStickerDiscord(
         "Sticker description",
       ),
       tags: normalizeEmojiName(payload.tags, "Sticker tags"),
+      files: [
+        {
+          data: media.buffer,
+          name: media.fileName ?? "sticker",
+          contentType,
+        },
+      ],
     },
-    files: [
-      {
-        data: media.buffer,
-        name: media.fileName ?? "sticker",
-        contentType,
-      },
-    ],
   });
 }
 
@@ -883,7 +1026,7 @@ export async function fetchMemberInfoDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIGuildMember> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(
     Routes.guildMember(guildId, userId),
   )) as APIGuildMember;
@@ -894,7 +1037,7 @@ export async function fetchRoleInfoDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIRole[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(Routes.guildRoles(guildId))) as APIRole[];
 }
 
@@ -903,7 +1046,7 @@ export async function addRoleDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.put(
     Routes.guildMemberRole(payload.guildId, payload.userId, payload.roleId),
   );
@@ -915,7 +1058,7 @@ export async function removeRoleDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.delete(
     Routes.guildMemberRole(payload.guildId, payload.userId, payload.roleId),
   );
@@ -927,7 +1070,7 @@ export async function fetchChannelInfoDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIChannel> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(Routes.channel(channelId))) as APIChannel;
 }
 
@@ -936,7 +1079,7 @@ export async function listGuildChannelsDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIChannel[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(Routes.guildChannels(guildId))) as APIChannel[];
 }
 
@@ -946,7 +1089,7 @@ export async function fetchVoiceStatusDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIVoiceState> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(
     Routes.guildVoiceState(guildId, userId),
   )) as APIVoiceState;
@@ -957,7 +1100,7 @@ export async function listScheduledEventsDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIGuildScheduledEvent[]> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.get(
     Routes.guildScheduledEvents(guildId),
   )) as APIGuildScheduledEvent[];
@@ -969,7 +1112,7 @@ export async function createScheduledEventDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIGuildScheduledEvent> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   return (await rest.post(Routes.guildScheduledEvents(guildId), {
     body: payload,
   })) as APIGuildScheduledEvent;
@@ -980,7 +1123,7 @@ export async function timeoutMemberDiscord(
   opts: DiscordReactOpts = {},
 ): Promise<APIGuildMember> {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   let until = payload.until;
   if (!until && payload.durationMinutes) {
     const ms = payload.durationMinutes * 60 * 1000;
@@ -990,7 +1133,9 @@ export async function timeoutMemberDiscord(
     Routes.guildMember(payload.guildId, payload.userId),
     {
       body: { communication_disabled_until: until ?? null },
-      reason: payload.reason,
+      headers: payload.reason
+        ? { "X-Audit-Log-Reason": encodeURIComponent(payload.reason) }
+        : undefined,
     },
   )) as APIGuildMember;
 }
@@ -1000,9 +1145,11 @@ export async function kickMemberDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   await rest.delete(Routes.guildMember(payload.guildId, payload.userId), {
-    reason: payload.reason,
+    headers: payload.reason
+      ? { "X-Audit-Log-Reason": encodeURIComponent(payload.reason) }
+      : undefined,
   });
   return { ok: true };
 }
@@ -1012,7 +1159,7 @@ export async function banMemberDiscord(
   opts: DiscordReactOpts = {},
 ) {
   const token = resolveToken(opts.token);
-  const rest = opts.rest ?? new REST({ version: "10" }).setToken(token);
+  const rest = resolveRest(token, opts.rest);
   const deleteMessageDays =
     typeof payload.deleteMessageDays === "number" &&
     Number.isFinite(payload.deleteMessageDays)
@@ -1023,7 +1170,9 @@ export async function banMemberDiscord(
       deleteMessageDays !== undefined
         ? { delete_message_days: deleteMessageDays }
         : undefined,
-    reason: payload.reason,
+    headers: payload.reason
+      ? { "X-Audit-Log-Reason": encodeURIComponent(payload.reason) }
+      : undefined,
   });
   return { ok: true };
 }

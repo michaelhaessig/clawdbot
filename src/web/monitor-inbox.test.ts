@@ -1005,6 +1005,9 @@ describe("web monitor inbox", () => {
   it("locks down when no config is present (pairing for unknown senders)", async () => {
     // No config file => locked-down defaults apply (pairing for unknown senders)
     mockLoadConfig.mockReturnValue({});
+    upsertPairingRequestMock
+      .mockResolvedValueOnce({ code: "PAIRCODE", created: true })
+      .mockResolvedValueOnce({ code: "PAIRCODE", created: false });
 
     const onMessage = vi.fn();
     const listener = await monitorWebInbox({ verbose: false, onMessage });
@@ -1033,6 +1036,26 @@ describe("web monitor inbox", () => {
     expect(sock.sendMessage).toHaveBeenCalledWith("999@s.whatsapp.net", {
       text: expect.stringContaining("Pairing code: PAIRCODE"),
     });
+
+    const upsertBlockedAgain = {
+      type: "notify",
+      messages: [
+        {
+          key: {
+            id: "no-config-1b",
+            fromMe: false,
+            remoteJid: "999@s.whatsapp.net",
+          },
+          message: { conversation: "ping again" },
+          messageTimestamp: 1_700_000_002,
+        },
+      ],
+    };
+
+    sock.ev.emit("messages.upsert", upsertBlockedAgain);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(sock.sendMessage).toHaveBeenCalledTimes(1);
 
     // Message from self should be allowed
     const upsertSelf = {
@@ -1063,6 +1086,110 @@ describe("web monitor inbox", () => {
     );
 
     // Reset mock for other tests
+    mockLoadConfig.mockReturnValue({
+      whatsapp: {
+        allowFrom: ["*"],
+      },
+      messages: {
+        messagePrefix: undefined,
+        responsePrefix: undefined,
+      },
+    });
+
+    await listener.close();
+  });
+
+  it("skips pairing replies for outbound DMs in same-phone mode", async () => {
+    mockLoadConfig.mockReturnValue({
+      whatsapp: {
+        dmPolicy: "pairing",
+        selfChatMode: true,
+      },
+      messages: {
+        messagePrefix: undefined,
+        responsePrefix: undefined,
+      },
+    });
+
+    const onMessage = vi.fn();
+    const listener = await monitorWebInbox({ verbose: false, onMessage });
+    const sock = await createWaSocket();
+
+    const upsert = {
+      type: "notify",
+      messages: [
+        {
+          key: {
+            id: "fromme-1",
+            fromMe: true,
+            remoteJid: "999@s.whatsapp.net",
+          },
+          message: { conversation: "hello" },
+          messageTimestamp: 1_700_000_000,
+        },
+      ],
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sock.sendMessage).not.toHaveBeenCalled();
+
+    mockLoadConfig.mockReturnValue({
+      whatsapp: {
+        allowFrom: ["*"],
+      },
+      messages: {
+        messagePrefix: undefined,
+        responsePrefix: undefined,
+      },
+    });
+
+    await listener.close();
+  });
+
+  it("still pairs outbound DMs when same-phone mode is disabled", async () => {
+    mockLoadConfig.mockReturnValue({
+      whatsapp: {
+        dmPolicy: "pairing",
+        selfChatMode: false,
+      },
+      messages: {
+        messagePrefix: undefined,
+        responsePrefix: undefined,
+      },
+    });
+
+    const onMessage = vi.fn();
+    const listener = await monitorWebInbox({ verbose: false, onMessage });
+    const sock = await createWaSocket();
+
+    const upsert = {
+      type: "notify",
+      messages: [
+        {
+          key: {
+            id: "fromme-2",
+            fromMe: true,
+            remoteJid: "999@s.whatsapp.net",
+          },
+          message: { conversation: "hello again" },
+          messageTimestamp: 1_700_000_000,
+        },
+      ],
+    };
+
+    sock.ev.emit("messages.upsert", upsert);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).toHaveBeenCalledTimes(1);
+    expect(sock.sendMessage).toHaveBeenCalledWith("999@s.whatsapp.net", {
+      text: expect.stringContaining("Pairing code: PAIRCODE"),
+    });
+
     mockLoadConfig.mockReturnValue({
       whatsapp: {
         allowFrom: ["*"],

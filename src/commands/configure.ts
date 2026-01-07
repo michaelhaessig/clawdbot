@@ -16,6 +16,11 @@ import {
   type OAuthCredentials,
   type OAuthProvider,
 } from "@mariozechner/pi-ai";
+import {
+  CLAUDE_CLI_PROFILE_ID,
+  CODEX_CLI_PROFILE_ID,
+  ensureAuthProfileStore,
+} from "../agents/auth-profiles.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import {
   CONFIG_PATH_CLAWDBOT,
@@ -35,6 +40,12 @@ import {
   isRemoteEnvironment,
   loginAntigravityVpsAware,
 } from "./antigravity-oauth.js";
+import { buildAuthChoiceOptions } from "./auth-choice-options.js";
+import {
+  DEFAULT_GATEWAY_DAEMON_RUNTIME,
+  GATEWAY_DAEMON_RUNTIME_OPTIONS,
+  type GatewayDaemonRuntime,
+} from "./daemon-runtime.js";
 import { healthCommand } from "./health.js";
 import {
   applyAuthProfileConfig,
@@ -145,6 +156,14 @@ async function promptGatewayConfig(
 
   let tailscaleResetOnExit = false;
   if (tailscaleMode !== "off") {
+    note(
+      [
+        "Docs:",
+        "https://docs.clawd.bot/gateway/tailscale",
+        "https://docs.clawd.bot/web",
+      ].join("\n"),
+      "Tailscale",
+    );
     tailscaleResetOnExit = Boolean(
       guardCancel(
         await confirm({
@@ -241,20 +260,21 @@ async function promptAuthConfig(
   const authChoice = guardCancel(
     await select({
       message: "Model/auth choice",
-      options: [
-        { value: "oauth", label: "Anthropic OAuth (Claude Pro/Max)" },
-        { value: "openai-codex", label: "OpenAI Codex (ChatGPT OAuth)" },
-        {
-          value: "antigravity",
-          label: "Google Antigravity (Claude Opus 4.5, Gemini 3, etc.)",
-        },
-        { value: "apiKey", label: "Anthropic API key" },
-        { value: "minimax", label: "Minimax M2.1 (LM Studio)" },
-        { value: "skip", label: "Skip for now" },
-      ],
+      options: buildAuthChoiceOptions({
+        store: ensureAuthProfileStore(),
+        includeSkip: true,
+      }),
     }),
     runtime,
-  ) as "oauth" | "openai-codex" | "antigravity" | "apiKey" | "minimax" | "skip";
+  ) as
+    | "oauth"
+    | "claude-cli"
+    | "openai-codex"
+    | "codex-cli"
+    | "antigravity"
+    | "apiKey"
+    | "minimax"
+    | "skip";
 
   let next = cfg;
 
@@ -286,16 +306,25 @@ async function promptAuthConfig(
       spin.stop("OAuth complete");
       if (oauthCreds) {
         await writeOAuthCredentials("anthropic", oauthCreds);
+        const profileId = `anthropic:${oauthCreds.email ?? "default"}`;
         next = applyAuthProfileConfig(next, {
-          profileId: "anthropic:default",
+          profileId,
           provider: "anthropic",
           mode: "oauth",
+          email: oauthCreds.email ?? undefined,
         });
       }
     } catch (err) {
       spin.stop("OAuth failed");
       runtime.error(String(err));
+      note("Trouble with OAuth? See https://docs.clawd.bot/start/faq", "OAuth");
     }
+  } else if (authChoice === "claude-cli") {
+    next = applyAuthProfileConfig(next, {
+      profileId: CLAUDE_CLI_PROFILE_ID,
+      provider: "anthropic",
+      mode: "oauth",
+    });
   } else if (authChoice === "openai-codex") {
     const isRemote = isRemoteEnvironment();
     note(
@@ -368,6 +397,21 @@ async function promptAuthConfig(
     } catch (err) {
       spin.stop("OpenAI OAuth failed");
       runtime.error(String(err));
+      note("Trouble with OAuth? See https://docs.clawd.bot/start/faq", "OAuth");
+    }
+  } else if (authChoice === "codex-cli") {
+    next = applyAuthProfileConfig(next, {
+      profileId: CODEX_CLI_PROFILE_ID,
+      provider: "openai-codex",
+      mode: "oauth",
+    });
+    const applied = applyOpenAICodexModelDefault(next);
+    next = applied.next;
+    if (applied.changed) {
+      note(
+        `Default model set to ${OPENAI_CODEX_DEFAULT_MODEL}`,
+        "Model configured",
+      );
     }
   } else if (authChoice === "antigravity") {
     const isRemote = isRemoteEnvironment();
@@ -442,6 +486,7 @@ async function promptAuthConfig(
     } catch (err) {
       spin.stop("Antigravity OAuth failed");
       runtime.error(String(err));
+      note("Trouble with OAuth? See https://docs.clawd.bot/start/faq", "OAuth");
     }
   } else if (authChoice === "apiKey") {
     const key = guardCancel(
@@ -502,11 +547,13 @@ async function maybeInstallDaemon(params: {
   runtime: RuntimeEnv;
   port: number;
   gatewayToken?: string;
+  daemonRuntime?: GatewayDaemonRuntime;
 }) {
   const service = resolveGatewayService();
   const loaded = await service.isLoaded({ env: process.env });
   let shouldCheckLinger = false;
   let shouldInstall = true;
+  let daemonRuntime = params.daemonRuntime ?? DEFAULT_GATEWAY_DAEMON_RUNTIME;
   if (loaded) {
     const action = guardCancel(
       await select({
@@ -531,11 +578,25 @@ async function maybeInstallDaemon(params: {
   }
 
   if (shouldInstall) {
+    if (!params.daemonRuntime) {
+      daemonRuntime = guardCancel(
+        await select({
+          message: "Gateway daemon runtime",
+          options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
+          initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+        }),
+        params.runtime,
+      ) as GatewayDaemonRuntime;
+    }
     const devMode =
       process.argv[1]?.includes(`${path.sep}src${path.sep}`) &&
       process.argv[1]?.endsWith(".ts");
     const { programArguments, workingDirectory } =
-      await resolveGatewayProgramArguments({ port: params.port, dev: devMode });
+      await resolveGatewayProgramArguments({
+        port: params.port,
+        dev: devMode,
+        runtime: daemonRuntime,
+      });
     const environment: Record<string, string | undefined> = {
       PATH: process.env.PATH,
       CLAWDBOT_GATEWAY_TOKEN: params.gatewayToken,
@@ -587,9 +648,11 @@ export async function runConfigureWizard(
     note(summarizeExistingConfig(baseConfig), title);
     if (!snapshot.valid && snapshot.issues.length > 0) {
       note(
-        snapshot.issues
-          .map((iss) => `- ${iss.path}: ${iss.message}`)
-          .join("\n"),
+        [
+          ...snapshot.issues.map((iss) => `- ${iss.path}: ${iss.message}`),
+          "",
+          "Docs: https://docs.clawd.bot/gateway/configuration",
+        ].join("\n"),
         "Config issues",
       );
     }
@@ -768,6 +831,14 @@ export async function runConfigureWizard(
       await healthCommand({ json: false, timeoutMs: 10_000 }, runtime);
     } catch (err) {
       runtime.error(`Health check failed: ${String(err)}`);
+      note(
+        [
+          "Docs:",
+          "https://docs.clawd.bot/gateway/health",
+          "https://docs.clawd.bot/gateway/troubleshooting",
+        ].join("\n"),
+        "Health check help",
+      );
     }
   }
 
@@ -784,9 +855,11 @@ export async function runConfigureWizard(
         port: gatewayPort,
         basePath: nextConfig.gateway?.controlUi?.basePath,
       });
-      return [`Web UI: ${links.httpUrl}`, `Gateway WS: ${links.wsUrl}`].join(
-        "\n",
-      );
+      return [
+        `Web UI: ${links.httpUrl}`,
+        `Gateway WS: ${links.wsUrl}`,
+        "Docs: https://docs.clawd.bot/web/control-ui",
+      ].join("\n");
     })(),
     "Control UI",
   );

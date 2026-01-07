@@ -32,6 +32,7 @@ const GROUP_LABELS: Record<string, string> = {
   models: "Models",
   routing: "Routing",
   messages: "Messages",
+  commands: "Commands",
   session: "Session",
   cron: "Cron",
   hooks: "Hooks",
@@ -58,6 +59,7 @@ const GROUP_ORDER: Record<string, number> = {
   models: 50,
   routing: 60,
   messages: 70,
+  commands: 75,
   session: 80,
   cron: 90,
   hooks: 100,
@@ -94,6 +96,9 @@ const FIELD_LABELS: Record<string, string> = {
   "agent.model.fallbacks": "Model Fallbacks",
   "agent.imageModel.primary": "Image Model",
   "agent.imageModel.fallbacks": "Image Model Fallbacks",
+  "commands.native": "Native Commands",
+  "commands.text": "Text Commands",
+  "commands.useAccessGroups": "Use Access Groups",
   "ui.seamColor": "Accent Color",
   "browser.controlUrl": "Browser Control URL",
   "session.agentToAgent.maxPingPongTurns": "Agent-to-Agent Ping-Pong Turns",
@@ -102,10 +107,20 @@ const FIELD_LABELS: Record<string, string> = {
   "talk.apiKey": "Talk API Key",
   "telegram.botToken": "Telegram Bot Token",
   "telegram.dmPolicy": "Telegram DM Policy",
+  "telegram.streamMode": "Telegram Stream Mode",
+  "telegram.retry.attempts": "Telegram Retry Attempts",
+  "telegram.retry.minDelayMs": "Telegram Retry Min Delay (ms)",
+  "telegram.retry.maxDelayMs": "Telegram Retry Max Delay (ms)",
+  "telegram.retry.jitter": "Telegram Retry Jitter",
   "whatsapp.dmPolicy": "WhatsApp DM Policy",
+  "whatsapp.selfChatMode": "WhatsApp Self-Phone Mode",
   "signal.dmPolicy": "Signal DM Policy",
   "imessage.dmPolicy": "iMessage DM Policy",
   "discord.dm.policy": "Discord DM Policy",
+  "discord.retry.attempts": "Discord Retry Attempts",
+  "discord.retry.minDelayMs": "Discord Retry Min Delay (ms)",
+  "discord.retry.maxDelayMs": "Discord Retry Max Delay (ms)",
+  "discord.retry.jitter": "Discord Retry Jitter",
   "slack.dm.policy": "Slack DM Policy",
   "discord.token": "Discord Bot Token",
   "slack.botToken": "Slack Bot Token",
@@ -137,6 +152,11 @@ const FIELD_HELP: Record<string, string> = {
     "Optional image model (provider/model) used when the primary model lacks image input.",
   "agent.imageModel.fallbacks":
     "Ordered fallback image models (provider/model).",
+  "commands.native":
+    "Register native commands with connectors that support it (Discord/Slack/Telegram).",
+  "commands.text": "Allow text command parsing (slash commands only).",
+  "commands.useAccessGroups":
+    "Enforce access-group allowlists/policies for commands.",
   "session.agentToAgent.maxPingPongTurns":
     "Max reply-back turns between requester and target (0–5).",
   "messages.ackReaction":
@@ -145,14 +165,34 @@ const FIELD_HELP: Record<string, string> = {
     'When to send ack reactions ("group-mentions", "group-all", "direct", "all").',
   "telegram.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires telegram.allowFrom=["*"].',
+  "telegram.streamMode":
+    "Draft streaming mode for Telegram replies (off | partial | block). Requires private topics + sendMessageDraft.",
+  "telegram.retry.attempts":
+    "Max retry attempts for outbound Telegram API calls (default: 3).",
+  "telegram.retry.minDelayMs":
+    "Minimum retry delay in ms for Telegram outbound calls.",
+  "telegram.retry.maxDelayMs":
+    "Maximum retry delay cap in ms for Telegram outbound calls.",
+  "telegram.retry.jitter":
+    "Jitter factor (0-1) applied to Telegram retry delays.",
   "whatsapp.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires whatsapp.allowFrom=["*"].',
+  "whatsapp.selfChatMode":
+    "Same-phone setup (bot uses your personal WhatsApp number). Suppresses pairing replies for outbound DMs.",
   "signal.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires signal.allowFrom=["*"].',
   "imessage.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires imessage.allowFrom=["*"].',
   "discord.dm.policy":
     'Direct message access control ("pairing" recommended). "open" requires discord.dm.allowFrom=["*"].',
+  "discord.retry.attempts":
+    "Max retry attempts for outbound Discord API calls (default: 3).",
+  "discord.retry.minDelayMs":
+    "Minimum retry delay in ms for Discord outbound calls.",
+  "discord.retry.maxDelayMs":
+    "Maximum retry delay cap in ms for Discord outbound calls.",
+  "discord.retry.jitter":
+    "Jitter factor (0-1) applied to Discord retry delays.",
   "slack.dm.policy":
     'Direct message access control ("pairing" recommended). "open" requires slack.dm.allowFrom=["*"].',
 };

@@ -1,8 +1,10 @@
 import type { ClawdbotConfig } from "../../config/config.js";
+import { logVerbose } from "../../globals.js";
 import { getReplyFromConfig } from "../reply.js";
 import type { MsgContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
+import { isRoutableChannel, routeReply } from "./route-reply.js";
 
 type DispatchFromConfigResult = {
   queuedFinal: boolean;
@@ -16,18 +18,72 @@ export async function dispatchReplyFromConfig(params: {
   replyOptions?: Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
   replyResolver?: typeof getReplyFromConfig;
 }): Promise<DispatchFromConfigResult> {
+  const { ctx, cfg, dispatcher } = params;
+
+  // Check if we should route replies to originating channel instead of dispatcher.
+  // Only route when the originating channel is DIFFERENT from the current surface.
+  // This handles cross-provider routing (e.g., message from Telegram being processed
+  // by a shared session that's currently on Slack) while preserving normal dispatcher
+  // flow when the provider handles its own messages.
+  //
+  // Debug: `pnpm test src/auto-reply/reply/dispatch-from-config.test.ts`
+  const originatingChannel = ctx.OriginatingChannel;
+  const originatingTo = ctx.OriginatingTo;
+  const currentSurface = (ctx.Surface ?? ctx.Provider)?.toLowerCase();
+  const shouldRouteToOriginating =
+    isRoutableChannel(originatingChannel) &&
+    originatingTo &&
+    originatingChannel !== currentSurface;
+
+  /**
+   * Helper to send a payload via route-reply (async).
+   * Only used when actually routing to a different provider.
+   * Note: Only called when shouldRouteToOriginating is true, so
+   * originatingChannel and originatingTo are guaranteed to be defined.
+   */
+  const sendPayloadAsync = async (payload: ReplyPayload): Promise<void> => {
+    // TypeScript doesn't narrow these from the shouldRouteToOriginating check,
+    // but they're guaranteed non-null when this function is called.
+    if (!originatingChannel || !originatingTo) return;
+    const result = await routeReply({
+      payload,
+      channel: originatingChannel,
+      to: originatingTo,
+      accountId: ctx.AccountId,
+      threadId: ctx.MessageThreadId,
+      cfg,
+    });
+    if (!result.ok) {
+      logVerbose(
+        `dispatch-from-config: route-reply failed: ${result.error ?? "unknown error"}`,
+      );
+    }
+  };
+
   const replyResult = await (params.replyResolver ?? getReplyFromConfig)(
-    params.ctx,
+    ctx,
     {
       ...params.replyOptions,
       onToolResult: (payload: ReplyPayload) => {
-        params.dispatcher.sendToolResult(payload);
+        if (shouldRouteToOriginating) {
+          // Fire-and-forget for streaming tool results when routing.
+          void sendPayloadAsync(payload);
+        } else {
+          // Synchronous dispatch to preserve callback timing.
+          dispatcher.sendToolResult(payload);
+        }
       },
       onBlockReply: (payload: ReplyPayload) => {
-        params.dispatcher.sendBlockReply(payload);
+        if (shouldRouteToOriginating) {
+          // Fire-and-forget for streaming block replies when routing.
+          void sendPayloadAsync(payload);
+        } else {
+          // Synchronous dispatch to preserve callback timing.
+          dispatcher.sendBlockReply(payload);
+        }
       },
     },
-    params.cfg,
+    cfg,
   );
 
   const replies = replyResult
@@ -37,10 +93,32 @@ export async function dispatchReplyFromConfig(params: {
     : [];
 
   let queuedFinal = false;
+  let routedFinalCount = 0;
   for (const reply of replies) {
-    queuedFinal = params.dispatcher.sendFinalReply(reply) || queuedFinal;
+    if (shouldRouteToOriginating && originatingChannel && originatingTo) {
+      // Route final reply to originating channel.
+      const result = await routeReply({
+        payload: reply,
+        channel: originatingChannel,
+        to: originatingTo,
+        accountId: ctx.AccountId,
+        threadId: ctx.MessageThreadId,
+        cfg,
+      });
+      if (!result.ok) {
+        logVerbose(
+          `dispatch-from-config: route-reply (final) failed: ${result.error ?? "unknown error"}`,
+        );
+      }
+      queuedFinal = result.ok || queuedFinal;
+      if (result.ok) routedFinalCount += 1;
+    } else {
+      queuedFinal = dispatcher.sendFinalReply(reply) || queuedFinal;
+    }
   }
-  await params.dispatcher.waitForIdle();
+  await dispatcher.waitForIdle();
 
-  return { queuedFinal, counts: params.dispatcher.getQueuedCounts() };
+  const counts = dispatcher.getQueuedCounts();
+  counts.final += routedFinalCount;
+  return { queuedFinal, counts };
 }

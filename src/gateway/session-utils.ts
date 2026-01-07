@@ -43,6 +43,7 @@ export type GatewaySessionRow = {
   abortedLastRun?: boolean;
   thinkingLevel?: string;
   verboseLevel?: string;
+  reasoningLevel?: string;
   elevatedLevel?: string;
   sendPolicy?: "allow" | "deny";
   inputTokens?: number;
@@ -73,8 +74,13 @@ export type SessionsPatchResult = {
 export function readSessionMessages(
   sessionId: string,
   storePath: string | undefined,
+  sessionFile?: string,
 ): unknown[] {
-  const candidates = resolveSessionTranscriptCandidates(sessionId, storePath);
+  const candidates = resolveSessionTranscriptCandidates(
+    sessionId,
+    storePath,
+    sessionFile,
+  );
 
   const filePath = candidates.find((p) => fs.existsSync(p));
   if (!filePath) return [];
@@ -98,9 +104,11 @@ export function readSessionMessages(
 export function resolveSessionTranscriptCandidates(
   sessionId: string,
   storePath: string | undefined,
+  sessionFile?: string,
   agentId?: string,
 ): string[] {
   const candidates: string[] = [];
+  if (sessionFile) candidates.push(sessionFile);
   if (storePath) {
     const dir = path.dirname(storePath);
     candidates.push(path.join(dir, `${sessionId}.jsonl`));
@@ -441,6 +449,7 @@ export function listSessionsFromStore(params: {
         abortedLastRun: entry?.abortedLastRun,
         thinkingLevel: entry?.thinkingLevel,
         verboseLevel: entry?.verboseLevel,
+        reasoningLevel: entry?.reasoningLevel,
         elevatedLevel: entry?.elevatedLevel,
         sendPolicy: entry?.sendPolicy,
         inputTokens: entry?.inputTokens,

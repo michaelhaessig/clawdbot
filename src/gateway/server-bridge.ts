@@ -20,6 +20,7 @@ import { resolveAgentTimeoutMs } from "../agents/timeout.js";
 import { normalizeGroupActivation } from "../auto-reply/group-activation.js";
 import {
   normalizeElevatedLevel,
+  normalizeReasoningLevel,
   normalizeThinkLevel,
   normalizeVerboseLevel,
 } from "../auto-reply/thinking.js";
@@ -434,6 +435,26 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
             }
           }
 
+          if ("reasoningLevel" in p) {
+            const raw = p.reasoningLevel;
+            if (raw === null) {
+              delete next.reasoningLevel;
+            } else if (raw !== undefined) {
+              const normalized = normalizeReasoningLevel(String(raw));
+              if (!normalized) {
+                return {
+                  ok: false,
+                  error: {
+                    code: ErrorCodes.INVALID_REQUEST,
+                    message: `invalid reasoningLevel: ${String(raw)} (use on|off|stream)`,
+                  },
+                };
+              }
+              if (normalized === "off") delete next.reasoningLevel;
+              else next.reasoningLevel = normalized;
+            }
+          }
+
           if ("elevatedLevel" in p) {
             const raw = p.elevatedLevel;
             if (raw === null) {
@@ -602,6 +623,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
             abortedLastRun: false,
             thinkingLevel: entry?.thinkingLevel,
             verboseLevel: entry?.verboseLevel,
+            reasoningLevel: entry?.reasoningLevel,
             model: entry?.model,
             contextTokens: entry?.contextTokens,
             sendPolicy: entry?.sendPolicy,
@@ -685,6 +707,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
             for (const candidate of resolveSessionTranscriptCandidates(
               sessionId,
               storePath,
+              entry?.sessionFile,
             )) {
               if (!fs.existsSync(candidate)) continue;
               try {
@@ -751,6 +774,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           const filePath = resolveSessionTranscriptCandidates(
             sessionId,
             storePath,
+            entry?.sessionFile,
           ).find((candidate) => fs.existsSync(candidate));
           if (!filePath) {
             return {
@@ -821,7 +845,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           const sessionId = entry?.sessionId;
           const rawMessages =
             sessionId && storePath
-              ? readSessionMessages(sessionId, storePath)
+              ? readSessionMessages(sessionId, storePath, entry?.sessionFile)
               : [];
           const max = typeof limit === "number" ? limit : 200;
           const sliced =
@@ -986,6 +1010,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
             updatedAt: now,
             thinkingLevel: entry?.thinkingLevel,
             verboseLevel: entry?.verboseLevel,
+            reasoningLevel: entry?.reasoningLevel,
             systemSent: entry?.systemSent,
             lastProvider: entry?.lastProvider,
             lastTo: entry?.lastTo,
@@ -1030,6 +1055,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
               {
                 message: messageWithAttachments,
                 sessionId,
+                sessionKey: p.sessionKey,
                 runId: clientRunId,
                 thinking: p.thinking,
                 deliver: p.deliver,
@@ -1125,6 +1151,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           updatedAt: now,
           thinkingLevel: entry?.thinkingLevel,
           verboseLevel: entry?.verboseLevel,
+          reasoningLevel: entry?.reasoningLevel,
           systemSent: entry?.systemSent,
           sendPolicy: entry?.sendPolicy,
           lastProvider: entry?.lastProvider,
@@ -1145,6 +1172,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           {
             message: text,
             sessionId,
+            sessionKey,
             thinking: "low",
             deliver: false,
             messageProvider: "node",
@@ -1207,6 +1235,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           updatedAt: now,
           thinkingLevel: entry?.thinkingLevel,
           verboseLevel: entry?.verboseLevel,
+          reasoningLevel: entry?.reasoningLevel,
           systemSent: entry?.systemSent,
           sendPolicy: entry?.sendPolicy,
           lastProvider: entry?.lastProvider,
@@ -1220,6 +1249,7 @@ export function createBridgeHandlers(ctx: BridgeHandlersContext) {
           {
             message,
             sessionId,
+            sessionKey,
             thinking: link?.thinking ?? undefined,
             deliver,
             to,

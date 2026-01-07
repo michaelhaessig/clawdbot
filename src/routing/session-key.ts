@@ -23,6 +23,20 @@ export function normalizeAgentId(value: string | undefined | null): string {
   );
 }
 
+export function normalizeAccountId(value: string | undefined | null): string {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return DEFAULT_ACCOUNT_ID;
+  if (/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(trimmed)) return trimmed;
+  return (
+    trimmed
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+/, "")
+      .replace(/-+$/, "")
+      .slice(0, 64) || DEFAULT_ACCOUNT_ID
+  );
+}
+
 export function parseAgentSessionKey(
   sessionKey: string | undefined | null,
 ): ParsedAgentSessionKey | null {
@@ -74,4 +88,21 @@ export function buildAgentPeerSessionKey(params: {
   const provider = (params.provider ?? "").trim().toLowerCase() || "unknown";
   const peerId = (params.peerId ?? "").trim() || "unknown";
   return `agent:${normalizeAgentId(params.agentId)}:${provider}:${peerKind}:${peerId}`;
+}
+
+export function resolveThreadSessionKeys(params: {
+  baseSessionKey: string;
+  threadId?: string | null;
+  parentSessionKey?: string;
+  useSuffix?: boolean;
+}): { sessionKey: string; parentSessionKey?: string } {
+  const threadId = (params.threadId ?? "").trim();
+  if (!threadId) {
+    return { sessionKey: params.baseSessionKey, parentSessionKey: undefined };
+  }
+  const useSuffix = params.useSuffix ?? true;
+  const sessionKey = useSuffix
+    ? `${params.baseSessionKey}:thread:${threadId}`
+    : params.baseSessionKey;
+  return { sessionKey, parentSessionKey: params.parentSessionKey };
 }

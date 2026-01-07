@@ -230,7 +230,7 @@ export async function monitorIMessageProvider(
       if (!dmAuthorized) {
         if (dmPolicy === "pairing") {
           const senderId = normalizeIMessageHandle(sender);
-          const { code } = await upsertProviderPairingRequest({
+          const { code, created } = await upsertProviderPairingRequest({
             provider: "imessage",
             id: senderId,
             meta: {
@@ -238,30 +238,30 @@ export async function monitorIMessageProvider(
               chatId: chatId ? String(chatId) : undefined,
             },
           });
-          logVerbose(
-            `imessage pairing request sender=${senderId} code=${code}`,
-          );
-          try {
-            await sendMessageIMessage(
-              sender,
-              [
-                "Clawdbot: access not configured.",
-                "",
-                `Pairing code: ${code}`,
-                "",
-                "Ask the bot owner to approve with:",
-                "clawdbot pairing approve --provider imessage <code>",
-              ].join("\n"),
-              {
-                client,
-                maxBytes: mediaMaxBytes,
-                ...(chatId ? { chatId } : {}),
-              },
-            );
-          } catch (err) {
-            logVerbose(
-              `imessage pairing reply failed for ${senderId}: ${String(err)}`,
-            );
+          if (created) {
+            logVerbose(`imessage pairing request sender=${senderId}`);
+            try {
+              await sendMessageIMessage(
+                sender,
+                [
+                  "Clawdbot: access not configured.",
+                  "",
+                  `Pairing code: ${code}`,
+                  "",
+                  "Ask the bot owner to approve with:",
+                  "clawdbot pairing approve --provider imessage <code>",
+                ].join("\n"),
+                {
+                  client,
+                  maxBytes: mediaMaxBytes,
+                  ...(chatId ? { chatId } : {}),
+                },
+              );
+            } catch (err) {
+              logVerbose(
+                `imessage pairing reply failed for ${senderId}: ${String(err)}`,
+              );
+            }
           }
         } else {
           logVerbose(
@@ -351,10 +351,11 @@ export async function monitorIMessageProvider(
           : normalizeIMessageHandle(sender),
       },
     });
+    const imessageTo = chatTarget || `imessage:${sender}`;
     const ctxPayload = {
       Body: body,
       From: isGroup ? `group:${chatId}` : `imessage:${sender}`,
-      To: chatTarget || `imessage:${sender}`,
+      To: imessageTo,
       SessionKey: route.sessionKey,
       AccountId: route.accountId,
       ChatType: isGroup ? "group" : "direct",
@@ -365,6 +366,7 @@ export async function monitorIMessageProvider(
       SenderName: sender,
       SenderId: sender,
       Provider: "imessage",
+      Surface: "imessage",
       MessageSid: message.id ? String(message.id) : undefined,
       Timestamp: createdAt,
       MediaPath: mediaPath,
@@ -372,6 +374,9 @@ export async function monitorIMessageProvider(
       MediaUrl: mediaPath,
       WasMentioned: mentioned,
       CommandAuthorized: commandAuthorized,
+      // Originating channel for reply routing.
+      OriginatingChannel: "imessage" as const,
+      OriginatingTo: imessageTo,
     };
 
     if (!isGroup) {
@@ -444,11 +449,17 @@ export async function monitorIMessageProvider(
   const abort = opts.abortSignal;
   const onAbort = () => {
     if (subscriptionId) {
-      void client.request("watch.unsubscribe", {
-        subscription: subscriptionId,
-      });
+      void client
+        .request("watch.unsubscribe", {
+          subscription: subscriptionId,
+        })
+        .catch(() => {
+          // Ignore disconnect errors during shutdown.
+        });
     }
-    void client.stop();
+    void client.stop().catch(() => {
+      // Ignore disconnect errors during shutdown.
+    });
   };
   abort?.addEventListener("abort", onAbort, { once: true });
 

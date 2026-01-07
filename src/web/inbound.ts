@@ -202,6 +202,9 @@ export async function monitorWebInbox(options: {
           : undefined);
       const isSamePhone = from === selfE164;
       const isSelfChat = isSelfChatMode(selfE164, configuredAllowFrom);
+      const isFromMe = Boolean(msg.key?.fromMe);
+      const selfChatMode = account.selfChatMode ?? false;
+      const selfPhoneMode = selfChatMode || isSelfChat;
 
       // Pre-compute normalized allowlists for filtering
       const dmHasWildcard = allowFrom?.includes("*") ?? false;
@@ -246,6 +249,12 @@ export async function monitorWebInbox(options: {
 
       // DM access control (secure defaults): "pairing" (default) / "allowlist" / "open" / "disabled"
       if (!group) {
+        if (isFromMe && !isSamePhone && selfPhoneMode) {
+          logVerbose(
+            "Skipping outbound self-phone DM (fromMe); no pairing reply needed.",
+          );
+          continue;
+        }
         if (dmPolicy === "disabled") {
           logVerbose("Blocked dm (dmPolicy: disabled)");
           continue;
@@ -258,31 +267,33 @@ export async function monitorWebInbox(options: {
               normalizedAllowFrom.includes(candidate));
           if (!allowed) {
             if (dmPolicy === "pairing") {
-              const { code } = await upsertProviderPairingRequest({
+              const { code, created } = await upsertProviderPairingRequest({
                 provider: "whatsapp",
                 id: candidate,
                 meta: {
                   name: (msg.pushName ?? "").trim() || undefined,
                 },
               });
-              logVerbose(
-                `whatsapp pairing request sender=${candidate} name=${msg.pushName ?? "unknown"} code=${code}`,
-              );
-              try {
-                await sock.sendMessage(remoteJid, {
-                  text: [
-                    "Clawdbot: access not configured.",
-                    "",
-                    `Pairing code: ${code}`,
-                    "",
-                    "Ask the bot owner to approve with:",
-                    "clawdbot pairing approve --provider whatsapp <code>",
-                  ].join("\n"),
-                });
-              } catch (err) {
+              if (created) {
                 logVerbose(
-                  `whatsapp pairing reply failed for ${candidate}: ${String(err)}`,
+                  `whatsapp pairing request sender=${candidate} name=${msg.pushName ?? "unknown"}`,
                 );
+                try {
+                  await sock.sendMessage(remoteJid, {
+                    text: [
+                      "Clawdbot: access not configured.",
+                      "",
+                      `Pairing code: ${code}`,
+                      "",
+                      "Ask the bot owner to approve with:",
+                      "clawdbot pairing approve --provider whatsapp <code>",
+                    ].join("\n"),
+                  });
+                } catch (err) {
+                  logVerbose(
+                    `whatsapp pairing reply failed for ${candidate}: ${String(err)}`,
+                  );
+                }
               }
             } else {
               logVerbose(
@@ -557,6 +568,30 @@ export async function monitorWebInbox(options: {
         },
       });
       return { messageId: result?.key?.id ?? "unknown" };
+    },
+    /**
+     * Send a reaction (emoji) to a specific message.
+     * Pass an empty string for emoji to remove the reaction.
+     */
+    sendReaction: async (
+      chatJid: string,
+      messageId: string,
+      emoji: string,
+      fromMe: boolean,
+      participant?: string,
+    ): Promise<void> => {
+      const jid = toWhatsappJid(chatJid);
+      await sock.sendMessage(jid, {
+        react: {
+          text: emoji,
+          key: {
+            remoteJid: jid,
+            id: messageId,
+            fromMe,
+            participant,
+          },
+        },
+      });
     },
     /**
      * Send typing indicator ("composing") to a chat.

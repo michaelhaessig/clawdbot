@@ -1,77 +1,85 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
-import type { ThinkLevel } from "../auto-reply/thinking.js";
+
 import {
-  isRateLimitAssistantError,
-  pickFallbackThinkingLevel,
+  buildBootstrapContextFiles,
+  formatAssistantErrorText,
+  isContextOverflowError,
 } from "./pi-embedded-helpers.js";
+import {
+  DEFAULT_AGENTS_FILENAME,
+  type WorkspaceBootstrapFile,
+} from "./workspace.js";
 
-const asAssistant = (overrides: Partial<AssistantMessage>) =>
-  ({
-    role: "assistant",
-    stopReason: "error",
-    ...overrides,
-  }) as AssistantMessage;
+const makeFile = (
+  overrides: Partial<WorkspaceBootstrapFile>,
+): WorkspaceBootstrapFile => ({
+  name: DEFAULT_AGENTS_FILENAME,
+  path: "/tmp/AGENTS.md",
+  content: "",
+  missing: false,
+  ...overrides,
+});
 
-describe("isRateLimitAssistantError", () => {
-  it("detects 429 rate limit payloads", () => {
-    const msg = asAssistant({
-      errorMessage:
-        '429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit. Please try again later."}}',
-    });
-    expect(isRateLimitAssistantError(msg)).toBe(true);
+describe("buildBootstrapContextFiles", () => {
+  it("keeps missing markers", () => {
+    const files = [makeFile({ missing: true, content: undefined })];
+    expect(buildBootstrapContextFiles(files)).toEqual([
+      {
+        path: DEFAULT_AGENTS_FILENAME,
+        content: "[MISSING] Expected at: /tmp/AGENTS.md",
+      },
+    ]);
   });
 
-  it("detects human-readable rate limit messages", () => {
-    const msg = asAssistant({
-      errorMessage: "Too many requests. Rate limit exceeded.",
-    });
-    expect(isRateLimitAssistantError(msg)).toBe(true);
+  it("skips empty or whitespace-only content", () => {
+    const files = [makeFile({ content: "   \n  " })];
+    expect(buildBootstrapContextFiles(files)).toEqual([]);
   });
 
-  it("detects quota exceeded messages", () => {
-    const msg = asAssistant({
-      errorMessage:
-        "You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors.",
-    });
-    expect(isRateLimitAssistantError(msg)).toBe(true);
-  });
-
-  it("returns false for non-error messages", () => {
-    const msg = asAssistant({
-      stopReason: "end_turn",
-      errorMessage: "rate limit",
-    });
-    expect(isRateLimitAssistantError(msg)).toBe(false);
+  it("truncates large bootstrap content", () => {
+    const head = `HEAD-${"a".repeat(6000)}`;
+    const tail = `${"b".repeat(3000)}-TAIL`;
+    const long = `${head}${tail}`;
+    const files = [makeFile({ content: long })];
+    const [result] = buildBootstrapContextFiles(files);
+    expect(result?.content).toContain(
+      "[...truncated, read AGENTS.md for full content...]",
+    );
+    expect(result?.content.length).toBeLessThan(long.length);
+    expect(result?.content.startsWith(long.slice(0, 120))).toBe(true);
+    expect(result?.content.endsWith(long.slice(-120))).toBe(true);
   });
 });
 
-describe("pickFallbackThinkingLevel", () => {
-  it("selects the first supported thinking level", () => {
-    const attempted = new Set<ThinkLevel>(["low"]);
-    const next = pickFallbackThinkingLevel({
-      message:
-        "Unsupported value: 'low' is not supported with the 'gpt-5.2-pro' model. Supported values are: 'medium', 'high', and 'xhigh'.",
-      attempted,
-    });
-    expect(next).toBe("medium");
+describe("isContextOverflowError", () => {
+  it("matches known overflow hints", () => {
+    const samples = [
+      "request_too_large",
+      "Request exceeds the maximum size",
+      "context length exceeded",
+      "Maximum context length",
+      "413 Request Entity Too Large",
+    ];
+    for (const sample of samples) {
+      expect(isContextOverflowError(sample)).toBe(true);
+    }
   });
 
-  it("skips already attempted levels", () => {
-    const attempted = new Set<ThinkLevel>(["low", "medium"]);
-    const next = pickFallbackThinkingLevel({
-      message: "Supported values are: 'medium', 'high', and 'xhigh'.",
-      attempted,
-    });
-    expect(next).toBe("high");
+  it("ignores unrelated errors", () => {
+    expect(isContextOverflowError("rate limit exceeded")).toBe(false);
   });
+});
 
-  it("returns undefined when no supported values are found", () => {
-    const attempted = new Set<ThinkLevel>(["low"]);
-    const next = pickFallbackThinkingLevel({
-      message: "Request failed.",
-      attempted,
-    });
-    expect(next).toBeUndefined();
+describe("formatAssistantErrorText", () => {
+  const makeAssistantError = (errorMessage: string): AssistantMessage =>
+    ({
+      stopReason: "error",
+      errorMessage,
+    }) as AssistantMessage;
+
+  it("returns a friendly message for context overflow", () => {
+    const msg = makeAssistantError("request_too_large");
+    expect(formatAssistantErrorText(msg)).toContain("Context overflow");
   });
 });

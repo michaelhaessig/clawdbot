@@ -1,3 +1,4 @@
+import ClawdbotProtocol
 import Foundation
 
 enum ClawdbotConfigFile {
@@ -32,7 +33,8 @@ enum ClawdbotConfigFile {
     }
 
     static func saveDict(_ dict: [String: Any]) {
-        if ProcessInfo.processInfo.isNixMode { return }
+        // Nix mode disables config writes in production, but tests rely on saving temp configs.
+        if ProcessInfo.processInfo.isNixMode, !ProcessInfo.processInfo.isRunningTests { return }
         do {
             let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
             let url = self.url()
@@ -121,6 +123,70 @@ enum ClawdbotConfigFile {
             return parsed
         }
         return nil
+    }
+
+    static func remoteGatewayPort() -> Int? {
+        guard let url = self.remoteGatewayUrl(),
+              let port = url.port,
+              port > 0
+        else { return nil }
+        return port
+    }
+
+    static func remoteGatewayPort(matchingHost sshHost: String) -> Int? {
+        let trimmedSshHost = sshHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSshHost.isEmpty,
+              let url = self.remoteGatewayUrl(),
+              let port = url.port,
+              port > 0,
+              let urlHost = url.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !urlHost.isEmpty
+        else {
+            return nil
+        }
+
+        let sshKey = Self.hostKey(trimmedSshHost)
+        let urlKey = Self.hostKey(urlHost)
+        guard !sshKey.isEmpty, !urlKey.isEmpty, sshKey == urlKey else { return nil }
+        return port
+    }
+
+    static func setRemoteGatewayUrl(host: String, port: Int?) {
+        guard let port, port > 0 else { return }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return }
+        self.updateGatewayDict { gateway in
+            var remote = gateway["remote"] as? [String: Any] ?? [:]
+            let existingUrl = (remote["url"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let scheme = URL(string: existingUrl)?.scheme ?? "ws"
+            remote["url"] = "\(scheme)://\(trimmedHost):\(port)"
+            gateway["remote"] = remote
+        }
+    }
+
+    private static func remoteGatewayUrl() -> URL? {
+        let root = self.loadDict()
+        guard let gateway = root["gateway"] as? [String: Any],
+              let remote = gateway["remote"] as? [String: Any],
+              let raw = remote["url"] as? String
+        else {
+            return nil
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return nil }
+        return url
+    }
+
+    private static func hostKey(_ host: String) -> String {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.contains(":") { return trimmed }
+        let digits = CharacterSet(charactersIn: "0123456789.")
+        if trimmed.rangeOfCharacter(from: digits.inverted) == nil {
+            return trimmed
+        }
+        return trimmed.split(separator: ".").first.map(String.init) ?? trimmed
     }
 
     private static func parseConfigData(_ data: Data) -> [String: Any]? {

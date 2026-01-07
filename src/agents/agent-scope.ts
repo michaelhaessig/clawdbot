@@ -21,16 +21,42 @@ export function resolveAgentIdFromSessionKey(
 export function resolveAgentConfig(
   cfg: ClawdbotConfig,
   agentId: string,
-): { workspace?: string; agentDir?: string } | undefined {
+):
+  | {
+      name?: string;
+      workspace?: string;
+      agentDir?: string;
+      model?: string;
+      sandbox?: {
+        mode?: "off" | "non-main" | "all";
+        workspaceAccess?: "none" | "ro" | "rw";
+        scope?: "session" | "agent" | "shared";
+        perSession?: boolean;
+        workspaceRoot?: string;
+        tools?: {
+          allow?: string[];
+          deny?: string[];
+        };
+      };
+      tools?: {
+        allow?: string[];
+        deny?: string[];
+      };
+    }
+  | undefined {
   const id = normalizeAgentId(agentId);
   const agents = cfg.routing?.agents;
   if (!agents || typeof agents !== "object") return undefined;
   const entry = agents[id];
   if (!entry || typeof entry !== "object") return undefined;
   return {
+    name: typeof entry.name === "string" ? entry.name : undefined,
     workspace:
       typeof entry.workspace === "string" ? entry.workspace : undefined,
     agentDir: typeof entry.agentDir === "string" ? entry.agentDir : undefined,
+    model: typeof entry.model === "string" ? entry.model : undefined,
+    sandbox: entry.sandbox,
+    tools: entry.tools,
   };
 }
 
@@ -52,4 +78,13 @@ export function resolveAgentDir(cfg: ClawdbotConfig, agentId: string) {
   if (configured) return resolveUserPath(configured);
   const root = resolveStateDir(process.env, os.homedir);
   return path.join(root, "agents", id, "agent");
+}
+
+/**
+ * Resolve the agent directory for the default agent without requiring config.
+ * Used by onboarding when writing auth profiles before config is fully set up.
+ */
+export function resolveDefaultAgentDir(): string {
+  const root = resolveStateDir(process.env, os.homedir);
+  return path.join(root, "agents", DEFAULT_AGENT_ID, "agent");
 }

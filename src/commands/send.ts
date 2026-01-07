@@ -2,8 +2,15 @@ import type { CliDeps } from "../cli/deps.js";
 import { loadConfig } from "../config/config.js";
 import { callGateway, randomIdempotencyKey } from "../gateway/call.js";
 import { success } from "../globals.js";
+import { deliverOutboundPayloads } from "../infra/outbound/deliver.js";
+import { buildOutboundResultEnvelope } from "../infra/outbound/envelope.js";
+import {
+  buildOutboundDeliveryJson,
+  formatGatewaySummary,
+  formatOutboundDeliverySummary,
+} from "../infra/outbound/format.js";
+import { resolveOutboundTarget } from "../infra/outbound/targets.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { resolveTelegramToken } from "../telegram/token.js";
 
 export async function sendCommand(
   opts: {
@@ -19,7 +26,8 @@ export async function sendCommand(
   deps: CliDeps,
   runtime: RuntimeEnv,
 ) {
-  const provider = (opts.provider ?? "whatsapp").toLowerCase();
+  const providerRaw = (opts.provider ?? "whatsapp").toLowerCase();
+  const provider = providerRaw === "imsg" ? "imessage" : providerRaw;
 
   if (opts.dryRun) {
     runtime.log(
@@ -28,133 +36,47 @@ export async function sendCommand(
     return;
   }
 
-  if (provider === "telegram") {
-    const { token } = resolveTelegramToken(loadConfig());
-    const result = await deps.sendMessageTelegram(opts.to, opts.message, {
-      token: token || undefined,
-      mediaUrl: opts.media,
+  if (
+    provider === "telegram" ||
+    provider === "discord" ||
+    provider === "slack" ||
+    provider === "signal" ||
+    provider === "imessage"
+  ) {
+    const resolvedTarget = resolveOutboundTarget({
+      provider,
+      to: opts.to,
     });
-    runtime.log(
-      success(
-        `✅ Sent via telegram. Message ID: ${result.messageId} (chat ${result.chatId})`,
-      ),
-    );
-    if (opts.json) {
-      runtime.log(
-        JSON.stringify(
-          {
-            provider: "telegram",
-            via: "direct",
-            to: opts.to,
-            chatId: result.chatId,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
-          null,
-          2,
-        ),
-      );
+    if (!resolvedTarget.ok) {
+      throw resolvedTarget.error;
     }
-    return;
-  }
-
-  if (provider === "discord") {
-    const result = await deps.sendMessageDiscord(opts.to, opts.message, {
-      token: process.env.DISCORD_BOT_TOKEN,
-      mediaUrl: opts.media,
+    const results = await deliverOutboundPayloads({
+      cfg: loadConfig(),
+      provider,
+      to: resolvedTarget.to,
+      payloads: [{ text: opts.message, mediaUrl: opts.media }],
+      deps: {
+        sendWhatsApp: deps.sendMessageWhatsApp,
+        sendTelegram: deps.sendMessageTelegram,
+        sendDiscord: deps.sendMessageDiscord,
+        sendSlack: deps.sendMessageSlack,
+        sendSignal: deps.sendMessageSignal,
+        sendIMessage: deps.sendMessageIMessage,
+      },
     });
-    runtime.log(
-      success(
-        `✅ Sent via discord. Message ID: ${result.messageId} (channel ${result.channelId})`,
-      ),
-    );
+    const last = results.at(-1);
+    const summary = formatOutboundDeliverySummary(provider, last);
+    runtime.log(success(summary));
     if (opts.json) {
       runtime.log(
         JSON.stringify(
-          {
-            provider: "discord",
+          buildOutboundDeliveryJson({
+            provider,
             via: "direct",
             to: opts.to,
-            channelId: result.channelId,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
-          null,
-          2,
-        ),
-      );
-    }
-    return;
-  }
-
-  if (provider === "slack") {
-    const result = await deps.sendMessageSlack(opts.to, opts.message, {
-      mediaUrl: opts.media,
-    });
-    runtime.log(
-      success(
-        `✅ Sent via slack. Message ID: ${result.messageId} (channel ${result.channelId})`,
-      ),
-    );
-    if (opts.json) {
-      runtime.log(
-        JSON.stringify(
-          {
-            provider: "slack",
-            via: "direct",
-            to: opts.to,
-            channelId: result.channelId,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
-          null,
-          2,
-        ),
-      );
-    }
-    return;
-  }
-
-  if (provider === "signal") {
-    const result = await deps.sendMessageSignal(opts.to, opts.message, {
-      mediaUrl: opts.media,
-    });
-    runtime.log(success(`✅ Sent via signal. Message ID: ${result.messageId}`));
-    if (opts.json) {
-      runtime.log(
-        JSON.stringify(
-          {
-            provider: "signal",
-            via: "direct",
-            to: opts.to,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
-          null,
-          2,
-        ),
-      );
-    }
-    return;
-  }
-
-  if (provider === "imessage" || provider === "imsg") {
-    const result = await deps.sendMessageIMessage(opts.to, opts.message, {
-      mediaUrl: opts.media,
-    });
-    runtime.log(
-      success(`✅ Sent via iMessage. Message ID: ${result.messageId}`),
-    );
-    if (opts.json) {
-      runtime.log(
-        JSON.stringify(
-          {
-            provider: "imessage",
-            via: "direct",
-            to: opts.to,
-            messageId: result.messageId,
-            mediaUrl: opts.media ?? null,
-          },
+            result: last,
+            mediaUrl: opts.media,
+          }),
           null,
           2,
         ),
@@ -187,19 +109,21 @@ export async function sendCommand(
 
   runtime.log(
     success(
-      `✅ Sent via gateway. Message ID: ${result.messageId ?? "unknown"}`,
+      formatGatewaySummary({ provider, messageId: result.messageId ?? null }),
     ),
   );
   if (opts.json) {
     runtime.log(
       JSON.stringify(
-        {
-          provider: "web",
-          via: "gateway",
-          to: opts.to,
-          messageId: result.messageId,
-          mediaUrl: opts.media ?? null,
-        },
+        buildOutboundResultEnvelope({
+          delivery: buildOutboundDeliveryJson({
+            provider,
+            via: "gateway",
+            to: opts.to,
+            result,
+            mediaUrl: opts.media ?? null,
+          }),
+        }),
         null,
         2,
       ),

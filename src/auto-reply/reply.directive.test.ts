@@ -15,6 +15,7 @@ import { drainSystemEvents } from "../infra/system-events.js";
 import {
   extractElevatedDirective,
   extractQueueDirective,
+  extractReasoningDirective,
   extractReplyToTag,
   extractThinkDirective,
   extractVerboseDirective,
@@ -97,6 +98,18 @@ describe("directive parsing", () => {
     const res = extractVerboseDirective(" please /verbose on now");
     expect(res.hasDirective).toBe(true);
     expect(res.verboseLevel).toBe("on");
+  });
+
+  it("matches reasoning directive", () => {
+    const res = extractReasoningDirective("/reasoning on please");
+    expect(res.hasDirective).toBe(true);
+    expect(res.reasoningLevel).toBe("on");
+  });
+
+  it("matches reasoning stream directive", () => {
+    const res = extractReasoningDirective("/reasoning stream please");
+    expect(res.hasDirective).toBe(true);
+    expect(res.reasoningLevel).toBe("stream");
   });
 
   it("matches elevated with leading space", () => {
@@ -512,7 +525,7 @@ describe("directive parsing", () => {
     await withTempHome(async (home) => {
       const storePath = path.join(home, "sessions.json");
       const ctx = {
-        Body: "please do the thing /verbose on",
+        Body: "please do the thing",
         From: "+1004",
         To: "+2000",
       };
@@ -545,6 +558,21 @@ describe("directive parsing", () => {
           },
         };
       });
+
+      await getReplyFromConfig(
+        { Body: "/verbose on", From: ctx.From, To: ctx.To },
+        {},
+        {
+          agent: {
+            model: "anthropic/claude-opus-4-5",
+            workspace: path.join(home, "clawd"),
+          },
+          whatsapp: {
+            allowFrom: ["*"],
+          },
+          session: { store: storePath },
+        },
+      );
 
       const res = await getReplyFromConfig(
         ctx,
@@ -827,7 +855,7 @@ describe("directive parsing", () => {
     });
   });
 
-  it("uses model override for inline /model", async () => {
+  it("ignores inline /model and uses the default model", async () => {
     await withTempHome(async (home) => {
       const storePath = path.join(home, "sessions.json");
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
@@ -867,8 +895,8 @@ describe("directive parsing", () => {
       expect(texts).toContain("done");
       expect(runEmbeddedPiAgent).toHaveBeenCalledOnce();
       const call = vi.mocked(runEmbeddedPiAgent).mock.calls[0]?.[0];
-      expect(call?.provider).toBe("openai");
-      expect(call?.model).toBe("gpt-4.1-mini");
+      expect(call?.provider).toBe("anthropic");
+      expect(call?.model).toBe("claude-opus-4-5");
     });
   });
 

@@ -33,6 +33,7 @@ export type SessionChatType = "direct" | "group" | "room";
 export type SessionEntry = {
   sessionId: string;
   updatedAt: number;
+  sessionFile?: string;
   /** Parent session key that spawned this session (used for sandbox session-tool scoping). */
   spawnedBy?: string;
   systemSent?: boolean;
@@ -40,6 +41,7 @@ export type SessionEntry = {
   chatType?: SessionChatType;
   thinkingLevel?: string;
   verboseLevel?: string;
+  reasoningLevel?: string;
   elevatedLevel?: string;
   providerOverride?: string;
   modelOverride?: string;
@@ -114,6 +116,14 @@ export function resolveSessionTranscriptsDir(
   return resolveAgentSessionsDir(DEFAULT_AGENT_ID, env, homedir);
 }
 
+export function resolveSessionTranscriptsDirForAgent(
+  agentId?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homedir: () => string = os.homedir,
+): string {
+  return resolveAgentSessionsDir(agentId, env, homedir);
+}
+
 export function resolveDefaultSessionStorePath(agentId?: string): string {
   return path.join(resolveAgentSessionsDir(agentId), "sessions.json");
 }
@@ -126,6 +136,17 @@ export function resolveSessionTranscriptPath(
   agentId?: string,
 ): string {
   return path.join(resolveAgentSessionsDir(agentId), `${sessionId}.jsonl`);
+}
+
+export function resolveSessionFilePath(
+  sessionId: string,
+  entry?: SessionEntry,
+  opts?: { agentId?: string },
+): string {
+  const candidate = entry?.sessionFile?.trim();
+  return candidate
+    ? candidate
+    : resolveSessionTranscriptPath(sessionId, opts?.agentId);
 }
 
 export function resolveStorePath(store?: string, opts?: { agentId?: string }) {
@@ -384,6 +405,7 @@ export async function updateLastRoute(params: {
   const next: SessionEntry = {
     sessionId: existing?.sessionId ?? crypto.randomUUID(),
     updatedAt: Math.max(existing?.updatedAt ?? 0, now),
+    sessionFile: existing?.sessionFile,
     systemSent: existing?.systemSent,
     abortedLastRun: existing?.abortedLastRun,
     thinkingLevel: existing?.thinkingLevel,

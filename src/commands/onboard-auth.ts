@@ -1,11 +1,14 @@
 import type { OAuthCredentials, OAuthProvider } from "@mariozechner/pi-ai";
+import { resolveDefaultAgentDir } from "../agents/agent-scope.js";
 import { upsertAuthProfile } from "../agents/auth-profiles.js";
 import type { ClawdbotConfig } from "../config/config.js";
 
 export async function writeOAuthCredentials(
   provider: OAuthProvider,
   creds: OAuthCredentials,
+  agentDir?: string,
 ): Promise<void> {
+  // Write to the multi-agent path so gateway finds credentials on startup
   upsertAuthProfile({
     profileId: `${provider}:${creds.email ?? "default"}`,
     credential: {
@@ -13,10 +16,12 @@ export async function writeOAuthCredentials(
       provider,
       ...creds,
     },
+    agentDir: agentDir ?? resolveDefaultAgentDir(),
   });
 }
 
-export async function setAnthropicApiKey(key: string) {
+export async function setAnthropicApiKey(key: string, agentDir?: string) {
+  // Write to the multi-agent path so gateway finds credentials on startup
   upsertAuthProfile({
     profileId: "anthropic:default",
     credential: {
@@ -24,6 +29,7 @@ export async function setAnthropicApiKey(key: string) {
       provider: "anthropic",
       key,
     },
+    agentDir: agentDir ?? resolveDefaultAgentDir(),
   });
 }
 
@@ -67,7 +73,9 @@ export function applyAuthProfileConfig(
   };
 }
 
-export function applyMinimaxConfig(cfg: ClawdbotConfig): ClawdbotConfig {
+export function applyMinimaxProviderConfig(
+  cfg: ClawdbotConfig,
+): ClawdbotConfig {
   const models = { ...cfg.agent?.models };
   models["anthropic/claude-opus-4-5"] = {
     ...models["anthropic/claude-opus-4-5"],
@@ -102,21 +110,31 @@ export function applyMinimaxConfig(cfg: ClawdbotConfig): ClawdbotConfig {
     ...cfg,
     agent: {
       ...cfg.agent,
-      model: {
-        ...(cfg.agent?.model &&
-        "fallbacks" in (cfg.agent.model as Record<string, unknown>)
-          ? {
-              fallbacks: (cfg.agent.model as { fallbacks?: string[] })
-                .fallbacks,
-            }
-          : undefined),
-        primary: "lmstudio/minimax-m2.1-gs32",
-      },
       models,
     },
     models: {
       mode: cfg.models?.mode ?? "merge",
       providers,
+    },
+  };
+}
+
+export function applyMinimaxConfig(cfg: ClawdbotConfig): ClawdbotConfig {
+  const next = applyMinimaxProviderConfig(cfg);
+  return {
+    ...next,
+    agent: {
+      ...next.agent,
+      model: {
+        ...(next.agent?.model &&
+        "fallbacks" in (next.agent.model as Record<string, unknown>)
+          ? {
+              fallbacks: (next.agent.model as { fallbacks?: string[] })
+                .fallbacks,
+            }
+          : undefined),
+        primary: "lmstudio/minimax-m2.1-gs32",
+      },
     },
   };
 }

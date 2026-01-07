@@ -2,8 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { confirm, intro, note, outro } from "@clack/prompts";
-
+import { confirm, intro, note, outro, select } from "@clack/prompts";
+import {
+  ensureAuthProfileStore,
+  repairOAuthProfileIdMismatch,
+} from "../agents/auth-profiles.js";
 import {
   DEFAULT_SANDBOX_BROWSER_IMAGE,
   DEFAULT_SANDBOX_COMMON_IMAGE,
@@ -34,6 +37,11 @@ import { defaultRuntime } from "../runtime.js";
 import { readTelegramAllowFromStore } from "../telegram/pairing-store.js";
 import { resolveTelegramToken } from "../telegram/token.js";
 import { normalizeE164, resolveUserPath, sleep } from "../utils.js";
+import {
+  DEFAULT_GATEWAY_DAEMON_RUNTIME,
+  GATEWAY_DAEMON_RUNTIME_OPTIONS,
+  type GatewayDaemonRuntime,
+} from "./daemon-runtime.js";
 import {
   detectLegacyStateMigrations,
   runLegacyStateMigrations,
@@ -341,7 +349,67 @@ async function runSandboxScript(
 
 type DoctorOptions = {
   workspaceSuggestions?: boolean;
+  yes?: boolean;
+  nonInteractive?: boolean;
 };
+
+type DoctorPrompter = {
+  confirm: (params: Parameters<typeof confirm>[0]) => Promise<boolean>;
+  confirmSkipInNonInteractive: (
+    params: Parameters<typeof confirm>[0],
+  ) => Promise<boolean>;
+  select: <T>(params: Parameters<typeof select>[0], fallback: T) => Promise<T>;
+};
+
+function createDoctorPrompter(params: {
+  runtime: RuntimeEnv;
+  options: DoctorOptions;
+}): DoctorPrompter {
+  const yes = params.options.yes === true;
+  const requestedNonInteractive = params.options.nonInteractive === true;
+  const isTty = Boolean(process.stdin.isTTY);
+  const nonInteractive = requestedNonInteractive || (!isTty && !yes);
+
+  const canPrompt = isTty && !yes && !nonInteractive;
+  const confirmDefault = async (p: Parameters<typeof confirm>[0]) => {
+    if (!canPrompt) return Boolean(p.initialValue ?? false);
+    return guardCancel(await confirm(p), params.runtime) === true;
+  };
+
+  return {
+    confirm: confirmDefault,
+    confirmSkipInNonInteractive: async (p) => {
+      if (nonInteractive) return false;
+      return confirmDefault(p);
+    },
+    select: async <T>(p: Parameters<typeof select>[0], fallback: T) => {
+      if (!canPrompt) return fallback;
+      return guardCancel(await select(p), params.runtime) as T;
+    },
+  };
+}
+
+async function maybeRepairAnthropicOAuthProfileId(
+  cfg: ClawdbotConfig,
+  prompter: DoctorPrompter,
+): Promise<ClawdbotConfig> {
+  const store = ensureAuthProfileStore();
+  const repair = repairOAuthProfileIdMismatch({
+    cfg,
+    store,
+    provider: "anthropic",
+    legacyProfileId: "anthropic:default",
+  });
+  if (!repair.migrated || repair.changes.length === 0) return cfg;
+
+  note(repair.changes.map((c) => `- ${c}`).join("\n"), "Auth profiles");
+  const apply = await prompter.confirm({
+    message: "Update Anthropic OAuth profile id in config now?",
+    initialValue: true,
+  });
+  if (!apply) return cfg;
+  return repair.config;
+}
 
 const MEMORY_SYSTEM_PROMPT = [
   "Memory system not found in workspace.",
@@ -458,6 +526,7 @@ type SandboxImageCheck = {
 async function handleMissingSandboxImage(
   params: SandboxImageCheck,
   runtime: RuntimeEnv,
+  prompter: DoctorPrompter,
 ) {
   const exists = await dockerImageExists(params.image);
   if (exists) return;
@@ -472,13 +541,10 @@ async function handleMissingSandboxImage(
 
   let built = false;
   if (params.buildScript) {
-    const build = guardCancel(
-      await confirm({
-        message: `Build ${params.label} sandbox image now?`,
-        initialValue: true,
-      }),
-      runtime,
-    );
+    const build = await prompter.confirmSkipInNonInteractive({
+      message: `Build ${params.label} sandbox image now?`,
+      initialValue: true,
+    });
     if (build) {
       built = await runSandboxScript(params.buildScript, runtime);
     }
@@ -491,13 +557,10 @@ async function handleMissingSandboxImage(
   const legacyExists = await dockerImageExists(legacyImage);
   if (!legacyExists) return;
 
-  const fallback = guardCancel(
-    await confirm({
-      message: `Switch config to legacy image ${legacyImage}?`,
-      initialValue: false,
-    }),
-    runtime,
-  );
+  const fallback = await prompter.confirmSkipInNonInteractive({
+    message: `Switch config to legacy image ${legacyImage}?`,
+    initialValue: false,
+  });
   if (!fallback) return;
 
   params.updateConfig(legacyImage);
@@ -506,6 +569,7 @@ async function handleMissingSandboxImage(
 async function maybeRepairSandboxImages(
   cfg: ClawdbotConfig,
   runtime: RuntimeEnv,
+  prompter: DoctorPrompter,
 ): Promise<ClawdbotConfig> {
   const sandbox = cfg.agent?.sandbox;
   const mode = sandbox?.mode ?? "off";
@@ -537,6 +601,7 @@ async function maybeRepairSandboxImages(
       },
     },
     runtime,
+    prompter,
   );
 
   if (sandbox.browser?.enabled) {
@@ -551,6 +616,7 @@ async function maybeRepairSandboxImages(
         },
       },
       runtime,
+      prompter,
     );
   }
 
@@ -712,6 +778,7 @@ async function maybeMigrateLegacyConfigFile(runtime: RuntimeEnv) {
 async function maybeMigrateLegacyGatewayService(
   cfg: ClawdbotConfig,
   runtime: RuntimeEnv,
+  prompter: DoctorPrompter,
 ) {
   const legacyServices = await findLegacyGatewayServices(process.env);
   if (legacyServices.length === 0) return;
@@ -723,13 +790,10 @@ async function maybeMigrateLegacyGatewayService(
     "Legacy Clawdis services detected",
   );
 
-  const migrate = guardCancel(
-    await confirm({
-      message: "Migrate legacy Clawdis services to Clawdbot now?",
-      initialValue: true,
-    }),
-    runtime,
-  );
+  const migrate = await prompter.confirmSkipInNonInteractive({
+    message: "Migrate legacy Clawdis services to Clawdbot now?",
+    initialValue: true,
+  });
   if (!migrate) return;
 
   try {
@@ -759,21 +823,30 @@ async function maybeMigrateLegacyGatewayService(
     return;
   }
 
-  const install = guardCancel(
-    await confirm({
-      message: "Install Clawdbot gateway service now?",
-      initialValue: true,
-    }),
-    runtime,
-  );
+  const install = await prompter.confirmSkipInNonInteractive({
+    message: "Install Clawdbot gateway service now?",
+    initialValue: true,
+  });
   if (!install) return;
 
+  const daemonRuntime = await prompter.select<GatewayDaemonRuntime>(
+    {
+      message: "Gateway daemon runtime",
+      options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
+      initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+    },
+    DEFAULT_GATEWAY_DAEMON_RUNTIME,
+  );
   const devMode =
     process.argv[1]?.includes(`${path.sep}src${path.sep}`) &&
     process.argv[1]?.endsWith(".ts");
   const port = resolveGatewayPort(cfg, process.env);
   const { programArguments, workingDirectory } =
-    await resolveGatewayProgramArguments({ port, dev: devMode });
+    await resolveGatewayProgramArguments({
+      port,
+      dev: devMode,
+      runtime: daemonRuntime,
+    });
   const environment: Record<string, string | undefined> = {
     PATH: process.env.PATH,
     CLAWDBOT_GATEWAY_TOKEN:
@@ -794,6 +867,7 @@ export async function doctorCommand(
   runtime: RuntimeEnv = defaultRuntime,
   options: DoctorOptions = {},
 ) {
+  const prompter = createDoctorPrompter({ runtime, options });
   printWizardHeader(runtime);
   intro("Clawdbot doctor");
 
@@ -816,13 +890,10 @@ export async function doctorCommand(
         .join("\n"),
       "Legacy config keys detected",
     );
-    const migrate = guardCancel(
-      await confirm({
-        message: "Migrate legacy config entries now?",
-        initialValue: true,
-      }),
-      runtime,
-    );
+    const migrate = await prompter.confirm({
+      message: "Migrate legacy config entries now?",
+      initialValue: true,
+    });
     if (migrate) {
       // Legacy migration (2026-01-02, commit: 16420e5b) — normalize per-provider allowlists; move WhatsApp gating into whatsapp.allowFrom.
       const { config: migrated, changes } = migrateLegacyConfig(
@@ -843,16 +914,15 @@ export async function doctorCommand(
     cfg = normalized.config;
   }
 
+  cfg = await maybeRepairAnthropicOAuthProfileId(cfg, prompter);
+
   const legacyState = await detectLegacyStateMigrations({ cfg });
   if (legacyState.preview.length > 0) {
     note(legacyState.preview.join("\n"), "Legacy state detected");
-    const migrate = guardCancel(
-      await confirm({
-        message: "Migrate legacy state (sessions/agent/WhatsApp auth) now?",
-        initialValue: true,
-      }),
-      runtime,
-    );
+    const migrate = await prompter.confirm({
+      message: "Migrate legacy state (sessions/agent/WhatsApp auth) now?",
+      initialValue: true,
+    });
     if (migrate) {
       const migrated = await runLegacyStateMigrations({
         detected: legacyState,
@@ -866,13 +936,17 @@ export async function doctorCommand(
     }
   }
 
-  cfg = await maybeRepairSandboxImages(cfg, runtime);
+  cfg = await maybeRepairSandboxImages(cfg, runtime, prompter);
 
-  await maybeMigrateLegacyGatewayService(cfg, runtime);
+  await maybeMigrateLegacyGatewayService(cfg, runtime, prompter);
 
   await noteSecurityWarnings(cfg);
 
-  if (process.platform === "linux" && resolveMode(cfg) === "local") {
+  if (
+    options.nonInteractive !== true &&
+    process.platform === "linux" &&
+    resolveMode(cfg) === "local"
+  ) {
     const service = resolveGatewayService();
     let loaded = false;
     try {
@@ -884,7 +958,7 @@ export async function doctorCommand(
       await ensureSystemdUserLingerInteractive({
         runtime,
         prompter: {
-          confirm: async (p) => guardCancel(await confirm(p), runtime) === true,
+          confirm: async (p) => prompter.confirm(p),
           note,
         },
         reason:
@@ -938,13 +1012,10 @@ export async function doctorCommand(
           "Gateway",
         );
       }
-      const restart = guardCancel(
-        await confirm({
-          message: "Restart gateway daemon now?",
-          initialValue: true,
-        }),
-        runtime,
-      );
+      const restart = await prompter.confirmSkipInNonInteractive({
+        message: "Restart gateway daemon now?",
+        initialValue: true,
+      });
       if (restart) {
         await service.restart({ stdout: process.stdout });
         await sleep(1500);

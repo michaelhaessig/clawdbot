@@ -17,6 +17,7 @@ import {
 } from "../../agents/pi-embedded.js";
 import { normalizeGroupActivation } from "../../auto-reply/group-activation.js";
 import {
+  normalizeReasoningLevel,
   normalizeThinkLevel,
   normalizeVerboseLevel,
 } from "../../auto-reply/thinking.js";
@@ -211,6 +212,28 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       }
     }
 
+    if ("reasoningLevel" in p) {
+      const raw = p.reasoningLevel;
+      if (raw === null) {
+        delete next.reasoningLevel;
+      } else if (raw !== undefined) {
+        const normalized = normalizeReasoningLevel(String(raw));
+        if (!normalized) {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              'invalid reasoningLevel (use "on"|"off"|"stream")',
+            ),
+          );
+          return;
+        }
+        if (normalized === "off") delete next.reasoningLevel;
+        else next.reasoningLevel = normalized;
+      }
+    }
+
     if ("model" in p) {
       const raw = p.model;
       if (raw === null) {
@@ -370,6 +393,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       abortedLastRun: false,
       thinkingLevel: entry?.thinkingLevel,
       verboseLevel: entry?.verboseLevel,
+      reasoningLevel: entry?.reasoningLevel,
       model: entry?.model,
       contextTokens: entry?.contextTokens,
       sendPolicy: entry?.sendPolicy,
@@ -461,6 +485,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       for (const candidate of resolveSessionTranscriptCandidates(
         sessionId,
         storePath,
+        entry?.sessionFile,
         target.agentId,
       )) {
         if (!fs.existsSync(candidate)) continue;
@@ -535,6 +560,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const filePath = resolveSessionTranscriptCandidates(
       sessionId,
       storePath,
+      entry?.sessionFile,
       target.agentId,
     ).find((candidate) => fs.existsSync(candidate));
     if (!filePath) {

@@ -10,12 +10,35 @@ import lockfile from "proper-lockfile";
 
 import type { ClawdbotConfig } from "../config/config.js";
 import { resolveOAuthPath } from "../config/paths.js";
+import type { AuthProfileConfig } from "../config/types.js";
+import { createSubsystemLogger } from "../logging.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveClawdbotAgentDir } from "./agent-paths.js";
+import { normalizeProviderId } from "./model-selection.js";
 
 const AUTH_STORE_VERSION = 1;
 const AUTH_PROFILE_FILENAME = "auth-profiles.json";
 const LEGACY_AUTH_FILENAME = "auth.json";
+
+// External CLI credential file locations
+const CLAUDE_CLI_CREDENTIALS_RELATIVE_PATH = ".claude/.credentials.json";
+const CODEX_CLI_AUTH_RELATIVE_PATH = ".codex/auth.json";
+
+export const CLAUDE_CLI_PROFILE_ID = "anthropic:claude-cli";
+export const CODEX_CLI_PROFILE_ID = "openai-codex:codex-cli";
+
+const AUTH_STORE_LOCK_OPTIONS = {
+  retries: {
+    retries: 10,
+    factor: 2,
+    minTimeout: 100,
+    maxTimeout: 10_000,
+    randomize: true,
+  },
+  stale: 30_000,
+} as const;
+
+const log = createSubsystemLogger("agents/auth-profiles");
 
 export type ApiKeyCredential = {
   type: "api_key";
@@ -87,6 +110,45 @@ function ensureAuthStoreFile(pathname: string) {
   saveJsonFile(pathname, payload);
 }
 
+function syncAuthProfileStore(
+  target: AuthProfileStore,
+  source: AuthProfileStore,
+): void {
+  target.version = source.version;
+  target.profiles = source.profiles;
+  target.lastGood = source.lastGood;
+  target.usageStats = source.usageStats;
+}
+
+async function updateAuthProfileStoreWithLock(params: {
+  agentDir?: string;
+  updater: (store: AuthProfileStore) => boolean;
+}): Promise<AuthProfileStore | null> {
+  const authPath = resolveAuthStorePath(params.agentDir);
+  ensureAuthStoreFile(authPath);
+
+  let release: (() => Promise<void>) | undefined;
+  try {
+    release = await lockfile.lock(authPath, AUTH_STORE_LOCK_OPTIONS);
+    const store = ensureAuthProfileStore(params.agentDir);
+    const shouldSave = params.updater(store);
+    if (shouldSave) {
+      saveAuthProfileStore(store, params.agentDir);
+    }
+    return store;
+  } catch {
+    return null;
+  } finally {
+    if (release) {
+      try {
+        await release();
+      } catch {
+        // ignore unlock errors
+      }
+    }
+  }
+}
+
 function buildOAuthApiKey(
   provider: OAuthProvider,
   credentials: OAuthCredentials,
@@ -112,14 +174,7 @@ async function refreshOAuthTokenWithLock(params: {
   let release: (() => Promise<void>) | undefined;
   try {
     release = await lockfile.lock(authPath, {
-      retries: {
-        retries: 10,
-        factor: 2,
-        minTimeout: 100,
-        maxTimeout: 10_000,
-        randomize: true,
-      },
-      stale: 30_000,
+      ...AUTH_STORE_LOCK_OPTIONS,
     });
 
     const store = ensureAuthProfileStore(params.agentDir);
@@ -220,11 +275,177 @@ function mergeOAuthFileIntoStore(store: AuthProfileStore): boolean {
   return mutated;
 }
 
+/**
+ * Read Anthropic OAuth credentials from Claude CLI's credential file.
+ * Claude CLI stores credentials at ~/.claude/.credentials.json
+ */
+function readClaudeCliCredentials(): OAuthCredential | null {
+  const credPath = path.join(
+    resolveUserPath("~"),
+    CLAUDE_CLI_CREDENTIALS_RELATIVE_PATH,
+  );
+  const raw = loadJsonFile(credPath);
+  if (!raw || typeof raw !== "object") return null;
+
+  const data = raw as Record<string, unknown>;
+  const claudeOauth = data.claudeAiOauth as Record<string, unknown> | undefined;
+  if (!claudeOauth || typeof claudeOauth !== "object") return null;
+
+  const accessToken = claudeOauth.accessToken;
+  const refreshToken = claudeOauth.refreshToken;
+  const expiresAt = claudeOauth.expiresAt;
+
+  if (typeof accessToken !== "string" || !accessToken) return null;
+  if (typeof refreshToken !== "string" || !refreshToken) return null;
+  if (typeof expiresAt !== "number" || expiresAt <= 0) return null;
+
+  return {
+    type: "oauth",
+    provider: "anthropic",
+    access: accessToken,
+    refresh: refreshToken,
+    expires: expiresAt,
+  };
+}
+
+/**
+ * Read OpenAI Codex OAuth credentials from Codex CLI's auth file.
+ * Codex CLI stores credentials at ~/.codex/auth.json
+ */
+function readCodexCliCredentials(): OAuthCredential | null {
+  const authPath = path.join(
+    resolveUserPath("~"),
+    CODEX_CLI_AUTH_RELATIVE_PATH,
+  );
+  const raw = loadJsonFile(authPath);
+  if (!raw || typeof raw !== "object") return null;
+
+  const data = raw as Record<string, unknown>;
+  const tokens = data.tokens as Record<string, unknown> | undefined;
+  if (!tokens || typeof tokens !== "object") return null;
+
+  const accessToken = tokens.access_token;
+  const refreshToken = tokens.refresh_token;
+
+  if (typeof accessToken !== "string" || !accessToken) return null;
+  if (typeof refreshToken !== "string" || !refreshToken) return null;
+
+  // Codex CLI doesn't store expiry, estimate 1 hour from file mtime or now
+  let expires: number;
+  try {
+    const stat = fs.statSync(authPath);
+    // Assume token is valid for ~1 hour from when the file was last modified
+    expires = stat.mtimeMs + 60 * 60 * 1000;
+  } catch {
+    expires = Date.now() + 60 * 60 * 1000;
+  }
+
+  return {
+    type: "oauth",
+    provider: "openai-codex" as unknown as OAuthProvider,
+    access: accessToken,
+    refresh: refreshToken,
+    expires,
+  };
+}
+
+function shallowEqualOAuthCredentials(
+  a: OAuthCredential | undefined,
+  b: OAuthCredential,
+): boolean {
+  if (!a) return false;
+  if (a.type !== "oauth") return false;
+  return (
+    a.provider === b.provider &&
+    a.access === b.access &&
+    a.refresh === b.refresh &&
+    a.expires === b.expires &&
+    a.email === b.email &&
+    a.enterpriseUrl === b.enterpriseUrl &&
+    a.projectId === b.projectId &&
+    a.accountId === b.accountId
+  );
+}
+
+/**
+ * Sync OAuth credentials from external CLI tools (Claude CLI, Codex CLI) into the store.
+ * This allows clawdbot to use the same credentials as these tools without requiring
+ * separate authentication, and keeps credentials in sync when CLI tools refresh tokens.
+ *
+ * Returns true if any credentials were updated.
+ */
+function syncExternalCliCredentials(store: AuthProfileStore): boolean {
+  let mutated = false;
+  const now = Date.now();
+
+  // Sync from Claude CLI
+  const claudeCreds = readClaudeCliCredentials();
+  if (claudeCreds) {
+    const existing = store.profiles[CLAUDE_CLI_PROFILE_ID];
+    const existingOAuth = existing?.type === "oauth" ? existing : undefined;
+
+    // Update if: no existing profile, existing is not oauth, or CLI has newer/valid token
+    const shouldUpdate =
+      !existingOAuth ||
+      existingOAuth.provider !== "anthropic" ||
+      existingOAuth.expires <= now ||
+      (claudeCreds.expires > now &&
+        claudeCreds.expires > existingOAuth.expires);
+
+    if (
+      shouldUpdate &&
+      !shallowEqualOAuthCredentials(existingOAuth, claudeCreds)
+    ) {
+      store.profiles[CLAUDE_CLI_PROFILE_ID] = claudeCreds;
+      mutated = true;
+      log.info("synced anthropic credentials from claude cli", {
+        profileId: CLAUDE_CLI_PROFILE_ID,
+        expires: new Date(claudeCreds.expires).toISOString(),
+      });
+    }
+  }
+
+  // Sync from Codex CLI
+  const codexCreds = readCodexCliCredentials();
+  if (codexCreds) {
+    const existing = store.profiles[CODEX_CLI_PROFILE_ID];
+    const existingOAuth = existing?.type === "oauth" ? existing : undefined;
+
+    // Codex creds don't carry expiry; use file mtime heuristic for freshness.
+    const shouldUpdate =
+      !existingOAuth ||
+      existingOAuth.provider !== ("openai-codex" as unknown as OAuthProvider) ||
+      existingOAuth.expires <= now ||
+      codexCreds.expires > existingOAuth.expires;
+
+    if (
+      shouldUpdate &&
+      !shallowEqualOAuthCredentials(existingOAuth, codexCreds)
+    ) {
+      store.profiles[CODEX_CLI_PROFILE_ID] = codexCreds;
+      mutated = true;
+      log.info("synced openai-codex credentials from codex cli", {
+        profileId: CODEX_CLI_PROFILE_ID,
+        expires: new Date(codexCreds.expires).toISOString(),
+      });
+    }
+  }
+
+  return mutated;
+}
+
 export function loadAuthProfileStore(): AuthProfileStore {
   const authPath = resolveAuthStorePath();
   const raw = loadJsonFile(authPath);
   const asStore = coerceAuthStore(raw);
-  if (asStore) return asStore;
+  if (asStore) {
+    // Sync from external CLI tools on every load
+    const synced = syncExternalCliCredentials(asStore);
+    if (synced) {
+      saveJsonFile(authPath, asStore);
+    }
+    return asStore;
+  }
 
   const legacyRaw = loadJsonFile(resolveLegacyAuthStorePath());
   const legacy = coerceLegacyStore(legacyRaw);
@@ -256,17 +477,27 @@ export function loadAuthProfileStore(): AuthProfileStore {
         };
       }
     }
+    syncExternalCliCredentials(store);
     return store;
   }
 
-  return { version: AUTH_STORE_VERSION, profiles: {} };
+  const store: AuthProfileStore = { version: AUTH_STORE_VERSION, profiles: {} };
+  syncExternalCliCredentials(store);
+  return store;
 }
 
 export function ensureAuthProfileStore(agentDir?: string): AuthProfileStore {
   const authPath = resolveAuthStorePath(agentDir);
   const raw = loadJsonFile(authPath);
   const asStore = coerceAuthStore(raw);
-  if (asStore) return asStore;
+  if (asStore) {
+    // Sync from external CLI tools on every load
+    const synced = syncExternalCliCredentials(asStore);
+    if (synced) {
+      saveJsonFile(authPath, asStore);
+    }
+    return asStore;
+  }
 
   const legacyRaw = loadJsonFile(resolveLegacyAuthStorePath(agentDir));
   const legacy = coerceLegacyStore(legacyRaw);
@@ -301,10 +532,29 @@ export function ensureAuthProfileStore(agentDir?: string): AuthProfileStore {
   }
 
   const mergedOAuth = mergeOAuthFileIntoStore(store);
-  const shouldWrite = legacy !== null || mergedOAuth;
+  const syncedCli = syncExternalCliCredentials(store);
+  const shouldWrite = legacy !== null || mergedOAuth || syncedCli;
   if (shouldWrite) {
     saveJsonFile(authPath, store);
   }
+
+  // PR #368: legacy auth.json could get re-migrated from other agent dirs,
+  // overwriting fresh OAuth creds with stale tokens (fixes #363). Delete only
+  // after we've successfully written auth-profiles.json.
+  if (shouldWrite && legacy !== null) {
+    const legacyPath = resolveLegacyAuthStorePath(agentDir);
+    try {
+      fs.unlinkSync(legacyPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        log.warn("failed to delete legacy auth.json after migration", {
+          err,
+          legacyPath,
+        });
+      }
+    }
+  }
+
   return store;
 }
 
@@ -336,8 +586,9 @@ export function listProfilesForProvider(
   store: AuthProfileStore,
   provider: string,
 ): string[] {
+  const providerKey = normalizeProviderId(provider);
   return Object.entries(store.profiles)
-    .filter(([, cred]) => cred.provider === provider)
+    .filter(([, cred]) => normalizeProviderId(cred.provider) === providerKey)
     .map(([id]) => id);
 }
 
@@ -355,13 +606,32 @@ export function isProfileInCooldown(
 
 /**
  * Mark a profile as successfully used. Resets error count and updates lastUsed.
+ * Uses store lock to avoid overwriting concurrent usage updates.
  */
-export function markAuthProfileUsed(params: {
+export async function markAuthProfileUsed(params: {
   store: AuthProfileStore;
   profileId: string;
   agentDir?: string;
-}): void {
+}): Promise<void> {
   const { store, profileId, agentDir } = params;
+  const updated = await updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => {
+      if (!freshStore.profiles[profileId]) return false;
+      freshStore.usageStats = freshStore.usageStats ?? {};
+      freshStore.usageStats[profileId] = {
+        ...freshStore.usageStats[profileId],
+        lastUsed: Date.now(),
+        errorCount: 0,
+        cooldownUntil: undefined,
+      };
+      return true;
+    },
+  });
+  if (updated) {
+    syncAuthProfileStore(store, updated);
+    return;
+  }
   if (!store.profiles[profileId]) return;
 
   store.usageStats = store.usageStats ?? {};
@@ -385,13 +655,38 @@ export function calculateAuthProfileCooldownMs(errorCount: number): number {
 /**
  * Mark a profile as failed/rate-limited. Applies exponential backoff cooldown.
  * Cooldown times: 1min, 5min, 25min, max 1 hour.
+ * Uses store lock to avoid overwriting concurrent usage updates.
  */
-export function markAuthProfileCooldown(params: {
+export async function markAuthProfileCooldown(params: {
   store: AuthProfileStore;
   profileId: string;
   agentDir?: string;
-}): void {
+}): Promise<void> {
   const { store, profileId, agentDir } = params;
+  const updated = await updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => {
+      if (!freshStore.profiles[profileId]) return false;
+
+      freshStore.usageStats = freshStore.usageStats ?? {};
+      const existing = freshStore.usageStats[profileId] ?? {};
+      const errorCount = (existing.errorCount ?? 0) + 1;
+
+      // Exponential backoff: 1min, 5min, 25min, capped at 1h
+      const backoffMs = calculateAuthProfileCooldownMs(errorCount);
+
+      freshStore.usageStats[profileId] = {
+        ...existing,
+        errorCount,
+        cooldownUntil: Date.now() + backoffMs,
+      };
+      return true;
+    },
+  });
+  if (updated) {
+    syncAuthProfileStore(store, updated);
+    return;
+  }
   if (!store.profiles[profileId]) return;
 
   store.usageStats = store.usageStats ?? {};
@@ -411,13 +706,31 @@ export function markAuthProfileCooldown(params: {
 
 /**
  * Clear cooldown for a profile (e.g., manual reset).
+ * Uses store lock to avoid overwriting concurrent usage updates.
  */
-export function clearAuthProfileCooldown(params: {
+export async function clearAuthProfileCooldown(params: {
   store: AuthProfileStore;
   profileId: string;
   agentDir?: string;
-}): void {
+}): Promise<void> {
   const { store, profileId, agentDir } = params;
+  const updated = await updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => {
+      if (!freshStore.usageStats?.[profileId]) return false;
+
+      freshStore.usageStats[profileId] = {
+        ...freshStore.usageStats[profileId],
+        errorCount: 0,
+        cooldownUntil: undefined,
+      };
+      return true;
+    },
+  });
+  if (updated) {
+    syncAuthProfileStore(store, updated);
+    return;
+  }
   if (!store.usageStats?.[profileId]) return;
 
   store.usageStats[profileId] = {
@@ -435,22 +748,33 @@ export function resolveAuthProfileOrder(params: {
   preferredProfile?: string;
 }): string[] {
   const { cfg, store, provider, preferredProfile } = params;
-  const configuredOrder = cfg?.auth?.order?.[provider];
+  const providerKey = normalizeProviderId(provider);
+  const configuredOrder = (() => {
+    const order = cfg?.auth?.order;
+    if (!order) return undefined;
+    for (const [key, value] of Object.entries(order)) {
+      if (normalizeProviderId(key) === providerKey) return value;
+    }
+    return undefined;
+  })();
   const explicitProfiles = cfg?.auth?.profiles
     ? Object.entries(cfg.auth.profiles)
-        .filter(([, profile]) => profile.provider === provider)
+        .filter(
+          ([, profile]) =>
+            normalizeProviderId(profile.provider) === providerKey,
+        )
         .map(([profileId]) => profileId)
     : [];
   const baseOrder =
     configuredOrder ??
     (explicitProfiles.length > 0
       ? explicitProfiles
-      : listProfilesForProvider(store, provider));
+      : listProfilesForProvider(store, providerKey));
   if (baseOrder.length === 0) return [];
 
   const filtered = baseOrder.filter((profileId) => {
     const cred = store.profiles[profileId];
-    return cred ? cred.provider === provider : true;
+    return cred ? normalizeProviderId(cred.provider) === providerKey : true;
   });
   const deduped: string[] = [];
   for (const entry of filtered) {
@@ -500,7 +824,7 @@ function orderProfilesByMode(
   }
 
   // Sort available profiles by lastUsed (oldest first = round-robin)
-  // Then by type (oauth preferred over api_key)
+  // Then by lastUsed (oldest first = round-robin within type)
   const scored = available.map((profileId) => {
     const type = store.profiles[profileId]?.type;
     const typeScore = type === "oauth" ? 0 : type === "api_key" ? 1 : 2;
@@ -508,14 +832,14 @@ function orderProfilesByMode(
     return { profileId, typeScore, lastUsed };
   });
 
-  // Primary sort: lastUsed (oldest first for round-robin)
-  // Secondary sort: type preference (oauth > api_key)
+  // Primary sort: type preference (oauth > api_key).
+  // Secondary sort: lastUsed (oldest first for round-robin within type).
   const sorted = scored
     .sort((a, b) => {
-      // First by lastUsed (oldest first)
-      if (a.lastUsed !== b.lastUsed) return a.lastUsed - b.lastUsed;
-      // Then by type
-      return a.typeScore - b.typeScore;
+      // First by type (oauth > api_key)
+      if (a.typeScore !== b.typeScore) return a.typeScore - b.typeScore;
+      // Then by lastUsed (oldest first)
+      return a.lastUsed - b.lastUsed;
     })
     .map((entry) => entry.profileId);
 
@@ -577,21 +901,60 @@ export async function resolveApiKeyForProfile(params: {
         email: refreshed.email ?? cred.email,
       };
     }
+    const fallbackProfileId = suggestOAuthProfileIdForLegacyDefault({
+      cfg,
+      store: refreshedStore,
+      provider: cred.provider,
+      legacyProfileId: profileId,
+    });
+    if (fallbackProfileId && fallbackProfileId !== profileId) {
+      try {
+        const fallbackResolved = await tryResolveOAuthProfile({
+          cfg,
+          store: refreshedStore,
+          profileId: fallbackProfileId,
+          agentDir: params.agentDir,
+        });
+        if (fallbackResolved) return fallbackResolved;
+      } catch {
+        // keep original error
+      }
+    }
     const message = error instanceof Error ? error.message : String(error);
+    const hint = formatAuthDoctorHint({
+      cfg,
+      store: refreshedStore,
+      provider: cred.provider,
+      profileId,
+    });
     throw new Error(
       `OAuth token refresh failed for ${cred.provider}: ${message}. ` +
-        "Please try again or re-authenticate.",
+        "Please try again or re-authenticate." +
+        (hint ? `\n\n${hint}` : ""),
     );
   }
 }
 
-export function markAuthProfileGood(params: {
+export async function markAuthProfileGood(params: {
   store: AuthProfileStore;
   provider: string;
   profileId: string;
   agentDir?: string;
-}): void {
+}): Promise<void> {
   const { store, provider, profileId, agentDir } = params;
+  const updated = await updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => {
+      const profile = freshStore.profiles[profileId];
+      if (!profile || profile.provider !== provider) return false;
+      freshStore.lastGood = { ...freshStore.lastGood, [provider]: profileId };
+      return true;
+    },
+  });
+  if (updated) {
+    syncAuthProfileStore(store, updated);
+    return;
+  }
   const profile = store.profiles[profileId];
   if (!profile || profile.provider !== provider) return;
   store.lastGood = { ...store.lastGood, [provider]: profileId };
@@ -614,4 +977,235 @@ export function resolveAuthProfileDisplayLabel(params: {
   const email = configEmail || profile?.email?.trim();
   if (email) return `${profileId} (${email})`;
   return profileId;
+}
+
+async function tryResolveOAuthProfile(params: {
+  cfg?: ClawdbotConfig;
+  store: AuthProfileStore;
+  profileId: string;
+  agentDir?: string;
+}): Promise<{ apiKey: string; provider: string; email?: string } | null> {
+  const { cfg, store, profileId } = params;
+  const cred = store.profiles[profileId];
+  if (!cred || cred.type !== "oauth") return null;
+  const profileConfig = cfg?.auth?.profiles?.[profileId];
+  if (profileConfig && profileConfig.provider !== cred.provider) return null;
+  if (profileConfig && profileConfig.mode !== cred.type) return null;
+
+  if (Date.now() < cred.expires) {
+    return {
+      apiKey: buildOAuthApiKey(cred.provider, cred),
+      provider: cred.provider,
+      email: cred.email,
+    };
+  }
+
+  const refreshed = await refreshOAuthTokenWithLock({
+    profileId,
+    provider: cred.provider,
+    agentDir: params.agentDir,
+  });
+  if (!refreshed) return null;
+  return {
+    apiKey: refreshed.apiKey,
+    provider: cred.provider,
+    email: cred.email,
+  };
+}
+
+function getProfileSuffix(profileId: string): string {
+  const idx = profileId.indexOf(":");
+  if (idx < 0) return "";
+  return profileId.slice(idx + 1);
+}
+
+function isEmailLike(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return trimmed.includes("@") && trimmed.includes(".");
+}
+
+export function suggestOAuthProfileIdForLegacyDefault(params: {
+  cfg?: ClawdbotConfig;
+  store: AuthProfileStore;
+  provider: string;
+  legacyProfileId: string;
+}): string | null {
+  const providerKey = normalizeProviderId(params.provider);
+  const legacySuffix = getProfileSuffix(params.legacyProfileId);
+  if (legacySuffix !== "default") return null;
+
+  const legacyCfg = params.cfg?.auth?.profiles?.[params.legacyProfileId];
+  if (
+    legacyCfg &&
+    normalizeProviderId(legacyCfg.provider) === providerKey &&
+    legacyCfg.mode !== "oauth"
+  ) {
+    return null;
+  }
+
+  const oauthProfiles = listProfilesForProvider(
+    params.store,
+    providerKey,
+  ).filter((id) => params.store.profiles[id]?.type === "oauth");
+  if (oauthProfiles.length === 0) return null;
+
+  const configuredEmail = legacyCfg?.email?.trim();
+  if (configuredEmail) {
+    const byEmail = oauthProfiles.find((id) => {
+      const cred = params.store.profiles[id];
+      if (!cred || cred.type !== "oauth") return false;
+      const email = cred.email?.trim();
+      return (
+        email === configuredEmail || id === `${providerKey}:${configuredEmail}`
+      );
+    });
+    if (byEmail) return byEmail;
+  }
+
+  const lastGood =
+    params.store.lastGood?.[providerKey] ??
+    params.store.lastGood?.[params.provider];
+  if (lastGood && oauthProfiles.includes(lastGood)) return lastGood;
+
+  const nonLegacy = oauthProfiles.filter((id) => id !== params.legacyProfileId);
+  if (nonLegacy.length === 1) return nonLegacy[0] ?? null;
+
+  const emailLike = nonLegacy.filter((id) => isEmailLike(getProfileSuffix(id)));
+  if (emailLike.length === 1) return emailLike[0] ?? null;
+
+  return null;
+}
+
+export type AuthProfileIdRepairResult = {
+  config: ClawdbotConfig;
+  changes: string[];
+  migrated: boolean;
+  fromProfileId?: string;
+  toProfileId?: string;
+};
+
+export function repairOAuthProfileIdMismatch(params: {
+  cfg: ClawdbotConfig;
+  store: AuthProfileStore;
+  provider: string;
+  legacyProfileId?: string;
+}): AuthProfileIdRepairResult {
+  const legacyProfileId =
+    params.legacyProfileId ?? `${normalizeProviderId(params.provider)}:default`;
+  const legacyCfg = params.cfg.auth?.profiles?.[legacyProfileId];
+  if (!legacyCfg) {
+    return { config: params.cfg, changes: [], migrated: false };
+  }
+  if (legacyCfg.mode !== "oauth") {
+    return { config: params.cfg, changes: [], migrated: false };
+  }
+  if (
+    normalizeProviderId(legacyCfg.provider) !==
+    normalizeProviderId(params.provider)
+  ) {
+    return { config: params.cfg, changes: [], migrated: false };
+  }
+
+  const toProfileId = suggestOAuthProfileIdForLegacyDefault({
+    cfg: params.cfg,
+    store: params.store,
+    provider: params.provider,
+    legacyProfileId,
+  });
+  if (!toProfileId || toProfileId === legacyProfileId) {
+    return { config: params.cfg, changes: [], migrated: false };
+  }
+
+  const toCred = params.store.profiles[toProfileId];
+  const toEmail = toCred?.type === "oauth" ? toCred.email?.trim() : undefined;
+
+  const nextProfiles = {
+    ...(params.cfg.auth?.profiles as
+      | Record<string, AuthProfileConfig>
+      | undefined),
+  } as Record<string, AuthProfileConfig>;
+  delete nextProfiles[legacyProfileId];
+  nextProfiles[toProfileId] = {
+    ...legacyCfg,
+    ...(toEmail ? { email: toEmail } : {}),
+  };
+
+  const providerKey = normalizeProviderId(params.provider);
+  const nextOrder = (() => {
+    const order = params.cfg.auth?.order;
+    if (!order) return undefined;
+    const resolvedKey = Object.keys(order).find(
+      (key) => normalizeProviderId(key) === providerKey,
+    );
+    if (!resolvedKey) return order;
+    const existing = order[resolvedKey];
+    if (!Array.isArray(existing)) return order;
+    const replaced = existing
+      .map((id) => (id === legacyProfileId ? toProfileId : id))
+      .filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0,
+      );
+    const deduped: string[] = [];
+    for (const entry of replaced) {
+      if (!deduped.includes(entry)) deduped.push(entry);
+    }
+    return { ...order, [resolvedKey]: deduped };
+  })();
+
+  const nextCfg: ClawdbotConfig = {
+    ...params.cfg,
+    auth: {
+      ...params.cfg.auth,
+      profiles: nextProfiles,
+      ...(nextOrder ? { order: nextOrder } : {}),
+    },
+  };
+
+  const changes = [
+    `Auth: migrate ${legacyProfileId} → ${toProfileId} (OAuth profile id)`,
+  ];
+
+  return {
+    config: nextCfg,
+    changes,
+    migrated: true,
+    fromProfileId: legacyProfileId,
+    toProfileId,
+  };
+}
+
+export function formatAuthDoctorHint(params: {
+  cfg?: ClawdbotConfig;
+  store: AuthProfileStore;
+  provider: string;
+  profileId?: string;
+}): string {
+  const providerKey = normalizeProviderId(params.provider);
+  if (providerKey !== "anthropic") return "";
+
+  const legacyProfileId = params.profileId ?? "anthropic:default";
+  const suggested = suggestOAuthProfileIdForLegacyDefault({
+    cfg: params.cfg,
+    store: params.store,
+    provider: providerKey,
+    legacyProfileId,
+  });
+  if (!suggested || suggested === legacyProfileId) return "";
+
+  const storeOauthProfiles = listProfilesForProvider(params.store, providerKey)
+    .filter((id) => params.store.profiles[id]?.type === "oauth")
+    .join(", ");
+
+  const cfgMode = params.cfg?.auth?.profiles?.[legacyProfileId]?.mode;
+  const cfgProvider = params.cfg?.auth?.profiles?.[legacyProfileId]?.provider;
+
+  return [
+    "Doctor hint (for GitHub issue):",
+    `- provider: ${providerKey}`,
+    `- config: ${legacyProfileId}${cfgProvider || cfgMode ? ` (provider=${cfgProvider ?? "?"}, mode=${cfgMode ?? "?"})` : ""}`,
+    `- auth store oauth profiles: ${storeOauthProfiles || "(none)"}`,
+    `- suggested profile: ${suggested}`,
+    'Fix: run "clawdbot doctor --yes"',
+  ].join("\n");
 }

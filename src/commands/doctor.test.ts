@@ -1,7 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+let originalIsTTY: boolean | undefined;
+
+function setStdinTty(value: boolean | undefined) {
+  try {
+    Object.defineProperty(process.stdin, "isTTY", {
+      value,
+      configurable: true,
+    });
+  } catch {
+    // ignore
+  }
+}
+
+beforeEach(() => {
+  originalIsTTY = process.stdin.isTTY;
+  setStdinTty(true);
+});
+
+afterEach(() => {
+  setStdinTty(originalIsTTY);
+});
 
 const readConfigFileSnapshot = vi.fn();
 const confirm = vi.fn().mockResolvedValue(true);
+const select = vi.fn().mockResolvedValue("node");
 const writeConfigFile = vi.fn().mockResolvedValue(undefined);
 const migrateLegacyConfig = vi.fn((raw: unknown) => ({
   config: raw as Record<string, unknown>,
@@ -16,6 +39,10 @@ const runCommandWithTimeout = vi.fn().mockResolvedValue({
   signal: null,
   killed: false,
 });
+
+const ensureAuthProfileStore = vi
+  .fn()
+  .mockReturnValue({ version: 1, profiles: {} });
 
 const legacyReadConfigFileSnapshot = vi.fn().mockResolvedValue({
   path: "/tmp/clawdis.json",
@@ -47,6 +74,7 @@ vi.mock("@clack/prompts", () => ({
   intro: vi.fn(),
   note: vi.fn(),
   outro: vi.fn(),
+  select,
 }));
 
 vi.mock("../agents/skills-status.js", () => ({
@@ -78,6 +106,14 @@ vi.mock("../process/exec.js", () => ({
   runExec,
   runCommandWithTimeout,
 }));
+
+vi.mock("../agents/auth-profiles.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ensureAuthProfileStore,
+  };
+});
 
 vi.mock("../daemon/service.js", () => ({
   resolveGatewayService: () => ({
@@ -440,5 +476,202 @@ describe("doctor", () => {
 
     expect(docker.image).toBe("clawdis-sandbox-common:bookworm-slim");
     expect(runCommandWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it("runs legacy state migrations in non-interactive mode without prompting", async () => {
+    readConfigFileSnapshot.mockResolvedValue({
+      path: "/tmp/clawdbot.json",
+      exists: true,
+      raw: "{}",
+      parsed: {},
+      valid: true,
+      config: {},
+      issues: [],
+      legacyIssues: [],
+    });
+
+    const { doctorCommand } = await import("./doctor.js");
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    const { detectLegacyStateMigrations, runLegacyStateMigrations } =
+      await import("./doctor-state-migrations.js");
+    detectLegacyStateMigrations.mockResolvedValueOnce({
+      targetAgentId: "main",
+      targetMainKey: "main",
+      stateDir: "/tmp/state",
+      oauthDir: "/tmp/oauth",
+      sessions: {
+        legacyDir: "/tmp/state/sessions",
+        legacyStorePath: "/tmp/state/sessions/sessions.json",
+        targetDir: "/tmp/state/agents/main/sessions",
+        targetStorePath: "/tmp/state/agents/main/sessions/sessions.json",
+        hasLegacy: true,
+      },
+      agentDir: {
+        legacyDir: "/tmp/state/agent",
+        targetDir: "/tmp/state/agents/main/agent",
+        hasLegacy: false,
+      },
+      whatsappAuth: {
+        legacyDir: "/tmp/oauth",
+        targetDir: "/tmp/oauth/whatsapp/default",
+        hasLegacy: false,
+      },
+      preview: ["- Legacy sessions detected"],
+    });
+    runLegacyStateMigrations.mockResolvedValueOnce({
+      changes: ["migrated"],
+      warnings: [],
+    });
+
+    confirm.mockClear();
+
+    await doctorCommand(runtime, { nonInteractive: true });
+
+    expect(runLegacyStateMigrations).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("runs legacy state migrations in yes mode without prompting", async () => {
+    readConfigFileSnapshot.mockResolvedValue({
+      path: "/tmp/clawdbot.json",
+      exists: true,
+      raw: "{}",
+      parsed: {},
+      valid: true,
+      config: {},
+      issues: [],
+      legacyIssues: [],
+    });
+
+    const { doctorCommand } = await import("./doctor.js");
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    const { detectLegacyStateMigrations, runLegacyStateMigrations } =
+      await import("./doctor-state-migrations.js");
+    detectLegacyStateMigrations.mockResolvedValueOnce({
+      targetAgentId: "main",
+      targetMainKey: "main",
+      stateDir: "/tmp/state",
+      oauthDir: "/tmp/oauth",
+      sessions: {
+        legacyDir: "/tmp/state/sessions",
+        legacyStorePath: "/tmp/state/sessions/sessions.json",
+        targetDir: "/tmp/state/agents/main/sessions",
+        targetStorePath: "/tmp/state/agents/main/sessions/sessions.json",
+        hasLegacy: true,
+      },
+      agentDir: {
+        legacyDir: "/tmp/state/agent",
+        targetDir: "/tmp/state/agents/main/agent",
+        hasLegacy: false,
+      },
+      whatsappAuth: {
+        legacyDir: "/tmp/oauth",
+        targetDir: "/tmp/oauth/whatsapp/default",
+        hasLegacy: false,
+      },
+      preview: ["- Legacy sessions detected"],
+    });
+    runLegacyStateMigrations.mockResolvedValueOnce({
+      changes: ["migrated"],
+      warnings: [],
+    });
+
+    runLegacyStateMigrations.mockClear();
+    confirm.mockClear();
+
+    await doctorCommand(runtime, { yes: true });
+
+    expect(runLegacyStateMigrations).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("skips gateway restarts in non-interactive mode", async () => {
+    readConfigFileSnapshot.mockResolvedValue({
+      path: "/tmp/clawdbot.json",
+      exists: true,
+      raw: "{}",
+      parsed: {},
+      valid: true,
+      config: {},
+      issues: [],
+      legacyIssues: [],
+    });
+
+    const { healthCommand } = await import("./health.js");
+    healthCommand.mockRejectedValueOnce(new Error("gateway closed"));
+
+    serviceIsLoaded.mockResolvedValueOnce(true);
+    serviceRestart.mockClear();
+    confirm.mockClear();
+
+    const { doctorCommand } = await import("./doctor.js");
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    await doctorCommand(runtime, { nonInteractive: true });
+
+    expect(serviceRestart).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("migrates anthropic oauth config profile id when only email profile exists", async () => {
+    readConfigFileSnapshot.mockResolvedValue({
+      path: "/tmp/clawdbot.json",
+      exists: true,
+      raw: "{}",
+      parsed: {},
+      valid: true,
+      config: {
+        auth: {
+          profiles: {
+            "anthropic:default": { provider: "anthropic", mode: "oauth" },
+          },
+        },
+      },
+      issues: [],
+      legacyIssues: [],
+    });
+
+    ensureAuthProfileStore.mockReturnValueOnce({
+      version: 1,
+      profiles: {
+        "anthropic:me@example.com": {
+          type: "oauth",
+          provider: "anthropic",
+          access: "access",
+          refresh: "refresh",
+          expires: Date.now() + 60_000,
+          email: "me@example.com",
+        },
+      },
+    });
+
+    const { doctorCommand } = await import("./doctor.js");
+    await doctorCommand(
+      { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+      { yes: true },
+    );
+
+    const written = writeConfigFile.mock.calls.at(-1)?.[0] as Record<
+      string,
+      unknown
+    >;
+    const profiles = (written.auth as { profiles: Record<string, unknown> })
+      .profiles;
+    expect(profiles["anthropic:me@example.com"]).toBeTruthy();
+    expect(profiles["anthropic:default"]).toBeUndefined();
   });
 });

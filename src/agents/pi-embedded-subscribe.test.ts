@@ -129,6 +129,44 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(payload.text).toBe("Hello block");
   });
 
+  it("prepends reasoning before text when enabled", () => {
+    let handler: ((evt: unknown) => void) | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const onBlockReply = vi.fn();
+
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<
+        typeof subscribeEmbeddedPiSession
+      >[0]["session"],
+      runId: "run",
+      onBlockReply,
+      blockReplyBreak: "message_end",
+      reasoningMode: "on",
+    });
+
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Because it helps" },
+        { type: "text", text: "Final answer" },
+      ],
+    } as AssistantMessage;
+
+    handler?.({ type: "message_end", message: assistantMessage });
+
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
+    const payload = onBlockReply.mock.calls[0][0];
+    expect(payload.text).toBe(
+      "_Reasoning:_\n_Because it helps_\n\nFinal answer",
+    );
+  });
+
   it("emits block replies on text_end and does not duplicate on message_end", () => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
@@ -360,6 +398,40 @@ describe("subscribeEmbeddedPiSession", () => {
     handler?.({ type: "message_end", message: assistantMessage });
 
     expect(subscription.assistantTexts).toEqual(["Hello world"]);
+  });
+
+  it("populates assistantTexts for non-streaming models with chunking enabled", () => {
+    // Non-streaming models (e.g. zai/glm-4.7): no text_delta events; message_end
+    // must still populate assistantTexts so providers can deliver a final reply.
+    let handler: SessionEventHandler | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const subscription = subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<
+        typeof subscribeEmbeddedPiSession
+      >[0]["session"],
+      runId: "run",
+      blockReplyChunking: { minChars: 50, maxChars: 200 }, // Chunking enabled
+    });
+
+    // Simulate non-streaming model: only message_start and message_end, no text_delta
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+
+    const assistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "Response from non-streaming model" }],
+    } as AssistantMessage;
+
+    handler?.({ type: "message_end", message: assistantMessage });
+
+    expect(subscription.assistantTexts).toEqual([
+      "Response from non-streaming model",
+    ]);
   });
 
   it("does not append when text_end content is a prefix of deltas", () => {

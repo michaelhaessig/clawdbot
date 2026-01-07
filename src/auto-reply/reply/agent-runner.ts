@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
@@ -9,6 +10,7 @@ import {
 import { hasNonzeroUsage } from "../../agents/usage.js";
 import {
   loadSessionStore,
+  resolveSessionTranscriptPath,
   type SessionEntry,
   saveSessionStore,
 } from "../../config/sessions.js";
@@ -30,6 +32,21 @@ import {
 import { extractReplyToTag } from "./reply-tags.js";
 import { incrementCompactionCount } from "./session-updates.js";
 import type { TypingController } from "./typing.js";
+
+const BUN_FETCH_SOCKET_ERROR_RE = /socket connection was closed unexpectedly/i;
+
+const isBunFetchSocketError = (message?: string) =>
+  Boolean(message && BUN_FETCH_SOCKET_ERROR_RE.test(message));
+
+const formatBunFetchSocketError = (message: string) => {
+  const trimmed = message.trim();
+  return [
+    "⚠️ LLM connection failed. This could be due to server issues, network problems, or context length exceeded (e.g., with local LLMs like LM Studio). Original error:",
+    "```",
+    trimmed || "Unknown error",
+    "```",
+  ].join("\n");
+};
 
 export async function runReplyAgent(params: {
   commandBody: string;
@@ -180,6 +197,9 @@ export async function runReplyAgent(params: {
     let fallbackProvider = followupRun.run.provider;
     let fallbackModel = followupRun.run.model;
     try {
+      const allowPartialStream = !(
+        followupRun.run.reasoningLevel === "stream" && opts?.onReasoningStream
+      );
       const fallbackResult = await runWithModelFallback({
         cfg: followupRun.run.config,
         provider: followupRun.run.provider,
@@ -204,37 +224,47 @@ export async function runReplyAgent(params: {
             authProfileId: followupRun.run.authProfileId,
             thinkLevel: followupRun.run.thinkLevel,
             verboseLevel: followupRun.run.verboseLevel,
+            reasoningLevel: followupRun.run.reasoningLevel,
             bashElevated: followupRun.run.bashElevated,
             timeoutMs: followupRun.run.timeoutMs,
             runId,
             blockReplyBreak: resolvedBlockStreamingBreak,
             blockReplyChunking,
-            onPartialReply: opts?.onPartialReply
-              ? async (payload) => {
-                  let text = payload.text;
-                  if (!isHeartbeat && text?.includes("HEARTBEAT_OK")) {
-                    const stripped = stripHeartbeatToken(text, {
-                      mode: "message",
+            onPartialReply:
+              opts?.onPartialReply && allowPartialStream
+                ? async (payload) => {
+                    let text = payload.text;
+                    if (!isHeartbeat && text?.includes("HEARTBEAT_OK")) {
+                      const stripped = stripHeartbeatToken(text, {
+                        mode: "message",
+                      });
+                      if (stripped.didStrip && !didLogHeartbeatStrip) {
+                        didLogHeartbeatStrip = true;
+                        logVerbose(
+                          "Stripped stray HEARTBEAT_OK token from reply",
+                        );
+                      }
+                      if (
+                        stripped.shouldSkip &&
+                        (payload.mediaUrls?.length ?? 0) === 0
+                      ) {
+                        return;
+                      }
+                      text = stripped.text;
+                    }
+                    if (!isHeartbeat) {
+                      await typing.startTypingOnText(text);
+                    }
+                    await opts.onPartialReply?.({
+                      text,
+                      mediaUrls: payload.mediaUrls,
                     });
-                    if (stripped.didStrip && !didLogHeartbeatStrip) {
-                      didLogHeartbeatStrip = true;
-                      logVerbose(
-                        "Stripped stray HEARTBEAT_OK token from reply",
-                      );
-                    }
-                    if (
-                      stripped.shouldSkip &&
-                      (payload.mediaUrls?.length ?? 0) === 0
-                    ) {
-                      return;
-                    }
-                    text = stripped.text;
                   }
-                  if (!isHeartbeat) {
-                    await typing.startTypingOnText(text);
-                  }
-                  await opts.onPartialReply?.({
-                    text,
+                : undefined,
+            onReasoningStream: opts?.onReasoningStream
+              ? async (payload) => {
+                  await opts.onReasoningStream?.({
+                    text: payload.text,
                     mediaUrls: payload.mediaUrls,
                   });
                 }
@@ -363,6 +393,42 @@ export async function runReplyAgent(params: {
       const message = err instanceof Error ? err.message : String(err);
       const isContextOverflow =
         /context.*overflow|too large|context window/i.test(message);
+      const isSessionCorruption =
+        /function call turn comes immediately after/i.test(message);
+
+      // Auto-recover from Gemini session corruption by resetting the session
+      if (isSessionCorruption && sessionKey && sessionStore && storePath) {
+        const corruptedSessionId = sessionEntry?.sessionId;
+        defaultRuntime.error(
+          `Session history corrupted (Gemini function call ordering). Resetting session: ${sessionKey}`,
+        );
+
+        try {
+          // Delete transcript file if it exists
+          if (corruptedSessionId) {
+            const transcriptPath =
+              resolveSessionTranscriptPath(corruptedSessionId);
+            try {
+              fs.unlinkSync(transcriptPath);
+            } catch {
+              // Ignore if file doesn't exist
+            }
+          }
+
+          // Remove session entry from store
+          delete sessionStore[sessionKey];
+          await saveSessionStore(storePath, sessionStore);
+        } catch (cleanupErr) {
+          defaultRuntime.error(
+            `Failed to reset corrupted session ${sessionKey}: ${String(cleanupErr)}`,
+          );
+        }
+
+        return finalizeWithFollowup({
+          text: "⚠️ Session history was corrupted. I've reset the conversation - please try again!",
+        });
+      }
+
       defaultRuntime.error(`Embedded agent failed before reply: ${message}`);
       return finalizeWithFollowup({
         text: isContextOverflow
@@ -401,8 +467,14 @@ export async function runReplyAgent(params: {
     const sanitizedPayloads = isHeartbeat
       ? payloadArray
       : payloadArray.flatMap((payload) => {
-          const text = payload.text;
-          if (!text || !text.includes("HEARTBEAT_OK")) return [payload];
+          let text = payload.text;
+
+          if (payload.isError && text && isBunFetchSocketError(text)) {
+            text = formatBunFetchSocketError(text);
+          }
+
+          if (!text || !text.includes("HEARTBEAT_OK"))
+            return [{ ...payload, text }];
           const stripped = stripHeartbeatToken(text, { mode: "message" });
           if (stripped.didStrip && !didLogHeartbeatStrip) {
             didLogHeartbeatStrip = true;

@@ -15,6 +15,7 @@ vi.mock("../agents/pi-embedded.js", () => ({
 }));
 
 import {
+  abortEmbeddedPiRun,
   compactEmbeddedPiSession,
   runEmbeddedPiAgent,
 } from "../agents/pi-embedded.js";
@@ -39,6 +40,7 @@ async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   process.env.HOME = base;
   try {
     vi.mocked(runEmbeddedPiAgent).mockClear();
+    vi.mocked(abortEmbeddedPiRun).mockClear();
     return await fn(base);
   } finally {
     process.env.HOME = previousHome;
@@ -81,6 +83,69 @@ describe("trigger handling", () => {
     });
   });
 
+  it("handles /stop without invoking the agent", async () => {
+    await withTempHome(async (home) => {
+      const res = await getReplyFromConfig(
+        {
+          Body: "/stop",
+          From: "+1003",
+          To: "+2000",
+        },
+        {},
+        makeCfg(home),
+      );
+      const text = Array.isArray(res) ? res[0]?.text : res?.text;
+      expect(text).toBe("⚙️ Agent was aborted.");
+      expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
+    });
+  });
+
+  it("targets the active session for native /stop", async () => {
+    await withTempHome(async (home) => {
+      const cfg = makeCfg(home);
+      const targetSessionKey = "agent:main:telegram:group:123";
+      const targetSessionId = "session-target";
+      await fs.writeFile(
+        cfg.session.store,
+        JSON.stringify(
+          {
+            [targetSessionKey]: {
+              sessionId: targetSessionId,
+              updatedAt: Date.now(),
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const res = await getReplyFromConfig(
+        {
+          Body: "/stop",
+          From: "telegram:111",
+          To: "telegram:111",
+          ChatType: "direct",
+          Provider: "telegram",
+          Surface: "telegram",
+          SessionKey: "telegram:slash:111",
+          CommandSource: "native",
+          CommandTargetSessionKey: targetSessionKey,
+          CommandAuthorized: true,
+        },
+        {},
+        cfg,
+      );
+
+      const text = Array.isArray(res) ? res[0]?.text : res?.text;
+      expect(text).toBe("⚙️ Agent was aborted.");
+      expect(vi.mocked(abortEmbeddedPiRun)).toHaveBeenCalledWith(
+        targetSessionId,
+      );
+      const store = loadSessionStore(cfg.session.store);
+      expect(store[targetSessionKey]?.abortedLastRun).toBe(true);
+    });
+  });
+
   it("restarts even with prefix/whitespace", async () => {
     await withTempHome(async (home) => {
       const res = await getReplyFromConfig(
@@ -110,13 +175,20 @@ describe("trigger handling", () => {
         makeCfg(home),
       );
       const text = Array.isArray(res) ? res[0]?.text : res?.text;
-      expect(text).toContain("Status");
+      expect(text).toContain("ClawdBot");
       expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
     });
   });
 
-  it("reports status when /status appears inline", async () => {
+  it("ignores inline /status and runs the agent", async () => {
     await withTempHome(async (home) => {
+      vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
+        payloads: [{ text: "ok" }],
+        meta: {
+          durationMs: 1,
+          agentMeta: { sessionId: "s", provider: "p", model: "m" },
+        },
+      });
       const res = await getReplyFromConfig(
         {
           Body: "please /status now",
@@ -127,8 +199,8 @@ describe("trigger handling", () => {
         makeCfg(home),
       );
       const text = Array.isArray(res) ? res[0]?.text : res?.text;
-      expect(text).toContain("Status");
-      expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
+      expect(text).not.toContain("Status");
+      expect(runEmbeddedPiAgent).toHaveBeenCalled();
     });
   });
 
@@ -265,8 +337,15 @@ describe("trigger handling", () => {
     });
   });
 
-  it("rejects elevated inline directive for unapproved sender", async () => {
+  it("ignores inline elevated directive for unapproved sender", async () => {
     await withTempHome(async (home) => {
+      vi.mocked(runEmbeddedPiAgent).mockResolvedValue({
+        payloads: [{ text: "ok" }],
+        meta: {
+          durationMs: 1,
+          agentMeta: { sessionId: "s", provider: "p", model: "m" },
+        },
+      });
       const cfg = {
         agent: {
           model: "anthropic/claude-opus-4-5",
@@ -293,8 +372,8 @@ describe("trigger handling", () => {
         cfg,
       );
       const text = Array.isArray(res) ? res[0]?.text : res?.text;
-      expect(text).toBe("elevated is not available right now.");
-      expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
+      expect(text).not.toBe("elevated is not available right now.");
+      expect(runEmbeddedPiAgent).toHaveBeenCalled();
     });
   });
 
@@ -927,7 +1006,7 @@ describe("trigger handling", () => {
 
 describe("group intro prompts", () => {
   const groupParticipationNote =
-    "Be a good group participant: lurk and follow the conversation, but only chime in when you have something genuinely helpful or relevant to add. Don't feel obligated to respond to every message — quality over quantity. Even when lurking silently, you can use emoji reactions to acknowledge messages, show support, or react to humor — reactions are always appreciated and don't clutter the chat.";
+    "Be a good group participant: mostly lurk and follow the conversation; reply only when directly addressed or you can add clear value. Emoji reactions are welcome when available.";
   it("labels Discord groups using the surface metadata", async () => {
     await withTempHome(async (home) => {
       vi.mocked(runEmbeddedPiAgent).mockResolvedValue({

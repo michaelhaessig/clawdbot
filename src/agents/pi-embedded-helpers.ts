@@ -16,6 +16,25 @@ import type { WorkspaceBootstrapFile } from "./workspace.js";
 
 export type EmbeddedContextFile = { path: string; content: string };
 
+const MAX_BOOTSTRAP_CHARS = 4000;
+const BOOTSTRAP_HEAD_CHARS = 2800;
+const BOOTSTRAP_TAIL_CHARS = 800;
+
+function trimBootstrapContent(content: string, fileName: string): string {
+  const trimmed = content.trimEnd();
+  if (trimmed.length <= MAX_BOOTSTRAP_CHARS) return trimmed;
+
+  const head = trimmed.slice(0, BOOTSTRAP_HEAD_CHARS);
+  const tail = trimmed.slice(-BOOTSTRAP_TAIL_CHARS);
+  return [
+    head,
+    "",
+    `[...truncated, read ${fileName} for full content...]`,
+    "",
+    tail,
+  ].join("\n");
+}
+
 export async function ensureSessionHeader(params: {
   sessionFile: string;
   sessionId: string;
@@ -88,12 +107,35 @@ export async function sanitizeSessionMessagesImages(
 export function buildBootstrapContextFiles(
   files: WorkspaceBootstrapFile[],
 ): EmbeddedContextFile[] {
-  return files.map((file) => ({
-    path: file.name,
-    content: file.missing
-      ? `[MISSING] Expected at: ${file.path}`
-      : (file.content ?? ""),
-  }));
+  const result: EmbeddedContextFile[] = [];
+  for (const file of files) {
+    if (file.missing) {
+      result.push({
+        path: file.name,
+        content: `[MISSING] Expected at: ${file.path}`,
+      });
+      continue;
+    }
+    const trimmed = trimBootstrapContent(file.content ?? "", file.name);
+    if (!trimmed) continue;
+    result.push({
+      path: file.name,
+      content: trimmed,
+    });
+  }
+  return result;
+}
+
+export function isContextOverflowError(errorMessage?: string): boolean {
+  if (!errorMessage) return false;
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes("request_too_large") ||
+    lower.includes("request exceeds the maximum size") ||
+    lower.includes("context length exceeded") ||
+    lower.includes("maximum context length") ||
+    (lower.includes("413") && lower.includes("too large"))
+  );
 }
 
 export function formatAssistantErrorText(
@@ -102,6 +144,14 @@ export function formatAssistantErrorText(
   if (msg.stopReason !== "error") return undefined;
   const raw = (msg.errorMessage ?? "").trim();
   if (!raw) return "LLM request failed with an unknown error.";
+
+  // Check for context overflow (413) errors
+  if (isContextOverflowError(raw)) {
+    return (
+      "Context overflow: the conversation history is too large. " +
+      "Use /new or /reset to start a fresh session."
+    );
+  }
 
   const invalidRequest = raw.match(
     /"type":"invalid_request_error".*?"message":"([^"]+)"/,

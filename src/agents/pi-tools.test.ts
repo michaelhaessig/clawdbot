@@ -31,6 +31,39 @@ describe("createClawdbotCodingTools", () => {
     expect(parameters.required ?? []).toContain("action");
   });
 
+  it("flattens anyOf-of-literals to enum for provider compatibility", () => {
+    const tools = createClawdbotCodingTools();
+    const browser = tools.find((tool) => tool.name === "browser");
+    expect(browser).toBeDefined();
+
+    const parameters = browser?.parameters as {
+      properties?: Record<string, unknown>;
+    };
+    const action = parameters.properties?.action as
+      | {
+          type?: unknown;
+          enum?: unknown[];
+          anyOf?: unknown[];
+        }
+      | undefined;
+
+    expect(action?.type).toBe("string");
+    expect(action?.anyOf).toBeUndefined();
+    expect(Array.isArray(action?.enum)).toBe(true);
+    expect(action?.enum).toContain("act");
+
+    const format = parameters.properties?.format as
+      | {
+          type?: unknown;
+          enum?: unknown[];
+          anyOf?: unknown[];
+        }
+      | undefined;
+    expect(format?.type).toBe("string");
+    expect(format?.anyOf).toBeUndefined();
+    expect(format?.enum).toEqual(["aria", "ai"]);
+  });
+
   it("preserves action enums in normalized schemas", () => {
     const tools = createClawdbotCodingTools();
     const toolNames = ["browser", "canvas", "nodes", "cron", "gateway"];
@@ -114,6 +147,22 @@ describe("createClawdbotCodingTools", () => {
 
     const slack = createClawdbotCodingTools({ messageProvider: "slack" });
     expect(slack.some((tool) => tool.name === "slack")).toBe(true);
+  });
+
+  it("scopes telegram tool to telegram provider", () => {
+    const other = createClawdbotCodingTools({ messageProvider: "whatsapp" });
+    expect(other.some((tool) => tool.name === "telegram")).toBe(false);
+
+    const telegram = createClawdbotCodingTools({ messageProvider: "telegram" });
+    expect(telegram.some((tool) => tool.name === "telegram")).toBe(true);
+  });
+
+  it("scopes whatsapp tool to whatsapp provider", () => {
+    const other = createClawdbotCodingTools({ messageProvider: "slack" });
+    expect(other.some((tool) => tool.name === "whatsapp")).toBe(false);
+
+    const whatsapp = createClawdbotCodingTools({ messageProvider: "whatsapp" });
+    expect(whatsapp.some((tool) => tool.name === "whatsapp")).toBe(true);
   });
 
   it("filters session tools for sub-agent sessions by default", () => {
@@ -224,6 +273,8 @@ describe("createClawdbotCodingTools", () => {
       enabled: true,
       sessionKey: "sandbox:test",
       workspaceDir: path.join(os.tmpdir(), "clawdbot-sandbox"),
+      agentWorkspaceDir: path.join(os.tmpdir(), "clawdbot-workspace"),
+      workspaceAccess: "none",
       containerName: "clawdbot-sbx-test",
       containerWorkdir: "/workspace",
       docker: {
@@ -246,6 +297,37 @@ describe("createClawdbotCodingTools", () => {
     expect(tools.some((tool) => tool.name === "bash")).toBe(true);
     expect(tools.some((tool) => tool.name === "read")).toBe(false);
     expect(tools.some((tool) => tool.name === "browser")).toBe(false);
+  });
+
+  it("hard-disables write/edit when sandbox workspaceAccess is ro", () => {
+    const sandbox = {
+      enabled: true,
+      sessionKey: "sandbox:test",
+      workspaceDir: path.join(os.tmpdir(), "clawdbot-sandbox"),
+      agentWorkspaceDir: path.join(os.tmpdir(), "clawdbot-workspace"),
+      workspaceAccess: "ro",
+      containerName: "clawdbot-sbx-test",
+      containerWorkdir: "/workspace",
+      docker: {
+        image: "clawdbot-sandbox:bookworm-slim",
+        containerPrefix: "clawdbot-sbx-",
+        workdir: "/workspace",
+        readOnlyRoot: true,
+        tmpfs: [],
+        network: "none",
+        user: "1000:1000",
+        capDrop: ["ALL"],
+        env: { LANG: "C.UTF-8" },
+      },
+      tools: {
+        allow: ["read", "write", "edit"],
+        deny: [],
+      },
+    };
+    const tools = createClawdbotCodingTools({ sandbox });
+    expect(tools.some((tool) => tool.name === "read")).toBe(true);
+    expect(tools.some((tool) => tool.name === "write")).toBe(false);
+    expect(tools.some((tool) => tool.name === "edit")).toBe(false);
   });
 
   it("filters tools by agent tool policy even without sandbox", () => {

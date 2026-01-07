@@ -8,45 +8,60 @@ import {
   webAuthExists,
 } from "../web/session.js";
 
+export type ProviderSummaryOptions = {
+  colorize?: boolean;
+  includeAllowFrom?: boolean;
+};
+
+const DEFAULT_OPTIONS: Required<ProviderSummaryOptions> = {
+  colorize: false,
+  includeAllowFrom: false,
+};
+
 export async function buildProviderSummary(
   cfg?: ClawdbotConfig,
+  options?: ProviderSummaryOptions,
 ): Promise<string[]> {
   const effective = cfg ?? loadConfig();
   const lines: string[] = [];
+  const resolved = { ...DEFAULT_OPTIONS, ...options };
+  const tint = (value: string, color?: (input: string) => string) =>
+    resolved.colorize && color ? color(value) : value;
 
   const webEnabled = effective.web?.enabled !== false;
   if (!webEnabled) {
-    lines.push(chalk.cyan("WhatsApp: disabled"));
+    lines.push(tint("WhatsApp: disabled", chalk.cyan));
   } else {
     const webLinked = await webAuthExists();
     const authAgeMs = getWebAuthAgeMs();
-    const authAge = authAgeMs === null ? "unknown" : formatAge(authAgeMs);
+    const authAge = authAgeMs === null ? "" : ` auth ${formatAge(authAgeMs)}`;
     const { e164 } = readWebSelfId();
     lines.push(
       webLinked
-        ? chalk.green(
-            `WhatsApp: linked${e164 ? ` as ${e164}` : ""} (auth ${authAge})`,
+        ? tint(
+            `WhatsApp: linked${e164 ? ` ${e164}` : ""}${authAge}`,
+            chalk.green,
           )
-        : chalk.red("WhatsApp: not linked"),
+        : tint("WhatsApp: not linked", chalk.red),
     );
   }
 
   const telegramEnabled = effective.telegram?.enabled !== false;
   if (!telegramEnabled) {
-    lines.push(chalk.cyan("Telegram: disabled"));
+    lines.push(tint("Telegram: disabled", chalk.cyan));
   } else {
     const { token: telegramToken } = resolveTelegramToken(effective);
     const telegramConfigured = Boolean(telegramToken?.trim());
     lines.push(
       telegramConfigured
-        ? chalk.green("Telegram: configured")
-        : chalk.cyan("Telegram: not configured"),
+        ? tint("Telegram: configured", chalk.green)
+        : tint("Telegram: not configured", chalk.cyan),
     );
   }
 
   const signalEnabled = effective.signal?.enabled !== false;
   if (!signalEnabled) {
-    lines.push(chalk.cyan("Signal: disabled"));
+    lines.push(tint("Signal: disabled", chalk.cyan));
   } else {
     const signalConfigured =
       Boolean(effective.signal) &&
@@ -60,28 +75,30 @@ export async function buildProviderSummary(
       );
     lines.push(
       signalConfigured
-        ? chalk.green("Signal: configured")
-        : chalk.cyan("Signal: not configured"),
+        ? tint("Signal: configured", chalk.green)
+        : tint("Signal: not configured", chalk.cyan),
     );
   }
 
   const imessageEnabled = effective.imessage?.enabled !== false;
   if (!imessageEnabled) {
-    lines.push(chalk.cyan("iMessage: disabled"));
+    lines.push(tint("iMessage: disabled", chalk.cyan));
   } else {
     const imessageConfigured = Boolean(effective.imessage);
     lines.push(
       imessageConfigured
-        ? chalk.green("iMessage: configured")
-        : chalk.cyan("iMessage: not configured"),
+        ? tint("iMessage: configured", chalk.green)
+        : tint("iMessage: not configured", chalk.cyan),
     );
   }
 
-  const allowFrom = effective.whatsapp?.allowFrom?.length
-    ? effective.whatsapp.allowFrom.map(normalizeE164).filter(Boolean)
-    : [];
-  if (allowFrom.length) {
-    lines.push(chalk.cyan(`AllowFrom: ${allowFrom.join(", ")}`));
+  if (resolved.includeAllowFrom) {
+    const allowFrom = effective.whatsapp?.allowFrom?.length
+      ? effective.whatsapp.allowFrom.map(normalizeE164).filter(Boolean)
+      : [];
+    if (allowFrom.length) {
+      lines.push(tint(`AllowFrom: ${allowFrom.join(", ")}`, chalk.cyan));
+    }
   }
 
   return lines;
