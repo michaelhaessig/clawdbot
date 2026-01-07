@@ -45,16 +45,20 @@ RUN pnpm prune --prod
 ARG BUILD_FROM
 FROM ${BUILD_FROM:-ghcr.io/home-assistant/aarch64-base-debian:bookworm}
 
-# Install Node.js and runtime dependencies
+# Install runtime dependencies (NOT nodejs - we copy from builder for Node 22)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs \
-    npm \
     libvips42 \
     xxd \
     lsof \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy Node.js 22 from builder stage (Debian apt only has Node 18, we need 22 for regex /v flag)
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 WORKDIR /app
 

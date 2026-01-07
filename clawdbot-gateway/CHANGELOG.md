@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.6
+
+- Copy Node.js 22 from builder stage instead of using Debian's Node 18
+- Fixes regex `/v` flag syntax error (requires Node 20+)
+
 ## 1.0.5
 
 - Explicitly set `init: false` to ensure s6-overlay runs as PID 1
