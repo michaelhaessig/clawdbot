@@ -50,6 +50,8 @@ for tool_dir in "$TOOLS_DIR"/*; do
 
     # Check for TypeScript/Node tool (package.json with src/index.ts)
     if [ -f "package.json" ] && [ -f "src/index.ts" ]; then
+        echo "  Installing dependencies..."
+        bun install --frozen-lockfile 2>/dev/null || bun install
         echo "  Building TypeScript tool with bun..."
         bun build src/index.ts --outfile="$BIN_DIR/${tool_name}.js" --target=node --minify
 
