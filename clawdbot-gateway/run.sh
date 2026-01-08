@@ -140,7 +140,7 @@ update_clawdbot() {
 
     # Fetch latest changes
     log_info "Fetching updates..."
-    if ! git -c credential.helper= fetch origin --all --prune; then
+    if ! git -c credential.helper= fetch origin --prune; then
         log_error "Failed to fetch updates"
         return 1
     fi
@@ -379,7 +379,6 @@ if [ ! -f "${CONFIG_FILE}" ]; then
         --non-interactive \
         --mode local \
         --workspace "${WORKSPACE}" \
-        --gateway-bind "lan" \
         --gateway-port "${GATEWAY_PORT}" \
         --gateway-auth "${AUTH_MODE}" \
         --gateway-token "${GATEWAY_TOKEN}" \
@@ -390,6 +389,22 @@ if [ ! -f "${CONFIG_FILE}" ]; then
         }
 
     log_info "Initial setup complete"
+fi
+
+# Normalize config: ensure gateway.mode is set and remove invalid gateway.bind
+if [ -f "${CONFIG_FILE}" ]; then
+    node -e "
+const fs = require('fs');
+const cfg = JSON.parse(fs.readFileSync('${CONFIG_FILE}', 'utf8'));
+let changed = false;
+if (!cfg.gateway) cfg.gateway = {};
+if (!cfg.gateway.mode) { cfg.gateway.mode = 'local'; changed = true; }
+if (cfg.gateway.bind && !['loopback','tailnet','lan','auto'].includes(cfg.gateway.bind)) {
+    delete cfg.gateway.bind;
+    changed = true;
+}
+if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
+" 2>/dev/null || true
 fi
 
 # =============================================================================
@@ -424,6 +439,5 @@ cd "$APP_DIR"
 # Use exec to replace shell with node process for proper signal handling
 # This ensures HA can restart the addon on failure
 exec node dist/index.js gateway \
-    --bind "lan" \
     --port "${GATEWAY_PORT}" \
     --allow-unconfigured
