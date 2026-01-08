@@ -1,10 +1,10 @@
 name: Clawdbot Gateway
-version: "1.0.7"
+version: "2.0.0"
 slug: clawdbot-gateway
-description: WhatsApp gateway with AI agent capabilities
+description: Self-updating WhatsApp gateway with AI agent capabilities
 url: https://github.com/michaelhaessig/clawdbot
 
-# Pre-built image (HA pulls this instead of building)
+# Bootstrap image - clawdbot is installed/updated at runtime from git
 image: ghcr.io/michaelhaessig/clawdbot-gateway-{arch}
 
 arch:
@@ -36,22 +36,35 @@ map:
   - share:rw
 
 options:
+  # Gateway settings
   gateway_port: 18789
   bridge_port: 18790
   gateway_token: ""
   workspace: "/share/clawdbot"
   vacuum_entity: ""
+  # Self-update settings
+  clawdbot_repo: "https://github.com/steipete/clawdbot.git"
+  clawdbot_version: "main"
+  update_mode: "auto"
+  pin_version: false
 
 schema:
+  # Gateway settings
   gateway_port: port
   bridge_port: port
   gateway_token: str?
   workspace: str
   vacuum_entity: str?
+  # Self-update settings
+  clawdbot_repo: url?
+  clawdbot_version: str?
+  update_mode: list(disabled|check|auto)?
+  pin_version: bool?
 
 environment:
   CLAWDBOT_STATE_DIR: /config/clawdbot
   CLAWDBOT_WORKSPACE_DIR: /share/clawdbot
+  CLAWDBOT_APP_DIR: /config/clawdbot-app
 
 panel_icon: mdi:whatsapp
 panel_title: Clawdbot

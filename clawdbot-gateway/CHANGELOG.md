@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.0.0
+
+**Major architectural change: Self-updating addon**
+
+The addon now manages clawdbot installation and updates at runtime instead of baking the app into the Docker image. This enables updates without container rebuilds.
+
+### New Features
+- **Self-updating**: Clawdbot is cloned and built on first start, stored in persistent storage
+- **Automatic updates**: Check for and apply updates on addon restart
+- **Configurable repository**: Track upstream, a fork, or private repo
+- **Version pinning**: Pin to specific branch/tag for stability
+- **Rollback support**: Automatic rollback on failed updates
+
+### New Configuration Options
+- `clawdbot_repo`: Git repository URL (default: upstream)
+- `clawdbot_version`: Branch or tag to track (default: main)
+- `update_mode`: `disabled`, `check`, or `auto` (default: auto)
+- `pin_version`: Prevent auto-updates when true
+
+### Breaking Changes
+- First start now takes 15-25 minutes on ARM (building from source)
+- Local Dockerfile removed (CI-built images only)
+- hac CLI moved to `clawdbot-gateway/tools/hac`
+
+### Technical Details
+- Bootstrap image includes: Node.js 22, pnpm, bun, git, build tools
+- App stored in `/config/clawdbot-app` (persisted across restarts)
+- Backup created before updates for rollback capability
+
 ## 1.0.7
 
 - Fix bind mode: use "lan" instead of raw IP (upstream API change)
