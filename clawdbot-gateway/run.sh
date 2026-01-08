@@ -391,7 +391,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     log_info "Initial setup complete"
 fi
 
-# Normalize config: ensure gateway.mode is set and remove invalid gateway.bind
+# Normalize config: ensure gateway.mode and gateway.bind are set correctly for HA
 if [ -f "${CONFIG_FILE}" ]; then
     node -e "
 const fs = require('fs');
@@ -399,10 +399,8 @@ const cfg = JSON.parse(fs.readFileSync('${CONFIG_FILE}', 'utf8'));
 let changed = false;
 if (!cfg.gateway) cfg.gateway = {};
 if (!cfg.gateway.mode) { cfg.gateway.mode = 'local'; changed = true; }
-if (cfg.gateway.bind && !['loopback','tailnet','lan','auto'].includes(cfg.gateway.bind)) {
-    delete cfg.gateway.bind;
-    changed = true;
-}
+// HA addon needs LAN binding for ingress access
+if (cfg.gateway.bind !== 'lan') { cfg.gateway.bind = 'lan'; changed = true; }
 if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
 " 2>/dev/null || true
 fi
