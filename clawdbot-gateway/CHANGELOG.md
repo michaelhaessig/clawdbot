@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7
+
+- Fix bind mode: use "lan" instead of raw IP (upstream API change)
+- Remove gateway_bind config option (now hardcoded to bind all interfaces)
+
 ## 1.0.6
 
 - Copy Node.js 22 from builder stage instead of using Debian's Node 18

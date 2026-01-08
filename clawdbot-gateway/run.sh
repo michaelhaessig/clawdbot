@@ -3,7 +3,9 @@
 set -euo pipefail
 
 # Read configuration from Home Assistant
-GATEWAY_BIND=$(bashio::config 'gateway_bind')
+# Note: gateway_bind now uses modes: "loopback", "tailnet", "lan", "auto"
+# For HA addon, we always use "lan" to bind to all interfaces (0.0.0.0)
+GATEWAY_BIND="lan"
 GATEWAY_PORT=$(bashio::config 'gateway_port')
 BRIDGE_PORT=$(bashio::config 'bridge_port')
 GATEWAY_TOKEN=$(bashio::config 'gateway_token')

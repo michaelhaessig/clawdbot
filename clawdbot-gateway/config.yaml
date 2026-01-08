@@ -1,5 +1,5 @@
 name: Clawdbot Gateway
-version: "1.0.6"
+version: "1.0.7"
 slug: clawdbot-gateway
 description: WhatsApp gateway with AI agent capabilities
 url: https://github.com/michaelhaessig/clawdbot
@@ -36,7 +36,6 @@ map:
   - share:rw
 
 options:
-  gateway_bind: "0.0.0.0"
   gateway_port: 18789
   bridge_port: 18790
   gateway_token: ""
@@ -44,7 +43,6 @@ options:
   vacuum_entity: ""
 
 schema:
-  gateway_bind: str
   gateway_port: port
   bridge_port: port
   gateway_token: str?
