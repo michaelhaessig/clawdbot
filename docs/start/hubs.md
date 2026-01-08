@@ -17,6 +17,7 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [Dashboard (local Gateway)](http://127.0.0.1:18789/)
 - [FAQ](https://docs.clawd.bot/start/faq)
 - [Configuration](https://docs.clawd.bot/gateway/configuration)
+- [Configuration examples](https://docs.clawd.bot/gateway/configuration-examples)
 - [Clawd (personal assistant)](https://docs.clawd.bot/start/clawd)
 - [Showcase](https://docs.clawd.bot/start/showcase)
 - [Lore](https://docs.clawd.bot/start/lore)
@@ -53,6 +54,7 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [Groups](https://docs.clawd.bot/concepts/groups)
 - [Group messages](https://docs.clawd.bot/concepts/group-messages)
 - [Model failover](https://docs.clawd.bot/concepts/model-failover)
+- [OAuth](https://docs.clawd.bot/concepts/oauth)
 
 ## Providers + ingress
 
