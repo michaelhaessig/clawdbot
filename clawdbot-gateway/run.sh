@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Disable git credential prompts (required for non-interactive container)
+export GIT_TERMINAL_PROMPT=0
+
 # =============================================================================
 # Clawdbot Self-Updating Home Assistant Addon
 # =============================================================================
