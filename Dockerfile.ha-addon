@@ -44,12 +44,21 @@ ARG GO_VERSION=1.23.4
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:$PATH"
 
-# Copy startup script, addon-specific tools, and custom skills
+# Copy startup script and build helper
 COPY clawdbot-gateway/run.sh /run.sh
-COPY clawdbot-gateway/tools /opt/addon-tools
-COPY clawdbot-gateway/skills /opt/addon-skills
 COPY clawdbot-gateway/build-tools.sh /opt/build-tools.sh
 RUN chmod +x /run.sh /opt/build-tools.sh
+
+# Create addon directories (may be empty)
+RUN mkdir -p /opt/addon-tools /opt/addon-skills
+
+# Copy addon-specific tools if they exist (each tool is a subdirectory)
+# Tools are built into binaries at image build time
+COPY clawdbot-gateway/tools/ /opt/addon-tools/
+
+# Copy addon-bundled skills if they exist (each skill is a subdirectory)
+# Skills are installed to managed skills dir at runtime
+COPY clawdbot-gateway/skills/ /opt/addon-skills/
 
 # Build addon tools (supports TypeScript/bun, Go, and pre-built binaries)
 RUN /opt/build-tools.sh

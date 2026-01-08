@@ -222,23 +222,45 @@ mkdir -p "$STATE_DIR"
 mkdir -p "$STATE_DIR/credentials"
 mkdir -p "$WORKSPACE"
 
+# =============================================================================
+# Skills Setup
+# =============================================================================
+# Skills are loaded from three locations (highest to lowest priority):
+#   1. Workspace skills: $WORKSPACE/skills (user-owned, editable without rebuild)
+#   2. Managed skills:   ~/.clawdbot/skills (addon-provided skills)
+#   3. Bundled skills:   shipped with clawdbot installation
+# =============================================================================
+
+# Workspace skills dir - users can add custom skills here without rebuilding
+WORKSPACE_SKILLS_DIR="$WORKSPACE/skills"
+mkdir -p "$WORKSPACE_SKILLS_DIR"
+
 # Managed skills dir: ~/.clawdbot/skills (HOME will be set to STATE_DIR)
-# So full path is: $STATE_DIR/.clawdbot/skills
 MANAGED_SKILLS_DIR="$STATE_DIR/.clawdbot/skills"
 mkdir -p "$MANAGED_SKILLS_DIR"
 
-# Install addon-specific skills (from /opt/addon-skills to managed skills dir)
+# Install addon-bundled skills (from /opt/addon-skills to managed skills dir)
 ADDON_SKILLS_DIR="/opt/addon-skills"
-if [ -d "$ADDON_SKILLS_DIR" ]; then
-    log_info "Installing addon skills..."
+if [ -d "$ADDON_SKILLS_DIR" ] && [ "$(ls -A "$ADDON_SKILLS_DIR" 2>/dev/null)" ]; then
+    log_info "Installing addon-bundled skills to managed dir..."
     for skill_dir in "$ADDON_SKILLS_DIR"/*; do
         [ -d "$skill_dir" ] || continue
         skill_name=$(basename "$skill_dir")
         target_dir="$MANAGED_SKILLS_DIR/$skill_name"
-        # Always update skills (overwrite with latest from image)
+        # Always update addon skills (overwrite with latest from image)
         rm -rf "$target_dir"
         cp -r "$skill_dir" "$target_dir"
-        log_info "  Installed skill: $skill_name"
+        log_info "  Installed: $skill_name"
+    done
+fi
+
+# Log workspace skills if any exist
+if [ -d "$WORKSPACE_SKILLS_DIR" ] && [ "$(ls -A "$WORKSPACE_SKILLS_DIR" 2>/dev/null)" ]; then
+    log_info "Found workspace skills (user-added):"
+    for skill_dir in "$WORKSPACE_SKILLS_DIR"/*; do
+        [ -d "$skill_dir" ] || continue
+        skill_name=$(basename "$skill_dir")
+        log_info "  Found: $skill_name"
     done
 fi
 
@@ -391,6 +413,8 @@ log_info "Access the web UI through Home Assistant's sidebar or at:"
 log_info "  http://<your-ha-ip>:${GATEWAY_PORT}"
 log_info ""
 log_info "To link WhatsApp, open the web UI and go to Connections > WhatsApp"
+log_info ""
+log_info "Custom skills: Add to ${WORKSPACE}/skills/ (no rebuild required)"
 
 cd "$APP_DIR"
 
