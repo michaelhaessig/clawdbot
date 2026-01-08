@@ -43,7 +43,7 @@ options:
   workspace: "/share/clawdbot"
   vacuum_entity: ""
   # Self-update settings
-  clawdbot_repo: "https://github.com/steipete/clawdbot.git"
+  clawdbot_repo: "https://github.com/clawdbot/clawdbot.git"
   clawdbot_version: "main"
   update_mode: "auto"
   pin_version: false
