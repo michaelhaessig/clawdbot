@@ -423,6 +423,7 @@ cd "$APP_DIR"
 
 # Use exec to replace shell with node process for proper signal handling
 # This ensures HA can restart the addon on failure
-exec node dist/index.js gateway-daemon \
+exec node dist/index.js gateway \
     --bind "lan" \
-    --port "${GATEWAY_PORT}"
+    --port "${GATEWAY_PORT}" \
+    --allow-unconfigured
