@@ -39,7 +39,7 @@ log_error() { bashio::log.error "$1"; }
 # === Version Helpers ===
 get_remote_version() {
     if [ -d "$APP_DIR/.git" ]; then
-        git -C "$APP_DIR" fetch origin --tags 2>/dev/null || return 1
+        git -c credential.helper= -C "$APP_DIR" fetch origin --tags 2>/dev/null || return 1
         git -C "$APP_DIR" rev-parse "origin/${CLAWDBOT_VERSION}" 2>/dev/null || \
         git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null
     fi
@@ -69,9 +69,9 @@ install_clawdbot() {
     # Clean up any failed previous attempts
     rm -rf "$STAGING_DIR"
 
-    # Clone repository
+    # Clone repository (disable credential helpers to avoid prompts for public repos)
     log_info "Cloning repository..."
-    if ! git clone --depth 1 --branch "$CLAWDBOT_VERSION" "$CLAWDBOT_REPO" "$STAGING_DIR"; then
+    if ! git -c credential.helper= clone --depth 1 --branch "$CLAWDBOT_VERSION" "$CLAWDBOT_REPO" "$STAGING_DIR"; then
         log_error "Failed to clone repository"
         return 1
     fi
@@ -140,7 +140,7 @@ update_clawdbot() {
 
     # Fetch latest changes
     log_info "Fetching updates..."
-    if ! git fetch origin --all --prune; then
+    if ! git -c credential.helper= fetch origin --all --prune; then
         log_error "Failed to fetch updates"
         return 1
     fi
