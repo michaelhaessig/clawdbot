@@ -1,5 +1,5 @@
 name: Clawdbot Gateway
-version: "2.0.5"
+version: "2.0.6"
 slug: clawdbot-gateway
 description: Self-updating WhatsApp gateway with AI agent capabilities
 url: https://github.com/michaelhaessig/clawdbot
@@ -13,6 +13,7 @@ arch:
 startup: services
 boot: auto
 init: false
+host_network: true
 
 # Enable Home Assistant API access (injects SUPERVISOR_TOKEN)
 hassio_api: true
