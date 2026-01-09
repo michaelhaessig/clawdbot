@@ -1,5 +1,5 @@
 name: Clawdbot Gateway
-version: "2.0.8"
+version: "2.0.9"
 slug: clawdbot-gateway
 description: Self-updating WhatsApp gateway with AI agent capabilities
 url: https://github.com/michaelhaessig/clawdbot
