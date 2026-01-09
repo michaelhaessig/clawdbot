@@ -224,32 +224,24 @@ verify_installation() {
 mkdir -p "$STATE_DIR"
 mkdir -p "$STATE_DIR/credentials"
 mkdir -p "$WORKSPACE"
+mkdir -p "$WORKSPACE/memory"
 
 # =============================================================================
-# Skills Setup
-# =============================================================================
-# Skills are loaded from three locations (highest to lowest priority):
-#   1. Workspace skills: $WORKSPACE/skills (user-owned, editable without rebuild)
-#   2. Managed skills:   ~/.clawdbot/skills (addon-provided skills)
-#   3. Bundled skills:   shipped with clawdbot installation
+# Skills Setup - skills are loaded from workspace: $WORKSPACE/skills
 # =============================================================================
 
-# Workspace skills dir - users can add custom skills here without rebuilding
 WORKSPACE_SKILLS_DIR="$WORKSPACE/skills"
 mkdir -p "$WORKSPACE_SKILLS_DIR"
 
-# Managed skills dir: ~/.clawdbot/skills (HOME will be set to STATE_DIR)
-MANAGED_SKILLS_DIR="$STATE_DIR/.clawdbot/skills"
-mkdir -p "$MANAGED_SKILLS_DIR"
-
-# Install addon-bundled skills (from /opt/addon-skills to managed skills dir)
+# Install addon-bundled skills to workspace
 ADDON_SKILLS_DIR="/opt/addon-skills"
 if [ -d "$ADDON_SKILLS_DIR" ] && [ "$(ls -A "$ADDON_SKILLS_DIR" 2>/dev/null)" ]; then
-    log_info "Installing addon-bundled skills to managed dir..."
+    log_info "Installing addon-bundled skills to workspace..."
     for skill_dir in "$ADDON_SKILLS_DIR"/*; do
         [ -d "$skill_dir" ] || continue
         skill_name=$(basename "$skill_dir")
-        target_dir="$MANAGED_SKILLS_DIR/$skill_name"
+        [ "$skill_name" = ".gitkeep" ] && continue
+        target_dir="$WORKSPACE_SKILLS_DIR/$skill_name"
         # Always update addon skills (overwrite with latest from image)
         rm -rf "$target_dir"
         cp -r "$skill_dir" "$target_dir"
@@ -257,13 +249,13 @@ if [ -d "$ADDON_SKILLS_DIR" ] && [ "$(ls -A "$ADDON_SKILLS_DIR" 2>/dev/null)" ];
     done
 fi
 
-# Log workspace skills if any exist
+# Log all workspace skills
 if [ -d "$WORKSPACE_SKILLS_DIR" ] && [ "$(ls -A "$WORKSPACE_SKILLS_DIR" 2>/dev/null)" ]; then
-    log_info "Found workspace skills (user-added):"
+    log_info "Workspace skills:"
     for skill_dir in "$WORKSPACE_SKILLS_DIR"/*; do
         [ -d "$skill_dir" ] || continue
         skill_name=$(basename "$skill_dir")
-        log_info "  Found: $skill_name"
+        log_info "  - $skill_name"
     done
 fi
 
