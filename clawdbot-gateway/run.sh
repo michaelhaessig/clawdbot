@@ -21,7 +21,7 @@ STAGING_DIR="${APP_DIR}.new"
 INSTALL_MARKER="${APP_DIR}/.install-marker"
 
 # Read addon configuration with defaults
-CLAWDBOT_REPO=$(bashio::config 'clawdbot_repo' 'https://github.com/steipete/clawdbot.git')
+CLAWDBOT_REPO=$(bashio::config 'clawdbot_repo' 'https://github.com/clawdbot/clawdbot.git')
 CLAWDBOT_VERSION=$(bashio::config 'clawdbot_version' 'main')
 UPDATE_MODE=$(bashio::config 'update_mode' 'auto')
 PIN_VERSION=$(bashio::config 'pin_version' 'false')
@@ -385,17 +385,20 @@ fi
 
 # Normalize config: ensure gateway settings are correct for HA addon
 if [ -f "${CONFIG_FILE}" ]; then
-    node -e "
+    HA_GATEWAY_TOKEN="${GATEWAY_TOKEN}" node -e "
 const fs = require('fs');
 const cfg = JSON.parse(fs.readFileSync('${CONFIG_FILE}', 'utf8'));
+const token = process.env.HA_GATEWAY_TOKEN || '';
 let changed = false;
 if (!cfg.gateway) cfg.gateway = {};
 if (!cfg.gateway.mode) { cfg.gateway.mode = 'local'; changed = true; }
 // HA addon needs LAN binding for ingress access
 if (cfg.gateway.bind !== 'lan') { cfg.gateway.bind = 'lan'; changed = true; }
-// HA handles authentication at ingress level, disable gateway auth
+// Set auth mode based on whether token is configured
 if (!cfg.gateway.auth) cfg.gateway.auth = {};
-if (cfg.gateway.auth.mode !== 'none') { cfg.gateway.auth.mode = 'none'; changed = true; }
+const wantMode = token ? 'token' : 'none';
+if (cfg.gateway.auth.mode !== wantMode) { cfg.gateway.auth.mode = wantMode; changed = true; }
+if (token && cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
 if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
 " 2>/dev/null || true
 fi
