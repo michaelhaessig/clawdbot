@@ -37,6 +37,18 @@ for tool_dir in "$TOOLS_DIR"/*; do
         continue
     fi
 
+    # Check for Go module install (go.module file with remote module path)
+    if [ -f "go.module" ]; then
+        echo "  Installing Go module..."
+        if command -v go &> /dev/null; then
+            module_path=$(cat go.module | tr -d '[:space:]')
+            GOBIN="$BIN_DIR" go install "$module_path"
+        else
+            echo "  WARNING: Go not installed, skipping $tool_name"
+        fi
+        continue
+    fi
+
     # Check for Go tool (go.mod present)
     if [ -f "go.mod" ]; then
         echo "  Building Go tool..."

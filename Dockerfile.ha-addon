@@ -24,6 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     xxd \
     lsof \
+    wget \
+    # Skill dependencies
+    jq \
+    ffmpeg \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 22 via nodesource (HA base only has Node 18, we need 22 for regex /v flag)
@@ -43,6 +48,35 @@ ENV PATH="/root/.bun/bin:$PATH"
 ARG GO_VERSION=1.23.4
 RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-$(dpkg --print-architecture).tar.gz" | tar -C /usr/local -xzf -
 ENV PATH="/usr/local/go/bin:$PATH"
+
+# Install uv (Python package manager for skills like local-places, nano-banana-pro)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Install gog CLI (Google Workspace: Gmail, Calendar, Drive, Contacts, Sheets, Docs)
+ARG GOG_VERSION=0.4.2
+RUN ARCH=$(dpkg --print-architecture | sed 's/aarch64/arm64/;s/x86_64/amd64/') \
+    && curl -fsSL "https://github.com/steipete/gogcli/releases/download/v${GOG_VERSION}/gogcli_${GOG_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar xz -C /usr/local/bin gog \
+    && chmod +x /usr/local/bin/gog
+
+# Install goplaces CLI (Google Places API search)
+ARG GOPLACES_VERSION=0.2.0
+RUN ARCH=$(dpkg --print-architecture | sed 's/aarch64/arm64/;s/x86_64/amd64/') \
+    && curl -fsSL "https://github.com/steipete/goplaces/releases/download/v${GOPLACES_VERSION}/goplaces_${GOPLACES_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar xz -C /usr/local/bin goplaces \
+    && chmod +x /usr/local/bin/goplaces
+
+# Install sag CLI (ElevenLabs TTS) - AMD64 only, no ARM64 build available
+ARG SAG_VERSION=0.2.1
+RUN ARCH=$(dpkg --print-architecture) \
+    && if [ "$ARCH" = "amd64" ]; then \
+        curl -fsSL "https://github.com/steipete/sag/releases/download/v${SAG_VERSION}/sag_${SAG_VERSION}_linux_amd64.tar.gz" \
+        | tar xz -C /usr/local/bin sag \
+        && chmod +x /usr/local/bin/sag; \
+    else \
+        echo "sag: skipping install (no ARM64 build available)"; \
+    fi
 
 # Copy startup script and build helper
 COPY clawdbot-gateway/run.sh /run.sh
