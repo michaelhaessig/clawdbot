@@ -480,7 +480,7 @@ Examples:
     const entityId = getEntityId(options);
     const result = await client.callService("roborock", "get_maps", {
       entity_id: entityId,
-    });
+    }, true); // returnResponse required for get_maps
     await handleResult(result, (data) => {
       if (options.format === "json") {
         console.log(JSON.stringify(data, null, 2));
@@ -667,7 +667,8 @@ Examples:
       "get_vacuum_current_position",
       {
         entity_id: entityId,
-      }
+      },
+      true // returnResponse required for position data
     );
     await handleResult(result);
   });

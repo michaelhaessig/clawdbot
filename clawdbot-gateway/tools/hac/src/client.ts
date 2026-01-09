@@ -195,13 +195,18 @@ export class HAClient {
 
   /**
    * Call a Home Assistant service
+   * @param returnResponse - If true, adds ?return_response for services that return data
    */
   async callService(
     domain: string,
     service: string,
-    data?: Record<string, unknown>
+    data?: Record<string, unknown>,
+    returnResponse?: boolean
   ): Promise<HAClientResult<unknown>> {
-    return this.request<unknown>("POST", `/services/${domain}/${service}`, data);
+    const path = returnResponse
+      ? `/services/${domain}/${service}?return_response`
+      : `/services/${domain}/${service}`;
+    return this.request<unknown>("POST", path, data);
   }
 
   /**
