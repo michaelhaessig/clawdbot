@@ -61,6 +61,27 @@ export async function ensureSessionHeader(params: {
 
 type ContentBlock = AgentToolResult<unknown>["content"][number];
 
+export function isEmptyAssistantMessageContent(
+  message: Extract<AgentMessage, { role: "assistant" }>,
+): boolean {
+  const content = message.content;
+  if (content == null) return true;
+  if (!Array.isArray(content)) return false;
+  return content.every((block) => {
+    if (!block || typeof block !== "object") return true;
+    const rec = block as { type?: unknown; text?: unknown };
+    if (rec.type !== "text") return false;
+    return typeof rec.text !== "string" || rec.text.trim().length === 0;
+  });
+}
+
+function isEmptyAssistantErrorMessage(
+  message: Extract<AgentMessage, { role: "assistant" }>,
+): boolean {
+  if (message.stopReason !== "error") return false;
+  return isEmptyAssistantMessageContent(message);
+}
+
 export async function sanitizeSessionMessagesImages(
   messages: AgentMessage[],
   label: string,
@@ -95,6 +116,31 @@ export async function sanitizeSessionMessagesImages(
           label,
         )) as unknown as typeof userMsg.content;
         out.push({ ...userMsg, content: nextContent });
+        continue;
+      }
+    }
+
+    if (role === "assistant") {
+      const assistantMsg = msg as Extract<AgentMessage, { role: "assistant" }>;
+      if (isEmptyAssistantErrorMessage(assistantMsg)) {
+        continue;
+      }
+      const content = assistantMsg.content;
+      if (Array.isArray(content)) {
+        const filteredContent = content.filter((block) => {
+          if (!block || typeof block !== "object") return true;
+          const rec = block as { type?: unknown; text?: unknown };
+          if (rec.type !== "text" || typeof rec.text !== "string") return true;
+          return rec.text.trim().length > 0;
+        });
+        const sanitizedContent = (await sanitizeContentBlocksImages(
+          filteredContent as unknown as ContentBlock[],
+          label,
+        )) as unknown as typeof assistantMsg.content;
+        if (sanitizedContent.length === 0) {
+          continue;
+        }
+        out.push({ ...assistantMsg, content: sanitizedContent });
         continue;
       }
     }

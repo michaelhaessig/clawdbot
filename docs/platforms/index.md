@@ -9,7 +9,8 @@ read_when:
 Clawdbot core is written in TypeScript, so the CLI + Gateway run anywhere Node or Bun runs.
 
 Companion apps exist for macOS (menu bar app) and mobile nodes (iOS/Android). Windows and
-Linux companion apps are planned, but the core Gateway is fully supported today.
+Linux companion apps are planned, but the Gateway is fully supported today.
+Native companion apps for Windows are also planned; the Gateway is recommended via WSL2.
 
 ## Choose your OS
 
@@ -18,6 +19,11 @@ Linux companion apps are planned, but the core Gateway is fully supported today.
 - Android: [Android](/platforms/android)
 - Windows: [Windows](/platforms/windows)
 - Linux: [Linux](/platforms/linux)
+
+## VPS & hosting
+
+- Hetzner (Docker): [Hetzner](/platforms/hetzner)
+- exe.dev (VM + HTTPS proxy): [exe.dev](/platforms/exe-dev)
 
 ## Common links
 
