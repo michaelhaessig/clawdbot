@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.14
+
+- Update gogcli to v0.5.4 (fixes path expansion and calendar timezone handling)
+
 ## 2.0.13
 
 - Fix hac vacuum water level options: use correct values (off|mild|moderate|intense)
