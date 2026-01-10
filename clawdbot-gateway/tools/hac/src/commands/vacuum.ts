@@ -14,7 +14,7 @@ const DEFAULT_VACUUM_ENTITY =
 // Known option values for validation (actual options may vary by model)
 const FAN_SPEEDS = ["off", "silent", "balanced", "turbo", "max", "max_plus", "custom"];
 const MOP_MODES = ["off", "standard", "deep", "deep_plus", "fast", "custom"];
-const MOP_INTENSITIES = ["off", "low", "moderate", "medium", "high", "custom", "max"];
+const MOP_INTENSITIES = ["off", "mild", "moderate", "intense"];
 const DUST_MODES = ["off", "light", "balanced", "max", "smart"];
 
 type VacuumOptions = {
@@ -107,7 +107,7 @@ Environment Variables:
 Cleaning Settings:
   hac vacuum fan <speed>      Set suction power (off|silent|balanced|turbo|max)
   hac vacuum mop <mode>       Set mop route/pattern (standard|deep|deep_plus)
-  hac vacuum water <level>    Set water/mop intensity (off|low|medium|high)
+  hac vacuum water <level>    Set water/mop intensity (off|mild|moderate|intense)
   hac vacuum dust <mode>      Set dust collection (off|light|balanced|max|smart)
 
 Room Cleaning:
@@ -366,14 +366,11 @@ Examples:
       .addHelpText(
         "after",
         `
-Water/Mop Intensity Options (varies by model):
+Water/Mop Intensity Options:
   off       - No water (vacuum only)
-  low       - Light water, quick dry
+  mild      - Light water, quick dry
   moderate  - Moderate water
-  medium    - Medium water
-  high      - Heavy water for tough stains
-  max       - Maximum water
-  custom    - Custom water flow
+  intense   - Heavy water for tough stains
 
 This controls the WATER AMOUNT, not the mop pattern.
 Use 'hac vacuum mop' to control mop route/pattern.
@@ -382,9 +379,9 @@ Without argument, shows current level and available options.
 
 Examples:
   $ hac vacuum water            # Show current level
-  $ hac vacuum water low        # Light water
+  $ hac vacuum water mild       # Light water
   $ hac vacuum water off        # Vacuum only (no mop)
-  $ hac vacuum water high       # Maximum water
+  $ hac vacuum water intense    # Maximum water
 `
       )
   ).action(async (level: string | undefined, options: VacuumOptions) => {
@@ -506,7 +503,7 @@ Examples:
       .option("--repeats <n>", "Number of cleaning passes", "1")
       .option("--fan <speed>", "Set fan speed before cleaning (off|silent|balanced|turbo|max)")
       .option("--mop <mode>", "Set mop mode before cleaning (off|standard|deep|deep_plus)")
-      .option("--water <level>", "Set water/mop intensity before cleaning (off|low|medium|high)")
+      .option("--water <level>", "Set water/mop intensity before cleaning (off|mild|moderate|intense)")
       .addHelpText(
         "after",
         `

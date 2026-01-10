@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.13
+
+- Fix hac vacuum water level options: use correct values (off|mild|moderate|intense)
+
 ## 2.0.12
 
 - Fix hac vacuum clean for Q Revo models (Qrevo Curv, Qrevo MaxV, etc.) that don't support `roborock.vacuum_clean_segment` service
