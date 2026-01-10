@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.12
+
+- Fix hac vacuum clean for Q Revo models (Qrevo Curv, Qrevo MaxV, etc.) that don't support `roborock.vacuum_clean_segment` service
+- Falls back to `vacuum.send_command` with `app_segment_clean` when native service returns 400
+
 ## 2.0.0
 
 **Major architectural change: Self-updating addon**

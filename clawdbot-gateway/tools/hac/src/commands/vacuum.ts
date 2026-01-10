@@ -589,7 +589,9 @@ Examples:
       }
 
       // Start segment cleaning
-      const result = await client.callService(
+      // Try roborock.vacuum_clean_segment first (works on S7, etc.)
+      // Fall back to vacuum.send_command with app_segment_clean (Qrevo Curv, etc.)
+      let result = await client.callService(
         "roborock",
         "vacuum_clean_segment",
         {
@@ -598,6 +600,21 @@ Examples:
           repeats,
         }
       );
+
+      // If roborock.vacuum_clean_segment fails (400 = service not available),
+      // fall back to vacuum.send_command with app_segment_clean (Q Revo, Qrevo Curv, etc.)
+      if (!result.ok && result.status === 400) {
+        if (options.verbose) {
+          console.error("[hac] roborock.vacuum_clean_segment not available, trying vacuum.send_command");
+        }
+        // app_segment_clean params format for Q Revo models:
+        // params: [{ segments: [id1, id2, ...], repeat: N }]
+        result = await client.callService("vacuum", "send_command", {
+          entity_id: entityId,
+          command: "app_segment_clean",
+          params: [{ segments, repeat: repeats }],
+        });
+      }
 
       await handleResult(result, () => {
         const settings = settingsApplied.length > 0
