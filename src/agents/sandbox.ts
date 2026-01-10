@@ -19,7 +19,7 @@ import {
   loadConfig,
   STATE_DIR_CLAWDBOT,
 } from "../config/config.js";
-import { normalizeAgentId } from "../routing/session-key.js";
+import { normalizeAgentId, normalizeMainKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { resolveUserPath } from "../utils.js";
 import {
@@ -55,6 +55,8 @@ export type SandboxBrowserConfig = {
   noVncPort: number;
   headless: boolean;
   enableNoVnc: boolean;
+  autoStart: boolean;
+  autoStartTimeoutMs: number;
 };
 
 export type SandboxDockerConfig = {
@@ -141,6 +143,7 @@ const DEFAULT_TOOL_ALLOW = [
   "sessions_history",
   "sessions_send",
   "sessions_spawn",
+  "session_status",
 ];
 const DEFAULT_TOOL_DENY = [
   "browser",
@@ -158,6 +161,7 @@ const DEFAULT_SANDBOX_BROWSER_PREFIX = "clawdbot-sbx-browser-";
 const DEFAULT_SANDBOX_BROWSER_CDP_PORT = 9222;
 const DEFAULT_SANDBOX_BROWSER_VNC_PORT = 5900;
 const DEFAULT_SANDBOX_BROWSER_NOVNC_PORT = 6080;
+const DEFAULT_SANDBOX_BROWSER_AUTOSTART_TIMEOUT_MS = 12_000;
 const SANDBOX_AGENT_WORKSPACE_MOUNT = "/agent";
 
 const SANDBOX_STATE_DIR = path.join(STATE_DIR_CLAWDBOT, "sandbox");
@@ -306,7 +310,36 @@ export function resolveSandboxBrowserConfig(params: {
     headless: agentBrowser?.headless ?? globalBrowser?.headless ?? false,
     enableNoVnc:
       agentBrowser?.enableNoVnc ?? globalBrowser?.enableNoVnc ?? true,
+    autoStart: agentBrowser?.autoStart ?? globalBrowser?.autoStart ?? true,
+    autoStartTimeoutMs:
+      agentBrowser?.autoStartTimeoutMs ??
+      globalBrowser?.autoStartTimeoutMs ??
+      DEFAULT_SANDBOX_BROWSER_AUTOSTART_TIMEOUT_MS,
   };
+}
+
+async function waitForSandboxCdp(params: {
+  cdpPort: number;
+  timeoutMs: number;
+}): Promise<boolean> {
+  const deadline = Date.now() + Math.max(0, params.timeoutMs);
+  const url = `http://127.0.0.1:${params.cdpPort}/json/version`;
+  while (Date.now() < deadline) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 1000);
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (res.ok) return true;
+      } finally {
+        clearTimeout(t);
+      }
+    } catch {
+      // ignore
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return false;
 }
 
 export function resolveSandboxPruneConfig(params: {
@@ -920,12 +953,31 @@ async function ensureSandboxBrowser(params: {
   if (shouldReuse && existing) {
     bridge = existing.bridge;
   } else {
+    const onEnsureAttachTarget = params.cfg.browser.autoStart
+      ? async () => {
+          const state = await dockerContainerState(containerName);
+          if (state.exists && !state.running) {
+            await execDocker(["start", containerName]);
+          }
+          const ok = await waitForSandboxCdp({
+            cdpPort: mappedCdp,
+            timeoutMs: params.cfg.browser.autoStartTimeoutMs,
+          });
+          if (!ok) {
+            throw new Error(
+              `Sandbox browser CDP did not become reachable on 127.0.0.1:${mappedCdp} within ${params.cfg.browser.autoStartTimeoutMs}ms.`,
+            );
+          }
+        }
+      : undefined;
+
     bridge = await startBrowserBridgeServer({
       resolved: buildSandboxBrowserResolvedConfig({
         controlPort: 0,
         cdpPort: mappedCdp,
         headless: params.cfg.browser.headless,
       }),
+      onEnsureAttachTarget,
     });
   }
   if (!shouldReuse) {
@@ -1045,7 +1097,7 @@ export async function resolveSandboxContext(params: {
   if (!rawSessionKey) return null;
   const agentId = resolveAgentIdFromSessionKey(rawSessionKey);
   const cfg = resolveSandboxConfigForAgent(params.config, agentId);
-  const mainKey = params.config?.session?.mainKey?.trim() || "main";
+  const mainKey = normalizeMainKey(params.config?.session?.mainKey);
   if (!shouldSandboxSession(cfg, rawSessionKey, mainKey)) return null;
 
   await maybePruneSandboxes(cfg);
@@ -1121,7 +1173,7 @@ export async function ensureSandboxWorkspaceForSession(params: {
   if (!rawSessionKey) return null;
   const agentId = resolveAgentIdFromSessionKey(rawSessionKey);
   const cfg = resolveSandboxConfigForAgent(params.config, agentId);
-  const mainKey = params.config?.session?.mainKey?.trim() || "main";
+  const mainKey = normalizeMainKey(params.config?.session?.mainKey);
   if (!shouldSandboxSession(cfg, rawSessionKey, mainKey)) return null;
 
   const agentWorkspaceDir = resolveUserPath(

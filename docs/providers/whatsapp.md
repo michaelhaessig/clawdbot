@@ -59,8 +59,8 @@ When the wizard asks for your personal WhatsApp number, enter the phone you will
 }
 ```
 
-Tip: if you set the routed agent’s `identity.name`, you can omit
-`messages.responsePrefix` and it will default to `[{identity.name}]`.
+Tip: set `messages.responsePrefix` explicitly if you want a consistent bot prefix
+on outbound replies.
 
 ### Number sourcing tips
 - **Local eSIM** from your country's mobile carrier (most reliable)
@@ -103,9 +103,9 @@ Tip: if you set the routed agent’s `identity.name`, you can omit
 If you run Clawdbot on your **personal WhatsApp number**, enable `whatsapp.selfChatMode` (see sample above).
 
 Behavior:
-- Suppresses pairing replies for **outbound DMs** (prevents spamming contacts).
+- Outbound DMs never trigger pairing replies (prevents spamming contacts).
 - Inbound unknown senders still follow `whatsapp.dmPolicy`.
-- Self-chat mode avoids auto read receipts and ignores mention JIDs.
+- Self-chat mode (allowFrom includes your number) avoids auto read receipts and ignores mention JIDs.
 - Read receipts sent for non-self-chat DMs.
 
 ## Message normalization (what the model sees)
@@ -151,7 +151,8 @@ Behavior:
 
 ## Limits
 - Outbound text is chunked to `whatsapp.textChunkLimit` (default 4000).
-- Media items are capped by `agents.defaults.mediaMaxMb` (default 5 MB).
+- Inbound media saves are capped by `whatsapp.mediaMaxMb` (default 50 MB).
+- Outbound media items are capped by `agents.defaults.mediaMaxMb` (default 5 MB).
 
 ## Outbound send (text + media)
 - Uses active web listener; error if gateway not running.
@@ -166,7 +167,7 @@ Behavior:
     - Gateway: `send` params include `gifPlayback: true`
 
 ## Media limits + optimization
-- Default cap: 5 MB (per media item).
+- Default outbound cap: 5 MB (per media item).
 - Override: `agents.defaults.mediaMaxMb`.
 - Images are auto-optimized to JPEG under cap (resize + quality sweep).
 - Oversize media => error; media reply falls back to text warning.
@@ -185,16 +186,18 @@ Behavior:
 
 ## Config quick map
 - `whatsapp.dmPolicy` (DM policy: pairing/allowlist/open/disabled).
-- `whatsapp.selfChatMode` (same-phone setup; suppress pairing replies for outbound DMs).
+- `whatsapp.selfChatMode` (same-phone setup; bot uses your personal WhatsApp number).
 - `whatsapp.allowFrom` (DM allowlist).
+- `whatsapp.mediaMaxMb` (inbound media save cap).
 - `whatsapp.accounts.<accountId>.*` (per-account settings + optional `authDir`).
+- `whatsapp.accounts.<accountId>.mediaMaxMb` (per-account inbound media cap).
 - `whatsapp.groupAllowFrom` (group sender allowlist).
 - `whatsapp.groupPolicy` (group policy).
 - `whatsapp.groups` (group allowlist + mention gating defaults; use `"*"` to allow all)
 - `whatsapp.actions.reactions` (gate WhatsApp tool reactions).
 - `agents.list[].groupChat.mentionPatterns` (or `messages.groupChat.mentionPatterns`)
 - `messages.groupChat.historyLimit`
-- `messages.messagePrefix` (inbound prefix)
+- `whatsapp.messagePrefix` (inbound prefix; per-account: `whatsapp.accounts.<accountId>.messagePrefix`; deprecated: `messages.messagePrefix`)
 - `messages.responsePrefix` (outbound prefix)
 - `agents.defaults.mediaMaxMb`
 - `agents.defaults.heartbeat.every`

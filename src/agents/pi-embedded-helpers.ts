@@ -103,7 +103,17 @@ export async function sanitizeSessionMessagesImages(
         content as ContentBlock[],
         label,
       )) as unknown as typeof toolMsg.content;
-      out.push({ ...toolMsg, content: nextContent });
+      const sanitizedToolCallId = toolMsg.toolCallId
+        ? sanitizeToolCallId(toolMsg.toolCallId)
+        : undefined;
+      const sanitizedMsg = {
+        ...toolMsg,
+        content: nextContent,
+        ...(sanitizedToolCallId && {
+          toolCallId: sanitizedToolCallId,
+        }),
+      };
+      out.push(sanitizedMsg);
       continue;
     }
 
@@ -133,14 +143,32 @@ export async function sanitizeSessionMessagesImages(
           if (rec.type !== "text" || typeof rec.text !== "string") return true;
           return rec.text.trim().length > 0;
         });
-        const sanitizedContent = (await sanitizeContentBlocksImages(
-          filteredContent as unknown as ContentBlock[],
+        // Also sanitize tool call IDs in assistant messages (function call blocks)
+        const sanitizedContent = await Promise.all(
+          filteredContent.map(async (block) => {
+            if (
+              block &&
+              typeof block === "object" &&
+              (block as { type?: unknown }).type === "functionCall" &&
+              (block as { id?: unknown }).id
+            ) {
+              const functionBlock = block as { type: string; id: string };
+              return {
+                ...functionBlock,
+                id: sanitizeToolCallId(functionBlock.id),
+              };
+            }
+            return block;
+          }),
+        );
+        const finalContent = (await sanitizeContentBlocksImages(
+          sanitizedContent as unknown as ContentBlock[],
           label,
         )) as unknown as typeof assistantMsg.content;
-        if (sanitizedContent.length === 0) {
+        if (finalContent.length === 0) {
           continue;
         }
-        out.push({ ...assistantMsg, content: sanitizedContent });
+        out.push({ ...assistantMsg, content: finalContent });
         continue;
       }
     }
@@ -248,33 +276,100 @@ export function isRateLimitAssistantError(
   msg: AssistantMessage | undefined,
 ): boolean {
   if (!msg || msg.stopReason !== "error") return false;
-  const raw = (msg.errorMessage ?? "").toLowerCase();
+  return isRateLimitErrorMessage(msg.errorMessage ?? "");
+}
+
+type ErrorPattern = RegExp | string;
+
+const ERROR_PATTERNS = {
+  rateLimit: [
+    /rate[_ ]limit|too many requests|429/,
+    "exceeded your current quota",
+    "resource has been exhausted",
+    "quota exceeded",
+    "resource_exhausted",
+  ],
+  timeout: [
+    "timeout",
+    "timed out",
+    "deadline exceeded",
+    "context deadline exceeded",
+  ],
+  billing: [
+    /\b402\b/,
+    "payment required",
+    "insufficient credits",
+    "credit balance",
+    "plans & billing",
+  ],
+  auth: [
+    /invalid[_ ]?api[_ ]?key/,
+    "incorrect api key",
+    "invalid token",
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "access denied",
+    "expired",
+    "token has expired",
+    /\b401\b/,
+    /\b403\b/,
+  ],
+  format: [
+    "invalid_request_error",
+    "string should match pattern",
+    "tool_use.id",
+    "tool_use_id",
+    "messages.1.content.1.tool_use.id",
+    "invalid request format",
+  ],
+} as const;
+
+function matchesErrorPatterns(
+  raw: string,
+  patterns: readonly ErrorPattern[],
+): boolean {
   if (!raw) return false;
-  return isRateLimitErrorMessage(raw);
+  const value = raw.toLowerCase();
+  return patterns.some((pattern) =>
+    pattern instanceof RegExp ? pattern.test(value) : value.includes(pattern),
+  );
 }
 
 export function isRateLimitErrorMessage(raw: string): boolean {
+  return matchesErrorPatterns(raw, ERROR_PATTERNS.rateLimit);
+}
+
+export function isTimeoutErrorMessage(raw: string): boolean {
+  return matchesErrorPatterns(raw, ERROR_PATTERNS.timeout);
+}
+
+export function isBillingErrorMessage(raw: string): boolean {
   const value = raw.toLowerCase();
+  if (!value) return false;
+  if (matchesErrorPatterns(value, ERROR_PATTERNS.billing)) return true;
   return (
-    /rate[_ ]limit|too many requests|429/.test(value) ||
-    value.includes("exceeded your current quota")
+    value.includes("billing") &&
+    (value.includes("upgrade") ||
+      value.includes("credits") ||
+      value.includes("payment") ||
+      value.includes("plan"))
   );
 }
 
+export function isBillingAssistantError(
+  msg: AssistantMessage | undefined,
+): boolean {
+  if (!msg || msg.stopReason !== "error") return false;
+  return isBillingErrorMessage(msg.errorMessage ?? "");
+}
+
 export function isAuthErrorMessage(raw: string): boolean {
-  const value = raw.toLowerCase();
-  if (!value) return false;
-  return (
-    /invalid[_ ]?api[_ ]?key/.test(value) ||
-    value.includes("incorrect api key") ||
-    value.includes("invalid token") ||
-    value.includes("authentication") ||
-    value.includes("unauthorized") ||
-    value.includes("forbidden") ||
-    value.includes("access denied") ||
-    /\b401\b/.test(value) ||
-    /\b403\b/.test(value)
-  );
+  return matchesErrorPatterns(raw, ERROR_PATTERNS.auth);
+}
+
+export function isCloudCodeAssistFormatError(raw: string): boolean {
+  return matchesErrorPatterns(raw, ERROR_PATTERNS.format);
 }
 
 export function isAuthAssistantError(
@@ -282,6 +377,34 @@ export function isAuthAssistantError(
 ): boolean {
   if (!msg || msg.stopReason !== "error") return false;
   return isAuthErrorMessage(msg.errorMessage ?? "");
+}
+
+export type FailoverReason =
+  | "auth"
+  | "format"
+  | "rate_limit"
+  | "billing"
+  | "timeout"
+  | "unknown";
+
+export function classifyFailoverReason(raw: string): FailoverReason | null {
+  if (isRateLimitErrorMessage(raw)) return "rate_limit";
+  if (isCloudCodeAssistFormatError(raw)) return "format";
+  if (isBillingErrorMessage(raw)) return "billing";
+  if (isTimeoutErrorMessage(raw)) return "timeout";
+  if (isAuthErrorMessage(raw)) return "auth";
+  return null;
+}
+
+export function isFailoverErrorMessage(raw: string): boolean {
+  return classifyFailoverReason(raw) !== null;
+}
+
+export function isFailoverAssistantError(
+  msg: AssistantMessage | undefined,
+): boolean {
+  if (!msg || msg.stopReason !== "error") return false;
+  return isFailoverErrorMessage(msg.errorMessage ?? "");
 }
 
 function extractSupportedValues(raw: string): string[] {
@@ -421,6 +544,31 @@ export function normalizeTextForComparison(text: string): string {
  * Uses substring matching to handle LLM elaboration (e.g., wrapping in quotes,
  * adding context, or slight rephrasing that includes the original).
  */
+// ── Tool Call ID Sanitization (Google Cloud Code Assist) ───────────────────────
+// Google Cloud Code Assist rejects tool call IDs that contain invalid characters.
+// OpenAI Codex generates IDs like "call_abc123|item_456" with pipe characters,
+// but Google requires IDs matching ^[a-zA-Z0-9_-]+$ pattern.
+// This function sanitizes tool call IDs by replacing invalid characters with underscores.
+
+export function sanitizeToolCallId(id: string): string {
+  if (!id || typeof id !== "string") return "default_tool_id";
+
+  const cloudCodeAssistPatternReplacement = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const trimmedInvalidStartChars = cloudCodeAssistPatternReplacement.replace(
+    /^[^a-zA-Z0-9_-]+/,
+    "",
+  );
+
+  return trimmedInvalidStartChars.length > 0
+    ? trimmedInvalidStartChars
+    : "sanitized_tool_id";
+}
+
+export function isValidCloudCodeAssistToolId(id: string): boolean {
+  if (!id || typeof id !== "string") return false;
+  return /^[a-zA-Z0-9_-]+$/.test(id);
+}
+
 export function isMessagingToolDuplicate(
   text: string,
   sentTexts: string[],

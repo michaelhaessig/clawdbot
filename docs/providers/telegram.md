@@ -131,6 +131,10 @@ Send in the group:
 
 Forward any message from the group to `@userinfobot` or `@getidsbot` on Telegram to see the chat ID (negative number like `-1001234567890`).
 
+**Tip:** For your own user ID, DM `@userinfobot` with `/start`. Useful for allowlists or debugging access control.
+
+**Privacy note:** `@userinfobot` is a third-party bot. If you prefer, use gateway logs (`clawdbot logs`) or Telegram developer tools to find user/chat IDs.
+
 ## Topics (forum supergroups)
 Telegram forum topics include a `message_thread_id` per message. Clawdbot:
 - Appends `:topic:<threadId>` to the Telegram group session key so each topic is isolated.
@@ -205,6 +209,10 @@ Config:
   - `partial`: update the draft bubble with the latest streaming text.
   - `block`: update the draft bubble in larger blocks (chunked).
   - `off`: disable draft streaming.
+
+Note: draft streaming is separate from **block streaming** (provider messages).
+Block streaming is off by default and requires `telegram.blockStreaming: true`
+if you want early Telegram messages instead of draft updates.
 
 Reasoning stream (Telegram only):
 - `/reasoning stream` streams reasoning into the draft bubble while the reply is
@@ -283,4 +291,4 @@ Related global options:
 - `agents.list[].groupChat.mentionPatterns` (mention gating patterns).
 - `messages.groupChat.mentionPatterns` (global fallback).
 - `commands.native`, `commands.text`, `commands.useAccessGroups` (command behavior).
-- `messages.responsePrefix`, `messages.ackReaction`, `messages.ackReactionScope`.
+- `messages.responsePrefix`, `messages.ackReaction`, `messages.ackReactionScope`, `messages.removeAckAfterReply`.

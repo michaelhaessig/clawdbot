@@ -2,6 +2,7 @@ import {
   resolveAgentConfig,
   resolveAgentDir,
   resolveDefaultAgentId,
+  resolveSessionAgentId,
 } from "../../agents/agent-scope.js";
 import {
   isProfileInCooldown,
@@ -31,12 +32,12 @@ import {
 import { resolveSandboxConfigForAgent } from "../../agents/sandbox.js";
 import type { ClawdbotConfig } from "../../config/config.js";
 import {
-  resolveAgentIdFromSessionKey,
   resolveAgentMainSessionKey,
   type SessionEntry,
   saveSessionStore,
 } from "../../config/sessions.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
+import { applyVerboseOverride } from "../../sessions/level-overrides.js";
 import { shortenHomePath } from "../../utils.js";
 import { extractModelDirective } from "../model.js";
 import type { MsgContext } from "../templating.js";
@@ -447,7 +448,7 @@ export async function handleDirectiveOnly(params: {
   directives: InlineDirectives;
   sessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
-  sessionKey?: string;
+  sessionKey: string;
   storePath?: string;
   elevatedEnabled: boolean;
   elevatedAllowed: boolean;
@@ -490,14 +491,18 @@ export async function handleDirectiveOnly(params: {
     currentReasoningLevel,
     currentElevatedLevel,
   } = params;
-  const activeAgentId = params.sessionKey
-    ? resolveAgentIdFromSessionKey(params.sessionKey)
-    : resolveDefaultAgentId(params.cfg);
+  const activeAgentId = resolveSessionAgentId({
+    sessionKey: params.sessionKey,
+    config: params.cfg,
+  });
   const agentDir = resolveAgentDir(params.cfg, activeAgentId);
   const runtimeIsSandboxed = (() => {
     const sessionKey = params.sessionKey?.trim();
     if (!sessionKey) return false;
-    const agentId = resolveAgentIdFromSessionKey(sessionKey);
+    const agentId = resolveSessionAgentId({
+      sessionKey,
+      config: params.cfg,
+    });
     const sandboxCfg = resolveSandboxConfigForAgent(params.cfg, agentId);
     if (sandboxCfg.mode === "off") return false;
     const mainKey = resolveAgentMainSessionKey({
@@ -836,6 +841,7 @@ export async function handleDirectiveOnly(params: {
         enqueueSystemEvent(
           formatModelSwitchEvent(nextLabel, modelSelection.alias),
           {
+            sessionKey,
             contextKey: `model:${nextLabel}`,
           },
         );
@@ -852,8 +858,7 @@ export async function handleDirectiveOnly(params: {
       else sessionEntry.thinkingLevel = directives.thinkLevel;
     }
     if (directives.hasVerboseDirective && directives.verboseLevel) {
-      if (directives.verboseLevel === "off") delete sessionEntry.verboseLevel;
-      else sessionEntry.verboseLevel = directives.verboseLevel;
+      applyVerboseOverride(sessionEntry, directives.verboseLevel);
     }
     if (directives.hasReasoningDirective && directives.reasoningLevel) {
       if (directives.reasoningLevel === "off")
@@ -861,8 +866,9 @@ export async function handleDirectiveOnly(params: {
       else sessionEntry.reasoningLevel = directives.reasoningLevel;
     }
     if (directives.hasElevatedDirective && directives.elevatedLevel) {
-      if (directives.elevatedLevel === "off") delete sessionEntry.elevatedLevel;
-      else sessionEntry.elevatedLevel = directives.elevatedLevel;
+      // Unlike other toggles, elevated defaults can be "on".
+      // Persist "off" explicitly so `/elevated off` actually overrides defaults.
+      sessionEntry.elevatedLevel = directives.elevatedLevel;
     }
     if (modelSelection) {
       if (modelSelection.isDefault) {
@@ -1012,7 +1018,7 @@ export async function persistInlineDirectives(params: {
   } = params;
   let { provider, model } = params;
   const activeAgentId = sessionKey
-    ? resolveAgentIdFromSessionKey(sessionKey)
+    ? resolveSessionAgentId({ sessionKey, config: cfg })
     : resolveDefaultAgentId(cfg);
   const agentDir = resolveAgentDir(cfg, activeAgentId);
 
@@ -1027,11 +1033,7 @@ export async function persistInlineDirectives(params: {
       updated = true;
     }
     if (directives.hasVerboseDirective && directives.verboseLevel) {
-      if (directives.verboseLevel === "off") {
-        delete sessionEntry.verboseLevel;
-      } else {
-        sessionEntry.verboseLevel = directives.verboseLevel;
-      }
+      applyVerboseOverride(sessionEntry, directives.verboseLevel);
       updated = true;
     }
     if (directives.hasReasoningDirective && directives.reasoningLevel) {
@@ -1048,11 +1050,8 @@ export async function persistInlineDirectives(params: {
       elevatedEnabled &&
       elevatedAllowed
     ) {
-      if (directives.elevatedLevel === "off") {
-        delete sessionEntry.elevatedLevel;
-      } else {
-        sessionEntry.elevatedLevel = directives.elevatedLevel;
-      }
+      // Persist "off" explicitly so inline `/elevated off` overrides defaults.
+      sessionEntry.elevatedLevel = directives.elevatedLevel;
       updated = true;
     }
     const modelDirective =
@@ -1103,6 +1102,7 @@ export async function persistInlineDirectives(params: {
             enqueueSystemEvent(
               formatModelSwitchEvent(nextLabel, resolved.alias),
               {
+                sessionKey,
                 contextKey: `model:${nextLabel}`,
               },
             );

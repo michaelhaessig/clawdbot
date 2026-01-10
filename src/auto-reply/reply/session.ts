@@ -6,6 +6,7 @@ import {
   CURRENT_SESSION_VERSION,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
+import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import type { ClawdbotConfig } from "../../config/config.js";
 import {
   buildGroupDisplayName,
@@ -13,7 +14,6 @@ import {
   DEFAULT_RESET_TRIGGERS,
   type GroupKeyResolution,
   loadSessionStore,
-  resolveAgentIdFromSessionKey,
   resolveGroupSessionKey,
   resolveSessionFilePath,
   resolveSessionKey,
@@ -23,6 +23,7 @@ import {
   type SessionScope,
   saveSessionStore,
 } from "../../config/sessions.js";
+import { normalizeMainKey } from "../../routing/session-key.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
@@ -90,8 +91,11 @@ export async function initSessionState(params: {
 }): Promise<SessionInitResult> {
   const { ctx, cfg, commandAuthorized } = params;
   const sessionCfg = cfg.session;
-  const mainKey = sessionCfg?.mainKey ?? "main";
-  const agentId = resolveAgentIdFromSessionKey(ctx.SessionKey);
+  const mainKey = normalizeMainKey(sessionCfg?.mainKey);
+  const agentId = resolveSessionAgentId({
+    sessionKey: ctx.SessionKey,
+    config: cfg,
+  });
   const resetTriggers = sessionCfg?.resetTriggers?.length
     ? sessionCfg.resetTriggers
     : DEFAULT_RESET_TRIGGERS;

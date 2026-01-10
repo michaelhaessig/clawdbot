@@ -3,12 +3,17 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
   buildBootstrapContextFiles,
+  classifyFailoverReason,
   formatAssistantErrorText,
+  isBillingErrorMessage,
+  isCloudCodeAssistFormatError,
   isContextOverflowError,
+  isFailoverErrorMessage,
   isMessagingToolDuplicate,
   normalizeTextForComparison,
   sanitizeGoogleTurnOrdering,
   sanitizeSessionMessagesImages,
+  sanitizeToolCallId,
   validateGeminiTurns,
 } from "./pi-embedded-helpers.js";
 import {
@@ -215,6 +220,78 @@ describe("isContextOverflowError", () => {
   });
 });
 
+describe("isBillingErrorMessage", () => {
+  it("matches credit / payment failures", () => {
+    const samples = [
+      "Your credit balance is too low to access the Anthropic API.",
+      "insufficient credits",
+      "Payment Required",
+      "HTTP 402 Payment Required",
+      "plans & billing",
+      "billing: please upgrade your plan",
+    ];
+    for (const sample of samples) {
+      expect(isBillingErrorMessage(sample)).toBe(true);
+    }
+  });
+
+  it("ignores unrelated errors", () => {
+    expect(isBillingErrorMessage("rate limit exceeded")).toBe(false);
+    expect(isBillingErrorMessage("invalid api key")).toBe(false);
+    expect(isBillingErrorMessage("context length exceeded")).toBe(false);
+  });
+});
+
+describe("isFailoverErrorMessage", () => {
+  it("matches auth/rate/billing/timeout", () => {
+    const samples = [
+      "invalid api key",
+      "429 rate limit exceeded",
+      "Your credit balance is too low",
+      "request timed out",
+      "invalid request format",
+    ];
+    for (const sample of samples) {
+      expect(isFailoverErrorMessage(sample)).toBe(true);
+    }
+  });
+});
+
+describe("classifyFailoverReason", () => {
+  it("returns a stable reason", () => {
+    expect(classifyFailoverReason("invalid api key")).toBe("auth");
+    expect(classifyFailoverReason("429 too many requests")).toBe("rate_limit");
+    expect(classifyFailoverReason("resource has been exhausted")).toBe(
+      "rate_limit",
+    );
+    expect(classifyFailoverReason("invalid request format")).toBe("format");
+    expect(classifyFailoverReason("credit balance too low")).toBe("billing");
+    expect(classifyFailoverReason("deadline exceeded")).toBe("timeout");
+    expect(classifyFailoverReason("string should match pattern")).toBe(
+      "format",
+    );
+    expect(classifyFailoverReason("bad request")).toBeNull();
+  });
+});
+
+describe("isCloudCodeAssistFormatError", () => {
+  it("matches format errors", () => {
+    const samples = [
+      "INVALID_REQUEST_ERROR: string should match pattern",
+      "messages.1.content.1.tool_use.id",
+      "tool_use.id should match pattern",
+      "invalid request format",
+    ];
+    for (const sample of samples) {
+      expect(isCloudCodeAssistFormatError(sample)).toBe(true);
+    }
+  });
+
+  it("ignores unrelated errors", () => {
+    expect(isCloudCodeAssistFormatError("rate limit exceeded")).toBe(false);
+  });
+});
+
 describe("formatAssistantErrorText", () => {
   const makeAssistantError = (errorMessage: string): AssistantMessage =>
     ({
@@ -225,6 +302,20 @@ describe("formatAssistantErrorText", () => {
   it("returns a friendly message for context overflow", () => {
     const msg = makeAssistantError("request_too_large");
     expect(formatAssistantErrorText(msg)).toContain("Context overflow");
+  });
+});
+
+describe("sanitizeToolCallId", () => {
+  it("keeps valid tool call IDs", () => {
+    expect(sanitizeToolCallId("call_abc-123")).toBe("call_abc-123");
+  });
+
+  it("replaces invalid characters with underscores", () => {
+    expect(sanitizeToolCallId("call_abc|item:456")).toBe("call_abc_item_456");
+  });
+
+  it("returns default for empty IDs", () => {
+    expect(sanitizeToolCallId("")).toBe("default_tool_id");
   });
 });
 

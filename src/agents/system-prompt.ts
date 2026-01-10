@@ -1,4 +1,5 @@
 import type { ThinkLevel } from "../auto-reply/thinking.js";
+import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 
 export function buildAgentSystemPrompt(params: {
@@ -12,6 +13,7 @@ export function buildAgentSystemPrompt(params: {
   userTimezone?: string;
   userTime?: string;
   contextFiles?: EmbeddedContextFile[];
+  skillsPrompt?: string;
   heartbeatPrompt?: string;
   runtimeInfo?: {
     host?: string;
@@ -19,6 +21,8 @@ export function buildAgentSystemPrompt(params: {
     arch?: string;
     node?: string;
     model?: string;
+    provider?: string;
+    capabilities?: string[];
   };
   sandboxInfo?: {
     enabled: boolean;
@@ -43,6 +47,7 @@ export function buildAgentSystemPrompt(params: {
     canvas: "Present/eval/snapshot the Canvas",
     nodes: "List/describe/notify/camera/screen on paired nodes",
     cron: "Manage cron jobs and wake events",
+    message: "Send messages and provider actions",
     gateway:
       "Restart, apply config, or run updates on the running Clawdbot process",
     agents_list: "List agent ids allowed for sessions_spawn",
@@ -50,11 +55,9 @@ export function buildAgentSystemPrompt(params: {
     sessions_history: "Fetch history for another session/sub-agent",
     sessions_send: "Send a message to another session/sub-agent",
     sessions_spawn: "Spawn a sub-agent session",
+    session_status:
+      "Show a /status-equivalent status card (includes usage + cost when available); optional per-session model override",
     image: "Analyze an image with the configured image model",
-    discord: "Send Discord reactions/messages and manage threads",
-    slack: "Send Slack messages and manage channels",
-    telegram: "Send Telegram reactions",
-    whatsapp: "Send WhatsApp reactions",
   };
 
   const toolOrder = [
@@ -71,21 +74,29 @@ export function buildAgentSystemPrompt(params: {
     "canvas",
     "nodes",
     "cron",
+    "message",
     "gateway",
     "agents_list",
     "sessions_list",
     "sessions_history",
     "sessions_send",
+    "session_status",
     "image",
-    "discord",
-    "slack",
-    "telegram",
-    "whatsapp",
   ];
 
-  const normalizedTools = (params.toolNames ?? [])
-    .map((tool) => tool.trim().toLowerCase())
-    .filter(Boolean);
+  const rawToolNames = (params.toolNames ?? []).map((tool) => tool.trim());
+  const canonicalToolNames = rawToolNames.filter(Boolean);
+  const canonicalByNormalized = new Map<string, string>();
+  for (const name of canonicalToolNames) {
+    const normalized = name.toLowerCase();
+    if (!canonicalByNormalized.has(normalized)) {
+      canonicalByNormalized.set(normalized, name);
+    }
+  }
+  const resolveToolName = (normalized: string) =>
+    canonicalByNormalized.get(normalized) ?? normalized;
+
+  const normalizedTools = canonicalToolNames.map((tool) => tool.toLowerCase());
   const availableTools = new Set(normalizedTools);
   const extraTools = Array.from(
     new Set(normalizedTools.filter((tool) => !toolOrder.includes(tool))),
@@ -93,13 +104,17 @@ export function buildAgentSystemPrompt(params: {
   const enabledTools = toolOrder.filter((tool) => availableTools.has(tool));
   const toolLines = enabledTools.map((tool) => {
     const summary = toolSummaries[tool];
-    return summary ? `- ${tool}: ${summary}` : `- ${tool}`;
+    const name = resolveToolName(tool);
+    return summary ? `- ${name}: ${summary}` : `- ${name}`;
   });
   for (const tool of extraTools.sort()) {
-    toolLines.push(`- ${tool}`);
+    toolLines.push(`- ${resolveToolName(tool)}`);
   }
 
   const hasGateway = availableTools.has("gateway");
+  const readToolName = resolveToolName("read");
+  const bashToolName = resolveToolName("bash");
+  const processToolName = resolveToolName("process");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
   const ownerNumbers = (params.ownerNumbers ?? [])
     .map((value) => value.trim())
@@ -122,17 +137,38 @@ export function buildAgentSystemPrompt(params: {
     : undefined;
   const userTimezone = params.userTimezone?.trim();
   const userTime = params.userTime?.trim();
+  const skillsPrompt = params.skillsPrompt?.trim();
   const heartbeatPrompt = params.heartbeatPrompt?.trim();
   const heartbeatPromptLine = heartbeatPrompt
     ? `Heartbeat prompt: ${heartbeatPrompt}`
     : "Heartbeat prompt: (configured)";
   const runtimeInfo = params.runtimeInfo;
+  const runtimeProvider = runtimeInfo?.provider?.trim().toLowerCase();
+  const runtimeCapabilities = (runtimeInfo?.capabilities ?? [])
+    .map((cap) => String(cap).trim())
+    .filter(Boolean);
+  const runtimeCapabilitiesLower = new Set(
+    runtimeCapabilities.map((cap) => cap.toLowerCase()),
+  );
+  const telegramInlineButtonsEnabled =
+    runtimeProvider === "telegram" &&
+    runtimeCapabilitiesLower.has("inlinebuttons");
+  const skillsLines = skillsPrompt ? [skillsPrompt, ""] : [];
+  const skillsSection = skillsPrompt
+    ? [
+        "## Skills",
+        `Skills provide task-specific instructions. Use \`${readToolName}\` to load the SKILL.md at the location listed for that skill.`,
+        ...skillsLines,
+        "",
+      ]
+    : [];
 
   const lines = [
     "You are a personal assistant running inside Clawdbot.",
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",
+    "Tool names are case-sensitive. Call tools exactly as listed.",
     toolLines.length > 0
       ? toolLines.join("\n")
       : [
@@ -140,8 +176,8 @@ export function buildAgentSystemPrompt(params: {
           "- grep: search file contents for patterns",
           "- find: find files by glob pattern",
           "- ls: list directory contents",
-          "- bash: run shell commands (supports background via yieldMs/background)",
-          "- process: manage background bash sessions",
+          `- ${bashToolName}: run shell commands (supports background via yieldMs/background)`,
+          `- ${processToolName}: manage background bash sessions`,
           "- whatsapp_login: generate a WhatsApp QR code and wait for linking",
           "- browser: control clawd's dedicated browser",
           "- canvas: present/eval/snapshot the Canvas",
@@ -154,9 +190,7 @@ export function buildAgentSystemPrompt(params: {
     "TOOLS.md does not control tool availability; it is user guidance for how to use external tools.",
     "If a task is more complex or takes longer, spawn a sub-agent. It will do the work for you and ping you when it's done. You can always check up on it.",
     "",
-    "## Skills",
-    `Skills provide task-specific instructions. Use \`read\` to load from ${params.workspaceDir}/skills/<name>/SKILL.md when needed.`,
-    "",
+    ...skillsSection,
     hasGateway ? "## Clawdbot Self-Update" : "",
     hasGateway
       ? [
@@ -229,6 +263,21 @@ export function buildAgentSystemPrompt(params: {
     "- Reply in current session → automatically routes to the source provider (Signal, Telegram, etc.)",
     "- Cross-session messaging → use sessions_send(sessionKey, message)",
     "- Never use bash/curl for provider messaging; Clawdbot handles all routing internally.",
+    availableTools.has("message")
+      ? [
+          "",
+          "### message tool",
+          "- Use `message` for proactive sends + provider actions (polls, reactions, etc.).",
+          "- If multiple providers are configured, pass `provider` (whatsapp|telegram|discord|slack|signal|imessage|msteams).",
+          telegramInlineButtonsEnabled
+            ? "- Telegram: inline buttons supported. Use `action=send` with `buttons=[[{text,callback_data}]]` (callback_data routes back as a user message)."
+            : runtimeProvider === "telegram"
+              ? '- Telegram: inline buttons NOT enabled. If you need them, ask to add "inlineButtons" to telegram.capabilities or telegram.accounts.<id>.capabilities.'
+              : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "",
     "",
   ];
 
@@ -253,6 +302,18 @@ export function buildAgentSystemPrompt(params: {
   }
 
   lines.push(
+    "## Silent Replies",
+    `When you have nothing to say, respond with ONLY: ${SILENT_REPLY_TOKEN}`,
+    "",
+    "⚠️ Rules:",
+    "- It must be your ENTIRE message — nothing else",
+    `- Never append it to an actual response (never include "${SILENT_REPLY_TOKEN}" in real replies)`,
+    "- Never wrap it in markdown or code blocks",
+    "",
+    `❌ Wrong: "Here's help... ${SILENT_REPLY_TOKEN}"`,
+    `❌ Wrong: "${SILENT_REPLY_TOKEN}"`,
+    `✅ Right: ${SILENT_REPLY_TOKEN}`,
+    "",
     "## Heartbeats",
     heartbeatPromptLine,
     "If you receive a heartbeat poll (a user message matching the heartbeat prompt above), and there is nothing that needs attention, reply exactly:",
@@ -270,6 +331,14 @@ export function buildAgentSystemPrompt(params: {
           : "",
       runtimeInfo?.node ? `node=${runtimeInfo.node}` : "",
       runtimeInfo?.model ? `model=${runtimeInfo.model}` : "",
+      runtimeProvider ? `provider=${runtimeProvider}` : "",
+      runtimeProvider
+        ? `capabilities=${
+            runtimeCapabilities.length > 0
+              ? runtimeCapabilities.join(",")
+              : "none"
+          }`
+        : "",
       `thinking=${params.defaultThinkLevel ?? "off"}`,
     ]
       .filter(Boolean)

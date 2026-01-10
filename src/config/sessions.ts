@@ -9,8 +9,8 @@ import type { MsgContext } from "../auto-reply/templating.js";
 import {
   buildAgentMainSessionKey,
   DEFAULT_AGENT_ID,
-  DEFAULT_MAIN_KEY,
   normalizeAgentId,
+  normalizeMainKey,
   resolveAgentIdFromSessionKey,
 } from "../routing/session-key.js";
 import { normalizeE164 } from "../utils.js";
@@ -19,6 +19,7 @@ import {
   isCacheEnabled,
   resolveCacheTtlMs,
 } from "./cache-utils.js";
+import { loadConfig } from "./config.js";
 import { resolveStateDir } from "./paths.js";
 
 // ============================================================================
@@ -227,9 +228,12 @@ export function resolveMainSessionKey(cfg?: {
     agents[0]?.id ??
     DEFAULT_AGENT_ID;
   const agentId = normalizeAgentId(defaultAgentId);
-  const mainKey =
-    (cfg?.session?.mainKey ?? DEFAULT_MAIN_KEY).trim() || DEFAULT_MAIN_KEY;
+  const mainKey = normalizeMainKey(cfg?.session?.mainKey);
   return buildAgentMainSessionKey({ agentId, mainKey });
+}
+
+export function resolveMainSessionKeyFromConfig(): string {
+  return resolveMainSessionKey(loadConfig());
 }
 
 export { resolveAgentIdFromSessionKey };
@@ -238,9 +242,7 @@ export function resolveAgentMainSessionKey(params: {
   cfg?: { session?: { mainKey?: string } };
   agentId: string;
 }): string {
-  const mainKey =
-    (params.cfg?.session?.mainKey ?? DEFAULT_MAIN_KEY).trim() ||
-    DEFAULT_MAIN_KEY;
+  const mainKey = normalizeMainKey(params.cfg?.session?.mainKey);
   return buildAgentMainSessionKey({ agentId: params.agentId, mainKey });
 }
 
@@ -485,31 +487,11 @@ export async function updateLastRoute(params: {
   const store = loadSessionStore(storePath);
   const existing = store[sessionKey];
   const now = Date.now();
+  const sessionId = existing?.sessionId ?? crypto.randomUUID();
   const next: SessionEntry = {
-    sessionId: existing?.sessionId ?? crypto.randomUUID(),
+    ...(existing ?? { sessionId, updatedAt: 0 }),
+    sessionId,
     updatedAt: Math.max(existing?.updatedAt ?? 0, now),
-    sessionFile: existing?.sessionFile,
-    systemSent: existing?.systemSent,
-    abortedLastRun: existing?.abortedLastRun,
-    thinkingLevel: existing?.thinkingLevel,
-    verboseLevel: existing?.verboseLevel,
-    providerOverride: existing?.providerOverride,
-    modelOverride: existing?.modelOverride,
-    sendPolicy: existing?.sendPolicy,
-    queueMode: existing?.queueMode,
-    inputTokens: existing?.inputTokens,
-    outputTokens: existing?.outputTokens,
-    totalTokens: existing?.totalTokens,
-    modelProvider: existing?.modelProvider,
-    model: existing?.model,
-    contextTokens: existing?.contextTokens,
-    displayName: existing?.displayName,
-    chatType: existing?.chatType,
-    provider: existing?.provider,
-    subject: existing?.subject,
-    room: existing?.room,
-    space: existing?.space,
-    skillsSnapshot: existing?.skillsSnapshot,
     lastProvider: provider,
     lastTo: to?.trim() ? to.trim() : undefined,
     lastAccountId: accountId?.trim()
@@ -543,8 +525,7 @@ export function resolveSessionKey(
   if (explicit) return explicit;
   const raw = deriveSessionKey(scope, ctx);
   if (scope === "global") return raw;
-  const canonicalMainKey =
-    (mainKey ?? DEFAULT_MAIN_KEY).trim() || DEFAULT_MAIN_KEY;
+  const canonicalMainKey = normalizeMainKey(mainKey);
   const canonical = buildAgentMainSessionKey({
     agentId: DEFAULT_AGENT_ID,
     mainKey: canonicalMainKey,

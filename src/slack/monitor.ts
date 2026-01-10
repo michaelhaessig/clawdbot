@@ -29,7 +29,7 @@ import {
 } from "../auto-reply/reply/mentions.js";
 import { createReplyDispatcherWithTyping } from "../auto-reply/reply/reply-dispatcher.js";
 import { getReplyFromConfig } from "../auto-reply/reply.js";
-import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import type {
   ClawdbotConfig,
@@ -45,7 +45,7 @@ import {
 import { danger, logVerbose, shouldLogVerbose } from "../globals.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
-import { detectMime } from "../media/mime.js";
+import { type FetchLike, fetchRemoteMedia } from "../media/fetch.js";
 import { saveMediaBuffer } from "../media/store.js";
 import { buildPairingReply } from "../pairing/pairing-messages.js";
 import {
@@ -53,10 +53,13 @@ import {
   upsertProviderPairingRequest,
 } from "../pairing/pairing-store.js";
 import { resolveAgentRoute } from "../routing/resolve-route.js";
-import { resolveThreadSessionKeys } from "../routing/session-key.js";
+import {
+  normalizeMainKey,
+  resolveThreadSessionKeys,
+} from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { resolveSlackAccount } from "./accounts.js";
-import { reactSlackMessage } from "./actions.js";
+import { reactSlackMessage, removeSlackReaction } from "./actions.js";
 import { sendMessageSlack } from "./send.js";
 import { resolveSlackThreadTargets } from "./threading.js";
 import { resolveSlackAppToken, resolveSlackBotToken } from "./token.js";
@@ -352,27 +355,28 @@ async function resolveSlackMedia(params: {
     const url = file.url_private_download ?? file.url_private;
     if (!url) continue;
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${params.token}` },
+      const fetchImpl: FetchLike = (input, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("Authorization", `Bearer ${params.token}`);
+        return fetch(input, { ...init, headers });
+      };
+      const fetched = await fetchRemoteMedia({
+        url,
+        fetchImpl,
+        filePathHint: file.name,
       });
-      if (!res.ok) continue;
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.byteLength > params.maxBytes) continue;
-      const contentType = await detectMime({
-        buffer,
-        headerMime: res.headers.get("content-type"),
-        filePath: file.name,
-      });
+      if (fetched.buffer.byteLength > params.maxBytes) continue;
       const saved = await saveMediaBuffer(
-        buffer,
-        contentType ?? file.mimetype,
+        fetched.buffer,
+        fetched.contentType ?? file.mimetype,
         "inbound",
         params.maxBytes,
       );
+      const label = fetched.fileName ?? file.name;
       return {
         path: saved.path,
         contentType: saved.contentType,
-        placeholder: file.name ? `[Slack file: ${file.name}]` : "[Slack file]",
+        placeholder: label ? `[Slack file: ${label}]` : "[Slack file]",
       };
     } catch {
       // Ignore download failures and fall through to the next file.
@@ -427,7 +431,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   });
   const sessionCfg = cfg.session;
   const sessionScope = sessionCfg?.scope ?? "per-sender";
-  const mainKey = (sessionCfg?.mainKey ?? "main").trim() || "main";
+  const mainKey = normalizeMainKey(sessionCfg?.mainKey);
 
   const resolveSlackSystemEventSessionKey = (params: {
     channelId?: string | null;
@@ -910,6 +914,8 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
     const rawBody = (message.text ?? "").trim() || media?.placeholder || "";
     if (!rawBody) return;
     const ackReaction = resolveAckReaction(cfg, route.agentId);
+    const ackReactionValue = ackReaction ?? "";
+    const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
     const shouldAckReaction = () => {
       if (!ackReaction) return false;
       if (ackReactionScope === "all") return true;
@@ -924,16 +930,27 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       }
       return false;
     };
-    if (shouldAckReaction() && message.ts) {
-      reactSlackMessage(message.channel, message.ts, ackReaction, {
-        token: botToken,
-        client: app.client,
-      }).catch((err) => {
-        logVerbose(
-          `slack react failed for channel ${message.channel}: ${String(err)}`,
-        );
-      });
-    }
+    const ackReactionMessageTs = message.ts;
+    const ackReactionPromise =
+      shouldAckReaction() && ackReactionMessageTs && ackReactionValue
+        ? reactSlackMessage(
+            message.channel,
+            ackReactionMessageTs,
+            ackReactionValue,
+            {
+              token: botToken,
+              client: app.client,
+            },
+          ).then(
+            () => true,
+            (err) => {
+              logVerbose(
+                `slack react failed for channel ${message.channel}: ${String(err)}`,
+              );
+              return false;
+            },
+          )
+        : null;
 
     const roomLabel = channelName ? `#${channelName}` : `#${message.channel}`;
 
@@ -1069,11 +1086,17 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       );
     }
 
-    const { replyThreadTs, statusThreadTs } = resolveSlackThreadTargets({
+    // Use helper for status thread; compute baseThreadTs for "first" mode support
+    const { statusThreadTs } = resolveSlackThreadTargets({
       message,
       replyToMode,
     });
+    const messageTs = message.ts ?? message.event_ts;
+    const incomingThreadTs = message.thread_ts;
     let didSetStatus = false;
+    // Shared mutable ref for tracking if a reply was sent (used by both
+    // auto-reply path and tool path for "first" threading mode).
+    const hasRepliedRef = { value: false };
     const onReplyStart = async () => {
       didSetStatus = true;
       await setSlackThreadStatus({
@@ -1087,6 +1110,12 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
         responsePrefix: resolveEffectiveMessagesConfig(cfg, route.agentId)
           .responsePrefix,
         deliver: async (payload) => {
+          const effectiveThreadTs = resolveSlackThreadTs({
+            replyToMode,
+            incomingThreadTs,
+            messageTs,
+            hasReplied: hasRepliedRef.value,
+          });
           await deliverReplies({
             replies: [payload],
             target: replyTarget,
@@ -1094,8 +1123,9 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
             accountId: account.accountId,
             runtime,
             textLimit,
-            replyThreadTs,
+            replyThreadTs: effectiveThreadTs,
           });
+          hasRepliedRef.value = true;
         },
         onError: (err, info) => {
           runtime.error?.(
@@ -1119,6 +1149,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       replyOptions: {
         ...replyOptions,
         skillFilter: channelConfig?.skills,
+        hasRepliedRef,
         disableBlockStreaming:
           typeof account.config.blockStreaming === "boolean"
             ? !account.config.blockStreaming
@@ -1139,6 +1170,20 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
       logVerbose(
         `slack: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`,
       );
+    }
+    if (removeAckAfterReply && ackReactionPromise && ackReactionMessageTs) {
+      const messageTs = ackReactionMessageTs;
+      void ackReactionPromise.then((didAck) => {
+        if (!didAck) return;
+        removeSlackReaction(message.channel, messageTs, ackReactionValue, {
+          token: botToken,
+          client: app.client,
+        }).catch((err) => {
+          logVerbose(
+            `slack: failed to remove ack reaction from ${message.channel}/${message.ts}: ${String(err)}`,
+          );
+        });
+      });
     }
   };
 
@@ -1917,7 +1962,8 @@ async function deliverReplies(params: {
     if (mediaList.length === 0) {
       for (const chunk of chunkMarkdownText(text, chunkLimit)) {
         const trimmed = chunk.trim();
-        if (!trimmed || trimmed === SILENT_REPLY_TOKEN) continue;
+        if (!trimmed || isSilentReplyText(trimmed, SILENT_REPLY_TOKEN))
+          continue;
         await sendMessageSlack(params.target, trimmed, {
           token: params.token,
           threadTs,
@@ -1958,6 +2004,33 @@ export function isSlackRoomAllowedByPolicy(params: {
   return channelAllowed;
 }
 
+/**
+ * Compute effective threadTs for a Slack reply based on replyToMode.
+ * - "off": stay in thread if already in one, otherwise main channel
+ * - "first": first reply goes to thread, subsequent replies to main channel
+ * - "all": all replies go to thread
+ */
+export function resolveSlackThreadTs(params: {
+  replyToMode: "off" | "first" | "all";
+  incomingThreadTs: string | undefined;
+  messageTs: string | undefined;
+  hasReplied: boolean;
+}): string | undefined {
+  const { replyToMode, incomingThreadTs, messageTs, hasReplied } = params;
+  if (incomingThreadTs) return incomingThreadTs;
+  if (!messageTs) return undefined;
+  if (replyToMode === "all") {
+    // All replies go to thread
+    return messageTs;
+  }
+  if (replyToMode === "first") {
+    // "first": only first reply goes to thread
+    return hasReplied ? undefined : messageTs;
+  }
+  // "off": never start a thread
+  return undefined;
+}
+
 async function deliverSlackSlashReplies(params: {
   replies: ReplyPayload[];
   respond: SlackRespondFn;
@@ -1969,7 +2042,9 @@ async function deliverSlackSlashReplies(params: {
   for (const payload of params.replies) {
     const textRaw = payload.text?.trim() ?? "";
     const text =
-      textRaw && textRaw !== SILENT_REPLY_TOKEN ? textRaw : undefined;
+      textRaw && !isSilentReplyText(textRaw, SILENT_REPLY_TOKEN)
+        ? textRaw
+        : undefined;
     const mediaList =
       payload.mediaUrls ?? (payload.mediaUrl ? [payload.mediaUrl] : []);
     const combined = [

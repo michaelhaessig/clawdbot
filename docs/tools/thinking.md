@@ -32,14 +32,15 @@ read_when:
 ## Verbose directives (/verbose or /v)
 - Levels: `on|full` or `off` (default).
 - Directive-only message toggles session verbose and replies `Verbose logging enabled.` / `Verbose logging disabled.`; invalid levels return a hint without changing state.
+- `/verbose off` stores an explicit session override; clear it via the Sessions UI by choosing `inherit`.
 - Inline directive affects only that message; session/global defaults apply otherwise.
 - Send `/verbose` (or `/verbose:`) with no argument to see the current verbose level.
 - When verbose is on, agents that emit structured tool results (Pi, other JSON agents) send each tool result back as its own metadata-only message, prefixed with `<emoji> <tool-name>: <arg>` when available (path/command); the tool output itself is not forwarded. These tool summaries are sent as soon as each tool finishes (separate bubbles), not as streaming deltas. If you toggle `/verbose on|off` while a run is in-flight, subsequent tool bubbles honor the new setting.
 
 ## Reasoning visibility (/reasoning)
 - Levels: `on|off|stream`.
-- Directive-only message toggles whether thinking blocks are shown as italic text in replies.
-- When enabled, any model-provided reasoning content is appended as a separate italic block.
+- Directive-only message toggles whether thinking blocks are shown in replies.
+- When enabled, reasoning is sent as a **separate message** prefixed with `Reasoning:`.
 - `stream` (Telegram only): streams reasoning into the Telegram draft bubble while the reply is generating, then sends the final answer without reasoning.
 - Alias: `/reason`.
 - Send `/reasoning` (or `/reasoning:`) with no argument to see the current reasoning level.

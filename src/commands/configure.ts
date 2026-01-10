@@ -67,13 +67,17 @@ import {
   GOOGLE_GEMINI_DEFAULT_MODEL,
 } from "./google-gemini-model-default.js";
 import { healthCommand } from "./health.js";
+import { formatHealthCheckFailure } from "./health-format.js";
 import {
   applyAuthProfileConfig,
+  applyMinimaxApiConfig,
   applyMinimaxConfig,
   applyMinimaxHostedConfig,
+  applyOpencodeZenConfig,
   setAnthropicApiKey,
   setGeminiApiKey,
   setMinimaxApiKey,
+  setOpencodeZenApiKey,
   writeOAuthCredentials,
 } from "./onboard-auth.js";
 import {
@@ -95,16 +99,20 @@ import {
   applyOpenAICodexModelDefault,
   OPENAI_CODEX_DEFAULT_MODEL,
 } from "./openai-codex-model-default.js";
+import { OPENCODE_ZEN_DEFAULT_MODEL } from "./opencode-zen-model-default.js";
 import { ensureSystemdUserLingerInteractive } from "./systemd-linger.js";
 
-type WizardSection =
-  | "model"
-  | "providers"
-  | "gateway"
-  | "daemon"
-  | "workspace"
-  | "skills"
-  | "health";
+export const CONFIGURE_WIZARD_SECTIONS = [
+  "workspace",
+  "model",
+  "gateway",
+  "daemon",
+  "providers",
+  "skills",
+  "health",
+] as const;
+
+export type WizardSection = (typeof CONFIGURE_WIZARD_SECTIONS)[number];
 
 type ProvidersWizardMode = "configure" | "remove";
 
@@ -362,7 +370,9 @@ async function promptAuthConfig(
     | "gemini-api-key"
     | "apiKey"
     | "minimax-cloud"
+    | "minimax-api"
     | "minimax"
+    | "opencode-zen"
     | "skip";
 
   let next = cfg;
@@ -780,6 +790,47 @@ async function promptAuthConfig(
     next = applyMinimaxHostedConfig(next);
   } else if (authChoice === "minimax") {
     next = applyMinimaxConfig(next);
+  } else if (authChoice === "minimax-api") {
+    const key = guardCancel(
+      await text({
+        message: "Enter MiniMax API key",
+        validate: (value) => (value?.trim() ? undefined : "Required"),
+      }),
+      runtime,
+    );
+    await setMinimaxApiKey(String(key).trim());
+    next = applyAuthProfileConfig(next, {
+      profileId: "minimax:default",
+      provider: "minimax",
+      mode: "api_key",
+    });
+    next = applyMinimaxApiConfig(next);
+  } else if (authChoice === "opencode-zen") {
+    note(
+      [
+        "OpenCode Zen provides access to Claude, GPT, Gemini, and more models.",
+        "Get your API key at: https://opencode.ai/auth",
+      ].join("\n"),
+      "OpenCode Zen",
+    );
+    const key = guardCancel(
+      await text({
+        message: "Enter OpenCode Zen API key",
+        validate: (value) => (value?.trim() ? undefined : "Required"),
+      }),
+      runtime,
+    );
+    await setOpencodeZenApiKey(String(key).trim());
+    next = applyAuthProfileConfig(next, {
+      profileId: "opencode-zen:default",
+      provider: "opencode-zen",
+      mode: "api_key",
+    });
+    next = applyOpencodeZenConfig(next);
+    note(
+      `Default model set to ${OPENCODE_ZEN_DEFAULT_MODEL}`,
+      "Model configured",
+    );
   }
 
   const currentModel =
@@ -1253,7 +1304,7 @@ export async function runConfigureWizard(
     try {
       await healthCommand({ json: false, timeoutMs: 10_000 }, runtime);
     } catch (err) {
-      runtime.error(`Health check failed: ${String(err)}`);
+      runtime.error(formatHealthCheckFailure(err));
       note(
         [
           "Docs:",
@@ -1303,4 +1354,11 @@ export async function runConfigureWizard(
 
 export async function configureCommand(runtime: RuntimeEnv = defaultRuntime) {
   await runConfigureWizard({ command: "configure" }, runtime);
+}
+
+export async function configureCommandWithSections(
+  sections: WizardSection[],
+  runtime: RuntimeEnv = defaultRuntime,
+) {
+  await runConfigureWizard({ command: "configure", sections }, runtime);
 }

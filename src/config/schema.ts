@@ -95,6 +95,10 @@ const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.workspace": "Workspace",
   "auth.profiles": "Auth Profiles",
   "auth.order": "Auth Profile Order",
+  "auth.cooldowns.billingBackoffHours": "Billing Backoff (hours)",
+  "auth.cooldowns.billingBackoffHoursByProvider": "Billing Backoff Overrides",
+  "auth.cooldowns.billingMaxHours": "Billing Backoff Cap (hours)",
+  "auth.cooldowns.failureWindowHours": "Failover Window (hours)",
   "agents.defaults.models": "Models",
   "agents.defaults.model.primary": "Primary Model",
   "agents.defaults.model.fallbacks": "Model Fallbacks",
@@ -112,7 +116,7 @@ const FIELD_LABELS: Record<string, string> = {
   "talk.apiKey": "Talk API Key",
   "telegram.botToken": "Telegram Bot Token",
   "telegram.dmPolicy": "Telegram DM Policy",
-  "telegram.streamMode": "Telegram Stream Mode",
+  "telegram.streamMode": "Telegram Draft Stream Mode",
   "telegram.retry.attempts": "Telegram Retry Attempts",
   "telegram.retry.minDelayMs": "Telegram Retry Min Delay (ms)",
   "telegram.retry.maxDelayMs": "Telegram Retry Max Delay (ms)",
@@ -156,6 +160,14 @@ const FIELD_HELP: Record<string, string> = {
   "auth.profiles": "Named auth profiles (provider + mode + optional email).",
   "auth.order":
     "Ordered auth profile IDs per provider (used for automatic failover).",
+  "auth.cooldowns.billingBackoffHours":
+    "Base backoff (hours) when a profile fails due to billing/insufficient credits (default: 5).",
+  "auth.cooldowns.billingBackoffHoursByProvider":
+    "Optional per-provider overrides for billing backoff (hours).",
+  "auth.cooldowns.billingMaxHours":
+    "Cap (hours) for billing backoff (default: 24).",
+  "auth.cooldowns.failureWindowHours":
+    "Failure window (hours) for backoff counters (default: 24).",
   "agents.defaults.models":
     "Configured model catalog (keys are full provider/model IDs).",
   "agents.defaults.model.primary": "Primary model (provider/model).",
@@ -181,7 +193,7 @@ const FIELD_HELP: Record<string, string> = {
   "telegram.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires telegram.allowFrom=["*"].',
   "telegram.streamMode":
-    "Draft streaming mode for Telegram replies (off | partial | block). Requires private topics + sendMessageDraft.",
+    "Draft streaming mode for Telegram replies (off | partial | block). Separate from block streaming; requires private topics + sendMessageDraft.",
   "telegram.retry.attempts":
     "Max retry attempts for outbound Telegram API calls (default: 3).",
   "telegram.retry.minDelayMs":
@@ -193,7 +205,7 @@ const FIELD_HELP: Record<string, string> = {
   "whatsapp.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires whatsapp.allowFrom=["*"].',
   "whatsapp.selfChatMode":
-    "Same-phone setup (bot uses your personal WhatsApp number). Suppresses pairing replies for outbound DMs.",
+    "Same-phone setup (bot uses your personal WhatsApp number).",
   "signal.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires signal.allowFrom=["*"].',
   "imessage.dmPolicy":

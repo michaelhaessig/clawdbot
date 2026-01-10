@@ -153,6 +153,7 @@ Chat messages support `/...` commands (text and native). See [/tools/slash-comma
 
 Highlights:
 - `/status` for quick diagnostics.
+- `/config` for persisted config changes.
 - `/debug` for runtime-only config overrides (memory, not disk).
 
 ## Setup + onboarding
@@ -177,7 +178,7 @@ Options:
 - `--workspace <dir>`
 - `--non-interactive`
 - `--mode <local|remote>`
-- `--auth-choice <setup-token|claude-cli|token|openai-codex|openai-api-key|codex-cli|antigravity|gemini-api-key|apiKey|minimax-cloud|minimax-api|minimax|skip>`
+- `--auth-choice <setup-token|claude-cli|token|openai-codex|openai-api-key|codex-cli|antigravity|gemini-api-key|apiKey|minimax-cloud|minimax-api|minimax|opencode-zen|skip>`
 - `--token-provider <id>` (non-interactive; used with `--auth-choice token`)
 - `--token <token>` (non-interactive; used with `--auth-choice token`)
 - `--token-profile-id <id>` (non-interactive; default: `<provider>:manual`)
@@ -186,6 +187,7 @@ Options:
 - `--openai-api-key <key>`
 - `--gemini-api-key <key>`
 - `--minimax-api-key <key>`
+- `--opencode-zen-api-key <key>`
 - `--gateway-port <port>`
 - `--gateway-bind <loopback|lan|tailnet|auto>`
 - `--gateway-auth <off|token|password>`
@@ -673,5 +675,5 @@ Options:
 - `--deliver`
 - `--thinking <level>`
 - `--message <text>`
-- `--timeout-ms <ms>`
+- `--timeout-ms <ms>` (defaults to `agents.defaults.timeoutSeconds`)
 - `--history-limit <n>`

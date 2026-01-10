@@ -9,10 +9,20 @@ import {
   saveSessionStore,
 } from "../../config/sessions.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
+import { normalizeMainKey } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
-import { normalizeMessageProvider } from "../../utils/message-provider.js";
+import {
+  INTERNAL_MESSAGE_PROVIDER,
+  isDeliverableMessageProvider,
+  isGatewayMessageProvider,
+  normalizeMessageProvider,
+} from "../../utils/message-provider.js";
 import { normalizeE164 } from "../../utils.js";
+import {
+  isWhatsAppGroupJid,
+  normalizeWhatsAppTarget,
+} from "../../whatsapp/normalize.js";
 import {
   type AgentWaitParams,
   ErrorCodes,
@@ -64,6 +74,26 @@ export const agentHandlers: GatewayRequestHandlers = {
       return;
     }
     const message = request.message.trim();
+    const rawProvider =
+      typeof request.provider === "string" ? request.provider.trim() : "";
+    if (rawProvider) {
+      const normalized = normalizeMessageProvider(rawProvider);
+      if (
+        normalized &&
+        normalized !== "last" &&
+        !isGatewayMessageProvider(normalized)
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `invalid agent params: unknown provider: ${normalized}`,
+          ),
+        );
+        return;
+      }
+    }
 
     const requestedSessionKey =
       typeof request.sessionKey === "string" && request.sessionKey.trim()
@@ -129,7 +159,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         cfg,
         agentId,
       });
-      const rawMainKey = (cfg.session?.mainKey ?? "main").trim() || "main";
+      const rawMainKey = normalizeMainKey(cfg.session?.mainKey);
       if (
         requestedSessionKey === mainSessionKey ||
         requestedSessionKey === rawMainKey
@@ -154,27 +184,24 @@ export const agentHandlers: GatewayRequestHandlers = {
         ? sessionEntry.lastTo.trim()
         : "";
 
+    const wantsDelivery = request.deliver === true;
+
     const resolvedProvider = (() => {
       if (requestedProvider === "last") {
         // WebChat is not a deliverable surface. Treat it as "unset" for routing,
         // so VoiceWake and CLI callers don't get stuck with deliver=false.
-        return lastProvider && lastProvider !== "webchat"
-          ? lastProvider
-          : "whatsapp";
+        if (lastProvider && lastProvider !== INTERNAL_MESSAGE_PROVIDER) {
+          return lastProvider;
+        }
+        return wantsDelivery ? "whatsapp" : INTERNAL_MESSAGE_PROVIDER;
       }
-      if (
-        requestedProvider === "whatsapp" ||
-        requestedProvider === "telegram" ||
-        requestedProvider === "discord" ||
-        requestedProvider === "signal" ||
-        requestedProvider === "imessage" ||
-        requestedProvider === "webchat"
-      ) {
-        return requestedProvider;
+
+      if (isGatewayMessageProvider(requestedProvider)) return requestedProvider;
+
+      if (lastProvider && lastProvider !== INTERNAL_MESSAGE_PROVIDER) {
+        return lastProvider;
       }
-      return lastProvider && lastProvider !== "webchat"
-        ? lastProvider
-        : "whatsapp";
+      return wantsDelivery ? "whatsapp" : INTERNAL_MESSAGE_PROVIDER;
     })();
 
     const resolvedTo = (() => {
@@ -183,13 +210,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           ? request.to.trim()
           : undefined;
       if (explicit) return explicit;
-      if (
-        resolvedProvider === "whatsapp" ||
-        resolvedProvider === "telegram" ||
-        resolvedProvider === "discord" ||
-        resolvedProvider === "signal" ||
-        resolvedProvider === "imessage"
-      ) {
+      if (isDeliverableMessageProvider(resolvedProvider)) {
         return lastTo || undefined;
       }
       return undefined;
@@ -204,11 +225,21 @@ export const agentHandlers: GatewayRequestHandlers = {
         typeof request.to === "string" && request.to.trim()
           ? request.to.trim()
           : undefined;
-      if (explicit) return resolvedTo;
+      if (explicit) {
+        if (!resolvedTo) return resolvedTo;
+        return normalizeWhatsAppTarget(resolvedTo) ?? resolvedTo;
+      }
+      if (resolvedTo && isWhatsAppGroupJid(resolvedTo)) {
+        return normalizeWhatsAppTarget(resolvedTo) ?? resolvedTo;
+      }
 
       const cfg = cfgForAgent ?? loadConfig();
       const rawAllow = cfg.whatsapp?.allowFrom ?? [];
-      if (rawAllow.includes("*")) return resolvedTo;
+      if (rawAllow.includes("*")) {
+        return resolvedTo
+          ? (normalizeWhatsAppTarget(resolvedTo) ?? resolvedTo)
+          : resolvedTo;
+      }
       const allowFrom = rawAllow
         .map((val) => normalizeE164(val))
         .filter((val) => val.length > 1);
@@ -216,7 +247,7 @@ export const agentHandlers: GatewayRequestHandlers = {
 
       const normalizedLast =
         typeof resolvedTo === "string" && resolvedTo.trim()
-          ? normalizeE164(resolvedTo)
+          ? normalizeWhatsAppTarget(resolvedTo)
           : undefined;
       if (normalizedLast && allowFrom.includes(normalizedLast)) {
         return normalizedLast;
@@ -224,7 +255,9 @@ export const agentHandlers: GatewayRequestHandlers = {
       return allowFrom[0];
     })();
 
-    const deliver = request.deliver === true && resolvedProvider !== "webchat";
+    const deliver =
+      request.deliver === true &&
+      resolvedProvider !== INTERNAL_MESSAGE_PROVIDER;
 
     const accepted = {
       runId,

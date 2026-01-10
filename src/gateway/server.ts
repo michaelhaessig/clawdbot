@@ -9,7 +9,11 @@ import {
   type ModelCatalogEntry,
   resetModelCatalogCacheForTest,
 } from "../agents/model-catalog.js";
-import { resolveConfiguredModelRef } from "../agents/model-selection.js";
+import {
+  getModelRefStatus,
+  resolveConfiguredModelRef,
+  resolveHooksGmailModel,
+} from "../agents/model-selection.js";
 import { resolveAnnounceTargetFromKey } from "../agents/tools/sessions-send-helpers.js";
 import { CANVAS_HOST_PATH } from "../canvas-host/a2ui.js";
 import {
@@ -37,6 +41,7 @@ import {
 import {
   loadSessionStore,
   resolveMainSessionKey,
+  resolveMainSessionKeyFromConfig,
   resolveStorePath,
 } from "../config/sessions.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
@@ -484,7 +489,8 @@ export async function startGatewayServer(
     text: string;
     mode: "now" | "next-heartbeat";
   }) => {
-    enqueueSystemEvent(value.text);
+    const sessionKey = resolveMainSessionKeyFromConfig();
+    enqueueSystemEvent(value.text, { sessionKey });
     if (value.mode === "now") {
       requestHeartbeatNow({ reason: "hook:wake" });
     }
@@ -505,6 +511,7 @@ export async function startGatewayServer(
     const sessionKey = value.sessionKey.trim()
       ? value.sessionKey.trim()
       : `hook:${randomUUID()}`;
+    const mainSessionKey = resolveMainSessionKeyFromConfig();
     const jobId = randomUUID();
     const now = Date.now();
     const job: CronJob = {
@@ -547,13 +554,17 @@ export async function startGatewayServer(
           result.status === "ok"
             ? `Hook ${value.name}`
             : `Hook ${value.name} (${result.status})`;
-        enqueueSystemEvent(`${prefix}: ${summary}`.trim());
+        enqueueSystemEvent(`${prefix}: ${summary}`.trim(), {
+          sessionKey: mainSessionKey,
+        });
         if (value.wakeMode === "now") {
           requestHeartbeatNow({ reason: `hook:${jobId}` });
         }
       } catch (err) {
         logHooks.warn(`hook agent failed: ${String(err)}`);
-        enqueueSystemEvent(`Hook ${value.name} (error): ${String(err)}`);
+        enqueueSystemEvent(`Hook ${value.name} (error): ${String(err)}`, {
+          sessionKey: mainSessionKey,
+        });
         if (value.wakeMode === "now") {
           requestHeartbeatNow({ reason: `hook:${jobId}:error` });
         }
@@ -1763,6 +1774,40 @@ export async function startGatewayServer(
     }
   }
 
+  // Validate hooks.gmail.model if configured.
+  if (cfgAtStart.hooks?.gmail?.model) {
+    const hooksModelRef = resolveHooksGmailModel({
+      cfg: cfgAtStart,
+      defaultProvider: DEFAULT_PROVIDER,
+    });
+    if (hooksModelRef) {
+      const { provider: defaultProvider, model: defaultModel } =
+        resolveConfiguredModelRef({
+          cfg: cfgAtStart,
+          defaultProvider: DEFAULT_PROVIDER,
+          defaultModel: DEFAULT_MODEL,
+        });
+      const catalog = await loadModelCatalog({ config: cfgAtStart });
+      const status = getModelRefStatus({
+        cfg: cfgAtStart,
+        catalog,
+        ref: hooksModelRef,
+        defaultProvider,
+        defaultModel,
+      });
+      if (!status.allowed) {
+        logHooks.warn(
+          `hooks.gmail.model "${status.key}" not in agents.defaults.models allowlist (will use primary instead)`,
+        );
+      }
+      if (!status.inCatalog) {
+        logHooks.warn(
+          `hooks.gmail.model "${status.key}" not in the model catalog (may fail at runtime)`,
+        );
+      }
+    }
+  }
+
   // Launch configured providers (WhatsApp Web, Discord, Slack, Telegram) so gateway replies via the
   // surface the message came from. Tests can opt out via CLAWDBOT_SKIP_PROVIDERS.
   if (process.env.CLAWDBOT_SKIP_PROVIDERS !== "1") {
@@ -1784,7 +1829,8 @@ export async function startGatewayServer(
     const summary = summarizeRestartSentinel(payload);
 
     if (!sessionKey) {
-      enqueueSystemEvent(message);
+      const mainSessionKey = resolveMainSessionKeyFromConfig();
+      enqueueSystemEvent(message, { sessionKey: mainSessionKey });
       return;
     }
 
@@ -1798,7 +1844,7 @@ export async function startGatewayServer(
     const provider = lastProvider ?? parsedTarget?.provider;
     const to = lastTo || parsedTarget?.to;
     if (!provider || !to) {
-      enqueueSystemEvent(message);
+      enqueueSystemEvent(message, { sessionKey });
       return;
     }
 
@@ -1815,7 +1861,7 @@ export async function startGatewayServer(
       allowFrom: cfg.whatsapp?.allowFrom ?? [],
     });
     if (!resolved.ok) {
-      enqueueSystemEvent(message);
+      enqueueSystemEvent(message, { sessionKey });
       return;
     }
 
@@ -1834,7 +1880,7 @@ export async function startGatewayServer(
         deps,
       );
     } catch (err) {
-      enqueueSystemEvent(`${summary}\n${String(err)}`);
+      enqueueSystemEvent(`${summary}\n${String(err)}`, { sessionKey });
     }
   };
 

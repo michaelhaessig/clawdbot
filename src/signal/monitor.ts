@@ -7,7 +7,9 @@ import type { ReplyPayload } from "../auto-reply/types.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import { loadConfig } from "../config/config.js";
 import { resolveStorePath, updateLastRoute } from "../config/sessions.js";
+import type { SignalReactionNotificationMode } from "../config/types.js";
 import { danger, logVerbose, shouldLogVerbose } from "../globals.js";
+import { enqueueSystemEvent } from "../infra/system-events.js";
 import { mediaKindFromMime } from "../media/constants.js";
 import { saveMediaBuffer } from "../media/store.js";
 import { buildPairingReply } from "../pairing/pairing-messages.js";
@@ -41,6 +43,19 @@ type SignalEnvelope = {
   dataMessage?: SignalDataMessage | null;
   editMessage?: { dataMessage?: SignalDataMessage | null } | null;
   syncMessage?: unknown;
+  reactionMessage?: SignalReactionMessage | null;
+};
+
+type SignalReactionMessage = {
+  emoji?: string | null;
+  targetAuthor?: string | null;
+  targetAuthorUuid?: string | null;
+  targetSentTimestamp?: number | null;
+  isRemove?: boolean | null;
+  groupInfo?: {
+    groupId?: string | null;
+    groupName?: string | null;
+  } | null;
 };
 
 type SignalDataMessage = {
@@ -101,6 +116,72 @@ function resolveRuntime(opts: MonitorSignalOpts): RuntimeEnv {
 
 function normalizeAllowList(raw?: Array<string | number>): string[] {
   return (raw ?? []).map((entry) => String(entry).trim()).filter(Boolean);
+}
+
+type SignalReactionTarget = {
+  kind: "phone" | "uuid";
+  id: string;
+  display: string;
+};
+
+function resolveSignalReactionTargets(
+  reaction: SignalReactionMessage,
+): SignalReactionTarget[] {
+  const targets: SignalReactionTarget[] = [];
+  const uuid = reaction.targetAuthorUuid?.trim();
+  if (uuid) {
+    targets.push({ kind: "uuid", id: uuid, display: `uuid:${uuid}` });
+  }
+  const author = reaction.targetAuthor?.trim();
+  if (author) {
+    const normalized = normalizeE164(author);
+    targets.push({ kind: "phone", id: normalized, display: normalized });
+  }
+  return targets;
+}
+
+function shouldEmitSignalReactionNotification(params: {
+  mode?: SignalReactionNotificationMode;
+  account?: string | null;
+  targets?: SignalReactionTarget[];
+  sender?: ReturnType<typeof resolveSignalSender> | null;
+  allowlist?: string[];
+}) {
+  const { mode, account, targets, sender, allowlist } = params;
+  const effectiveMode = mode ?? "own";
+  if (effectiveMode === "off") return false;
+  if (effectiveMode === "own") {
+    const accountId = account?.trim();
+    if (!accountId || !targets || targets.length === 0) return false;
+    const normalizedAccount = normalizeE164(accountId);
+    return targets.some((target) => {
+      if (target.kind === "uuid") {
+        return accountId === target.id || accountId === `uuid:${target.id}`;
+      }
+      return normalizedAccount === target.id;
+    });
+  }
+  if (effectiveMode === "allowlist") {
+    if (!sender || !allowlist || allowlist.length === 0) return false;
+    return isSignalSenderAllowed(sender, allowlist);
+  }
+  return true;
+}
+
+function buildSignalReactionSystemEventText(params: {
+  emojiLabel: string;
+  actorLabel: string;
+  messageId: string;
+  targetLabel?: string;
+  groupLabel?: string;
+}) {
+  const base = `Signal reaction added: ${params.emojiLabel} by ${params.actorLabel} msg ${params.messageId}`;
+  const withTarget = params.targetLabel
+    ? `${base} from ${params.targetLabel}`
+    : base;
+  return params.groupLabel
+    ? `${withTarget} in ${params.groupLabel}`
+    : withTarget;
 }
 
 async function waitForSignalDaemonReady(params: {
@@ -244,6 +325,10 @@ export async function monitorSignalProvider(
         : []),
   );
   const groupPolicy = accountInfo.config.groupPolicy ?? "open";
+  const reactionMode = accountInfo.config.reactionNotifications ?? "own";
+  const reactionAllowlist = normalizeAllowList(
+    accountInfo.config.reactionAllowlist,
+  );
   const mediaMaxBytes =
     (opts.mediaMaxMb ?? accountInfo.config.mediaMaxMb ?? 8) * 1024 * 1024;
   const ignoreAttachments =
@@ -305,9 +390,6 @@ export async function monitorSignalProvider(
       const envelope = payload?.envelope;
       if (!envelope) return;
       if (envelope.syncMessage) return;
-      const dataMessage =
-        envelope.dataMessage ?? envelope.editMessage?.dataMessage;
-      if (!dataMessage) return;
 
       const sender = resolveSignalSender(envelope);
       if (!sender) return;
@@ -316,6 +398,69 @@ export async function monitorSignalProvider(
           return;
         }
       }
+      const dataMessage =
+        envelope.dataMessage ?? envelope.editMessage?.dataMessage;
+      if (envelope.reactionMessage && !dataMessage) {
+        const reaction = envelope.reactionMessage;
+        if (reaction.isRemove) return; // Ignore reaction removals
+        const emojiLabel = reaction.emoji?.trim() || "emoji";
+        const senderDisplay = formatSignalSenderDisplay(sender);
+        const senderName = envelope.sourceName ?? senderDisplay;
+        logVerbose(`signal reaction: ${emojiLabel} from ${senderName}`);
+        const targets = resolveSignalReactionTargets(reaction);
+        const shouldNotify = shouldEmitSignalReactionNotification({
+          mode: reactionMode,
+          account,
+          targets,
+          sender,
+          allowlist: reactionAllowlist,
+        });
+        if (!shouldNotify) return;
+        const groupId = reaction.groupInfo?.groupId ?? undefined;
+        const groupName = reaction.groupInfo?.groupName ?? undefined;
+        const isGroup = Boolean(groupId);
+        const senderPeerId = resolveSignalPeerId(sender);
+        const route = resolveAgentRoute({
+          cfg,
+          provider: "signal",
+          accountId: accountInfo.accountId,
+          peer: {
+            kind: isGroup ? "group" : "dm",
+            id: isGroup ? (groupId ?? "unknown") : senderPeerId,
+          },
+        });
+        const groupLabel = isGroup
+          ? `${groupName ?? "Signal Group"} id:${groupId}`
+          : undefined;
+        const messageId = reaction.targetSentTimestamp
+          ? String(reaction.targetSentTimestamp)
+          : "unknown";
+        const text = buildSignalReactionSystemEventText({
+          emojiLabel,
+          actorLabel: senderName,
+          messageId,
+          targetLabel: targets[0]?.display,
+          groupLabel,
+        });
+        const senderId = formatSignalSenderId(sender);
+        const contextKey = [
+          "signal",
+          "reaction",
+          "added",
+          messageId,
+          senderId,
+          emojiLabel,
+          groupId ?? "",
+        ]
+          .filter(Boolean)
+          .join(":");
+        enqueueSystemEvent(text, {
+          sessionKey: route.sessionKey,
+          contextKey,
+        });
+        return;
+      }
+      if (!dataMessage) return;
       const senderDisplay = formatSignalSenderDisplay(sender);
       const senderRecipient = resolveSignalRecipient(sender);
       const senderPeerId = resolveSignalPeerId(sender);

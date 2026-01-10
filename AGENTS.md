@@ -34,6 +34,8 @@
 - Framework: Vitest with V8 coverage thresholds (70% lines/branches/functions/statements).
 - Naming: match source names with `*.test.ts`; e2e in `*.e2e.test.ts`.
 - Run `pnpm test` (or `pnpm test:coverage`) before pushing when you touch logic.
+- Live tests (real keys): `CLAWDBOT_LIVE_TEST=1 pnpm test:live` (Clawdbot-only) or `LIVE=1 pnpm test:live` (includes provider live tests). Docker: `pnpm test:docker:live-models`, `pnpm test:docker:live-gateway`. Onboarding Docker E2E: `pnpm test:docker:onboard`.
+- Full kit + what’s covered: `docs/testing.md`.
 - Pure test additions/fixes generally do **not** need a changelog entry unless they alter user-facing behavior or the user asks for one.
 - Mobile: before using a simulator, check for connected real devices (iOS + Android) and prefer them when available.
 
@@ -41,6 +43,7 @@
 - Create commits with `scripts/committer "<msg>" <file...>`; avoid manual `git add`/`git commit` so staging stays scoped.
 - Follow concise, action-oriented commit messages (e.g., `CLI: add verbose flag to send`).
 - Group related changes; avoid bundling unrelated refactors.
+- Changelog workflow: keep latest released version at top (no `Unreleased`); after publishing, bump version and start a new top section.
 - PRs should summarize scope, note testing performed, and mention any user-facing changes or new flags.
 - PR review flow: when given a PR link, review via `gh pr view`/`gh pr diff` and do **not** change branches.
 - PR merge flow: create a temp branch from `main`, merge the PR branch into it (prefer squash unless commit history is important; use rebase/merge when it is). Always try to merge the PR unless it’s truly difficult, then use another approach. If we squash, add the PR author as a co-contributor. Apply fixes, add changelog entry (include PR # + thanks), run full gate before the final commit, commit, merge back to `main`, delete the temp branch, and end on `main`.
@@ -65,6 +68,7 @@
 ## Agent-Specific Notes
 - Vocabulary: "makeup" = "mac app".
 - When answering questions, respond with high-confidence answers only: verify in code; do not guess.
+- Never update the Carbon dependency.
 - Gateway currently runs only as the menubar app; there is no separate LaunchAgent/helper label installed. Restart via the Clawdbot Mac app or `scripts/restart-mac.sh`; to verify/kill use `launchctl print gui/$UID | grep clawdbot` rather than assuming a fixed label. **When debugging on macOS, start/stop the gateway via the app, not ad-hoc tmux sessions; kill any temporary tunnels before handoff.**
 - macOS logs: use `./scripts/clawlog.sh` (aka `vtlog`) to query unified logs for the Clawdbot subsystem; it supports follow/tail/category filters and expects passwordless sudo for `/usr/bin/log`.
 - If shared guardrails are available locally, review them; otherwise follow this repo's guidance.

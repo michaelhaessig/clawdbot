@@ -10,6 +10,7 @@ import { Type } from "@sinclair/typebox";
 import type { ClawdbotConfig } from "../config/config.js";
 import { detectMime } from "../media/mime.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
+import { resolveGatewayMessageProvider } from "../utils/message-provider.js";
 import { startWebLoginWithQr, waitForWebLogin } from "../web/login-qr.js";
 import {
   resolveAgentConfig,
@@ -22,6 +23,7 @@ import {
   type ProcessToolDefaults,
 } from "./bash-tools.js";
 import { createClawdbotTools } from "./clawdbot-tools.js";
+import type { ModelAuthMode } from "./model-auth.js";
 import type { SandboxContext, SandboxToolPolicy } from "./sandbox.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
 import { cleanSchemaForGemini } from "./schema/clean-for-gemini.js";
@@ -282,28 +284,6 @@ function normalizeToolNames(list?: string[]) {
   return list.map((entry) => entry.trim().toLowerCase()).filter(Boolean);
 }
 
-/**
- * Anthropic blocks specific lowercase tool names (bash, read, write, edit) with OAuth tokens.
- * Renaming to capitalized versions bypasses the block while maintaining compatibility
- * with regular API keys.
- */
-const OAUTH_BLOCKED_TOOL_NAMES: Record<string, string> = {
-  bash: "Bash",
-  read: "Read",
-  write: "Write",
-  edit: "Edit",
-};
-
-function renameBlockedToolsForOAuth(tools: AnyAgentTool[]): AnyAgentTool[] {
-  return tools.map((tool) => {
-    const newName = OAUTH_BLOCKED_TOOL_NAMES[tool.name];
-    if (newName) {
-      return { ...tool, name: newName };
-    }
-    return tool;
-  });
-}
-
 const DEFAULT_SUBAGENT_TOOL_DENY = [
   "sessions_list",
   "sessions_history",
@@ -348,11 +328,13 @@ function resolveEffectiveToolPolicy(params: {
     params.config && agentId
       ? resolveAgentConfig(params.config, agentId)
       : undefined;
-  const hasAgentTools = agentConfig?.tools !== undefined;
+  const agentTools = agentConfig?.tools;
+  const hasAgentToolPolicy =
+    Array.isArray(agentTools?.allow) || Array.isArray(agentTools?.deny);
   const globalTools = params.config?.tools;
   return {
     agentId,
-    policy: hasAgentTools ? agentConfig?.tools : globalTools,
+    policy: hasAgentToolPolicy ? agentTools : globalTools,
   };
 }
 
@@ -500,6 +482,48 @@ export const __testing = {
   cleanToolSchemaForGemini,
 } as const;
 
+function throwAbortError(): never {
+  const err = new Error("Aborted");
+  err.name = "AbortError";
+  throw err;
+}
+
+function combineAbortSignals(
+  a?: AbortSignal,
+  b?: AbortSignal,
+): AbortSignal | undefined {
+  if (!a && !b) return undefined;
+  if (a && !b) return a;
+  if (b && !a) return b;
+  if (a?.aborted) return a;
+  if (b?.aborted) return b;
+  if (typeof AbortSignal.any === "function") {
+    return AbortSignal.any([a as AbortSignal, b as AbortSignal]);
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  a?.addEventListener("abort", onAbort, { once: true });
+  b?.addEventListener("abort", onAbort, { once: true });
+  return controller.signal;
+}
+
+function wrapToolWithAbortSignal(
+  tool: AnyAgentTool,
+  abortSignal?: AbortSignal,
+): AnyAgentTool {
+  if (!abortSignal) return tool;
+  const execute = tool.execute;
+  if (!execute) return tool;
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      const combined = combineAbortSignals(signal, abortSignal);
+      if (combined?.aborted) throwAbortError();
+      return await execute(toolCallId, params, combined, onUpdate);
+    },
+  };
+}
+
 export function createClawdbotCodingTools(options?: {
   bash?: BashToolDefaults & ProcessToolDefaults;
   messageProvider?: string;
@@ -508,6 +532,25 @@ export function createClawdbotCodingTools(options?: {
   sessionKey?: string;
   agentDir?: string;
   config?: ClawdbotConfig;
+  abortSignal?: AbortSignal;
+  /**
+   * Provider of the currently selected model (used for provider-specific tool quirks).
+   * Example: "anthropic", "openai", "google", "openai-codex".
+   */
+  modelProvider?: string;
+  /**
+   * Auth mode for the current provider. We only need this for Anthropic OAuth
+   * tool-name blocking quirks.
+   */
+  modelAuthMode?: ModelAuthMode;
+  /** Current channel ID for auto-threading (Slack). */
+  currentChannelId?: string;
+  /** Current thread timestamp for auto-threading (Slack). */
+  currentThreadTs?: string;
+  /** Reply-to mode for Slack auto-threading. */
+  replyToMode?: "off" | "first" | "all";
+  /** Mutable ref to track if a reply was sent (for "first" mode). */
+  hasRepliedRef?: { value: boolean };
 }): AnyAgentTool[] {
   const bashToolName = "bash";
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
@@ -573,11 +616,15 @@ export function createClawdbotCodingTools(options?: {
     ...createClawdbotTools({
       browserControlUrl: sandbox?.browser?.controlUrl,
       agentSessionKey: options?.sessionKey,
-      agentProvider: options?.messageProvider,
+      agentProvider: resolveGatewayMessageProvider(options?.messageProvider),
       agentAccountId: options?.agentAccountId,
       agentDir: options?.agentDir,
       sandboxed: !!sandbox,
       config: options?.config,
+      currentChannelId: options?.currentChannelId,
+      currentThreadTs: options?.currentThreadTs,
+      replyToMode: options?.replyToMode,
+      hasRepliedRef: options?.hasRepliedRef,
     }),
   ];
   const toolsFiltered = effectiveToolsPolicy
@@ -592,8 +639,14 @@ export function createClawdbotCodingTools(options?: {
   // Always normalize tool JSON Schemas before handing them to pi-agent/pi-ai.
   // Without this, some providers (notably OpenAI) will reject root-level union schemas.
   const normalized = subagentFiltered.map(normalizeToolParameters);
+  const withAbort = options?.abortSignal
+    ? normalized.map((tool) =>
+        wrapToolWithAbortSignal(tool, options.abortSignal),
+      )
+    : normalized;
 
-  // Anthropic blocks specific lowercase tool names (bash, read, write, edit) with OAuth tokens.
-  // Always use capitalized versions for compatibility with both OAuth and regular API keys.
-  return renameBlockedToolsForOAuth(normalized);
+  // NOTE: Keep canonical (lowercase) tool names here.
+  // pi-ai's Anthropic OAuth transport remaps tool names to Claude Code-style names
+  // on the wire and maps them back for tool dispatch.
+  return withAbort;
 }

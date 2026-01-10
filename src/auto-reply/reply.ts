@@ -3,9 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  resolveAgentConfig,
   resolveAgentDir,
-  resolveAgentIdFromSessionKey,
   resolveAgentWorkspaceDir,
+  resolveSessionAgentId,
 } from "../agents/agent-scope.js";
 import { resolveModelRefFromString } from "../agents/model-selection.js";
 import {
@@ -28,6 +29,7 @@ import {
 import { resolveSessionFilePath } from "../config/sessions.js";
 import { logVerbose } from "../globals.js";
 import { clearCommandLane, getQueueSize } from "../process/command-queue.js";
+import { normalizeMainKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { resolveCommandAuthorization } from "./command-auth.js";
 import { hasControlCommand } from "./command-detection.js";
@@ -205,13 +207,53 @@ function isApprovedElevatedSender(params: {
   return false;
 }
 
+function resolveElevatedPermissions(params: {
+  cfg: ClawdbotConfig;
+  agentId: string;
+  ctx: MsgContext;
+  provider: string;
+}): { enabled: boolean; allowed: boolean } {
+  const globalConfig = params.cfg.tools?.elevated;
+  const agentConfig = resolveAgentConfig(params.cfg, params.agentId)?.tools
+    ?.elevated;
+  const globalEnabled = globalConfig?.enabled !== false;
+  const agentEnabled = agentConfig?.enabled !== false;
+  const enabled = globalEnabled && agentEnabled;
+  if (!enabled) return { enabled, allowed: false };
+  if (!params.provider) return { enabled, allowed: false };
+
+  const discordFallback =
+    params.provider === "discord"
+      ? params.cfg.discord?.dm?.allowFrom
+      : undefined;
+  const globalAllowed = isApprovedElevatedSender({
+    provider: params.provider,
+    ctx: params.ctx,
+    allowFrom: globalConfig?.allowFrom,
+    discordFallback,
+  });
+  if (!globalAllowed) return { enabled, allowed: false };
+
+  const agentAllowed = agentConfig?.allowFrom
+    ? isApprovedElevatedSender({
+        provider: params.provider,
+        ctx: params.ctx,
+        allowFrom: agentConfig.allowFrom,
+      })
+    : true;
+  return { enabled, allowed: globalAllowed && agentAllowed };
+}
+
 export async function getReplyFromConfig(
   ctx: MsgContext,
   opts?: GetReplyOptions,
   configOverride?: ClawdbotConfig,
 ): Promise<ReplyPayload | ReplyPayload[] | undefined> {
   const cfg = configOverride ?? loadConfig();
-  const agentId = resolveAgentIdFromSessionKey(ctx.SessionKey);
+  const agentId = resolveSessionAgentId({
+    sessionKey: ctx.SessionKey,
+    config: cfg,
+  });
   const agentCfg = cfg.agents?.defaults;
   const sessionCfg = cfg.session;
   const { defaultProvider, defaultModel, aliasIndex } = resolveDefaultModel({
@@ -391,21 +433,13 @@ export async function getReplyFromConfig(
     sessionCtx.Provider?.trim().toLowerCase() ??
     ctx.Provider?.trim().toLowerCase() ??
     "";
-  const elevatedConfig = cfg.tools?.elevated;
-  const discordElevatedFallback =
-    messageProviderKey === "discord" ? cfg.discord?.dm?.allowFrom : undefined;
-  const elevatedEnabled = elevatedConfig?.enabled !== false;
-  const elevatedAllowed =
-    elevatedEnabled &&
-    Boolean(
-      messageProviderKey &&
-        isApprovedElevatedSender({
-          provider: messageProviderKey,
-          ctx,
-          allowFrom: elevatedConfig?.allowFrom,
-          discordFallback: discordElevatedFallback,
-        }),
-    );
+  const { enabled: elevatedEnabled, allowed: elevatedAllowed } =
+    resolveElevatedPermissions({
+      cfg,
+      agentId,
+      ctx,
+      provider: messageProviderKey,
+    });
   if (
     directives.hasElevatedDirective &&
     (!elevatedEnabled || !elevatedAllowed)
@@ -439,20 +473,26 @@ export async function getReplyFromConfig(
       (agentCfg?.elevatedDefault as ElevatedLevel | undefined) ??
       "on")
     : "off";
+  const providerKey = sessionCtx.Provider?.trim().toLowerCase();
+  const explicitBlockStreamingEnable = opts?.disableBlockStreaming === false;
   const resolvedBlockStreaming =
     opts?.disableBlockStreaming === true
       ? "off"
       : opts?.disableBlockStreaming === false
         ? "on"
-        : agentCfg?.blockStreamingDefault === "off"
-          ? "off"
-          : "on";
+        : agentCfg?.blockStreamingDefault === "on"
+          ? "on"
+          : "off";
   const resolvedBlockStreamingBreak: "text_end" | "message_end" =
     agentCfg?.blockStreamingBreak === "message_end"
       ? "message_end"
       : "text_end";
+  const allowBlockStreaming =
+    providerKey === "telegram" || explicitBlockStreamingEnable;
   const blockStreamingEnabled =
-    resolvedBlockStreaming === "on" && opts?.disableBlockStreaming !== true;
+    resolvedBlockStreaming === "on" &&
+    opts?.disableBlockStreaming !== true &&
+    allowBlockStreaming;
   const blockReplyChunking = blockStreamingEnabled
     ? resolveBlockStreamingChunking(
         cfg,
@@ -573,7 +613,7 @@ export async function getReplyFromConfig(
         resolvedVerboseLevel: (currentVerboseLevel ?? "off") as VerboseLevel,
         resolvedReasoningLevel: (currentReasoningLevel ??
           "off") as ReasoningLevel,
-        resolvedElevatedLevel: currentElevatedLevel,
+        resolvedElevatedLevel,
         resolveDefaultThinkingLevel: async () =>
           currentThinkLevel ??
           (agentCfg?.thinkingDefault as ThinkLevel | undefined),
@@ -750,7 +790,7 @@ export async function getReplyFromConfig(
   const isGroupSession =
     sessionEntry?.chatType === "group" || sessionEntry?.chatType === "room";
   const isMainSession =
-    !isGroupSession && sessionKey === (sessionCfg?.mainKey ?? "main");
+    !isGroupSession && sessionKey === normalizeMainKey(sessionCfg?.mainKey);
   prefixedBodyBase = await prependSystemEvents({
     cfg,
     sessionKey,
@@ -846,6 +886,7 @@ export async function getReplyFromConfig(
   const authProfileId = sessionEntry?.authProfileOverride;
   const followupRun = {
     prompt: queuedBody,
+    messageId: sessionCtx.MessageSid,
     summaryLine: baseBodyTrimmedRaw,
     enqueuedAt: Date.now(),
     // Originating channel for reply routing.

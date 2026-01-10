@@ -15,7 +15,7 @@ The prompt is assembled by Clawdbot and injected into each agent run.
 The prompt is intentionally compact and uses fixed sections:
 
 - **Tooling**: current tool list + short descriptions.
-- **Skills**: tells the model how to load skill instructions on demand.
+- **Skills** (when available): tells the model how to load skill instructions on demand.
 - **Clawdbot Self-Update**: how to run `config.apply` and `update.run`.
 - **Workspace**: working directory (`agents.defaults.workspace`).
 - **Workspace Files (injected)**: indicates bootstrap files are included below.
@@ -49,10 +49,20 @@ Use `agents.defaults.userTimezone` in `~/.clawdbot/clawdbot.json` to change the 
 
 ## Skills
 
-Skills are **not** auto-injected. Instead, the prompt instructs the model to use `read` to load skill instructions on demand:
+When eligible skills exist, Clawdbot injects a compact **available skills list**
+(`formatSkillsForPrompt`) that includes the **file path** for each skill. The
+prompt instructs the model to use `read` to load the SKILL.md at the listed
+location (workspace, managed, or bundled). If no skills are eligible, the
+Skills section is omitted.
 
 ```
-<workspace>/skills/<name>/SKILL.md
+<available_skills>
+  <skill>
+    <name>...</name>
+    <description>...</description>
+    <location>...</location>
+  </skill>
+</available_skills>
 ```
 
 This keeps the base prompt small while still enabling targeted skill usage.

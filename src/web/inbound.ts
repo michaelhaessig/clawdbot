@@ -30,6 +30,7 @@ import {
   isSelfChatMode,
   jidToE164,
   normalizeE164,
+  resolveJidToE164,
   toWhatsappJid,
 } from "../utils.js";
 import { resolveWhatsAppAccount } from "./accounts.js";
@@ -39,6 +40,7 @@ import {
   getStatusCode,
   waitForWaConnection,
 } from "./session.js";
+import { parseVcard } from "./vcard.js";
 
 export type WebListenerCloseReason = {
   status?: number;
@@ -83,6 +85,7 @@ export async function monitorWebInbox(options: {
   accountId: string;
   authDir: string;
   onMessage: (msg: WebInboundMessage) => Promise<void>;
+  mediaMaxMb?: number;
 }) {
   const inboundLogger = getChildLogger({ module: "web-inbound" });
   const inboundConsoleLog = createSubsystemLogger(
@@ -122,23 +125,10 @@ export async function monitorWebInbox(options: {
   const GROUP_META_TTL_MS = 5 * 60 * 1000; // 5 minutes
   const lidLookup = sock.signalRepository?.lidMapping;
 
-  const resolveJidToE164 = async (
+  const resolveInboundJid = async (
     jid: string | null | undefined,
-  ): Promise<string | null> => {
-    if (!jid) return null;
-    const direct = jidToE164(jid);
-    if (direct) return direct;
-    if (!/(@lid|@hosted\.lid)$/.test(jid)) return null;
-    if (!lidLookup?.getPNForLID) return null;
-    try {
-      const pnJid = await lidLookup.getPNForLID(jid);
-      if (!pnJid) return null;
-      return jidToE164(pnJid);
-    } catch (err) {
-      logVerbose(`LID mapping lookup failed for ${jid}: ${String(err)}`);
-      return null;
-    }
-  };
+  ): Promise<string | null> =>
+    resolveJidToE164(jid, { authDir: options.authDir, lidLookup });
 
   const getGroupMeta = async (jid: string) => {
     const cached = groupMetaCache.get(jid);
@@ -149,7 +139,7 @@ export async function monitorWebInbox(options: {
         (
           await Promise.all(
             meta.participants?.map(async (p) => {
-              const mapped = await resolveJidToE164(p.id);
+              const mapped = await resolveInboundJid(p.id);
               return mapped ?? p.id;
             }) ?? [],
           )
@@ -190,12 +180,12 @@ export async function monitorWebInbox(options: {
         continue;
       const group = isJidGroup(remoteJid);
       const participantJid = msg.key?.participant ?? undefined;
-      const from = group ? remoteJid : await resolveJidToE164(remoteJid);
+      const from = group ? remoteJid : await resolveInboundJid(remoteJid);
       // Skip if we still can't resolve an id to key conversation
       if (!from) continue;
       const senderE164 = group
         ? participantJid
-          ? await resolveJidToE164(participantJid)
+          ? await resolveInboundJid(participantJid)
           : null
         : from;
       let groupSubject: string | undefined;
@@ -234,8 +224,6 @@ export async function monitorWebInbox(options: {
       const isSamePhone = from === selfE164;
       const isSelfChat = isSelfChatMode(selfE164, configuredAllowFrom);
       const isFromMe = Boolean(msg.key?.fromMe);
-      const selfChatMode = account.selfChatMode ?? false;
-      const selfPhoneMode = selfChatMode || isSelfChat;
 
       // Pre-compute normalized allowlists for filtering
       const dmHasWildcard = allowFrom?.includes("*") ?? false;
@@ -280,10 +268,8 @@ export async function monitorWebInbox(options: {
 
       // DM access control (secure defaults): "pairing" (default) / "allowlist" / "open" / "disabled"
       if (!group) {
-        if (isFromMe && !isSamePhone && selfPhoneMode) {
-          logVerbose(
-            "Skipping outbound self-phone DM (fromMe); no pairing reply needed.",
-          );
+        if (isFromMe && !isSamePhone) {
+          logVerbose("Skipping outbound DM (fromMe); no pairing reply needed.");
           continue;
         }
         if (dmPolicy === "disabled") {
@@ -375,9 +361,16 @@ export async function monitorWebInbox(options: {
       try {
         const inboundMedia = await downloadInboundMedia(msg, sock);
         if (inboundMedia) {
+          const maxMb =
+            typeof options.mediaMaxMb === "number" && options.mediaMaxMb > 0
+              ? options.mediaMaxMb
+              : 50;
+          const maxBytes = maxMb * 1024 * 1024;
           const saved = await saveMediaBuffer(
             inboundMedia.buffer,
             inboundMedia.mimetype,
+            "inbound",
+            maxBytes,
           );
           mediaPath = saved.path;
           mediaType = inboundMedia.mimetype;
@@ -577,9 +570,10 @@ export async function monitorWebInbox(options: {
         payload = { text };
       }
       const result = await sock.sendMessage(jid, payload);
+      const accountId = sendOptions?.accountId ?? options.accountId;
       recordProviderActivity({
         provider: "whatsapp",
-        accountId: options.accountId,
+        accountId,
         direction: "outbound",
       });
       return { messageId: result?.key?.id ?? "unknown" };
@@ -739,6 +733,12 @@ export function extractText(
       candidate.documentMessage?.caption;
     if (caption?.trim()) return caption.trim();
   }
+  const contactPlaceholder =
+    extractContactPlaceholder(message) ??
+    (extracted && extracted !== message
+      ? extractContactPlaceholder(extracted as proto.IMessage | undefined)
+      : undefined);
+  if (contactPlaceholder) return contactPlaceholder;
   return undefined;
 }
 
@@ -753,6 +753,89 @@ export function extractMediaPlaceholder(
   if (message.documentMessage) return "<media:document>";
   if (message.stickerMessage) return "<media:sticker>";
   return undefined;
+}
+
+function extractContactPlaceholder(
+  rawMessage: proto.IMessage | undefined,
+): string | undefined {
+  const message = unwrapMessage(rawMessage);
+  if (!message) return undefined;
+  const contact = message.contactMessage ?? undefined;
+  if (contact) {
+    const { name, phones } = describeContact({
+      displayName: contact.displayName,
+      vcard: contact.vcard,
+    });
+    return formatContactPlaceholder(name, phones);
+  }
+  const contactsArray = message.contactsArrayMessage?.contacts ?? undefined;
+  if (!contactsArray || contactsArray.length === 0) return undefined;
+  const labels = contactsArray
+    .map((entry) =>
+      describeContact({ displayName: entry.displayName, vcard: entry.vcard }),
+    )
+    .map((entry) => formatContactLabel(entry.name, entry.phones))
+    .filter((value): value is string => Boolean(value));
+  return formatContactsPlaceholder(labels, contactsArray.length);
+}
+
+function describeContact(input: {
+  displayName?: string | null;
+  vcard?: string | null;
+}): { name?: string; phones: string[] } {
+  const displayName = (input.displayName ?? "").trim();
+  const parsed = parseVcard(input.vcard ?? undefined);
+  const name = displayName || parsed.name;
+  return { name, phones: parsed.phones };
+}
+
+function formatContactPlaceholder(name?: string, phones?: string[]): string {
+  const label = formatContactLabel(name, phones);
+  if (!label) return "<contact>";
+  return `<contact: ${label}>`;
+}
+
+function formatContactsPlaceholder(labels: string[], total: number): string {
+  const cleaned = labels.map((label) => label.trim()).filter(Boolean);
+  if (cleaned.length === 0) {
+    const suffix = total === 1 ? "contact" : "contacts";
+    return `<contacts: ${total} ${suffix}>`;
+  }
+  const remaining = Math.max(total - cleaned.length, 0);
+  const suffix = remaining > 0 ? ` +${remaining} more` : "";
+  return `<contacts: ${cleaned.join(", ")}${suffix}>`;
+}
+
+function formatContactLabel(
+  name?: string,
+  phones?: string[],
+): string | undefined {
+  const phoneLabel = formatPhoneList(phones);
+  const parts = [name, phoneLabel].filter((value): value is string =>
+    Boolean(value),
+  );
+  if (parts.length === 0) return undefined;
+  return parts.join(", ");
+}
+
+function formatPhoneList(phones?: string[]): string | undefined {
+  const cleaned = phones?.map((phone) => phone.trim()).filter(Boolean) ?? [];
+  if (cleaned.length === 0) return undefined;
+  const { shown, remaining } = summarizeList(cleaned, cleaned.length, 1);
+  const [primary] = shown;
+  if (!primary) return undefined;
+  if (remaining === 0) return primary;
+  return `${primary} (+${remaining} more)`;
+}
+
+function summarizeList(
+  values: string[],
+  total: number,
+  maxShown: number,
+): { shown: string[]; remaining: number } {
+  const shown = values.slice(0, maxShown);
+  const remaining = Math.max(total - shown.length, 0);
+  return { shown, remaining };
 }
 
 export function extractLocationData(

@@ -61,6 +61,40 @@ docker compose run --rm clawdbot-cli onboard
 docker compose up -d clawdbot-gateway
 ```
 
+### Faster rebuilds (recommended)
+
+To speed up rebuilds, order your Dockerfile so dependency layers are cached.
+This avoids re-running `pnpm install` unless lockfiles change:
+
+```dockerfile
+FROM node:22-bookworm
+
+# Install Bun (required for build scripts)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+RUN corepack enable
+
+WORKDIR /app
+
+# Cache dependencies unless package metadata changes
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY ui/package.json ./ui/package.json
+COPY patches ./patches
+COPY scripts ./scripts
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+RUN pnpm ui:install
+RUN pnpm ui:build
+
+ENV NODE_ENV=production
+
+CMD ["node","dist/index.js"]
+```
+
 ### Provider setup (optional)
 
 Use the CLI container to configure providers, then restart the gateway if needed.
@@ -144,7 +178,7 @@ precedence, and troubleshooting.
   - `"rw"` mounts the agent workspace read/write at `/workspace`
 - Auto-prune: idle > 24h OR age > 7d
 - Network: `none` by default (explicitly opt-in if you need egress)
-- Default allow: `bash`, `process`, `read`, `write`, `edit`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`
+- Default allow: `bash`, `process`, `read`, `write`, `edit`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `session_status`
 - Default deny: `browser`, `canvas`, `nodes`, `cron`, `discord`, `gateway`
 
 ### Enable sandboxing
@@ -191,7 +225,7 @@ precedence, and troubleshooting.
   tools: {
     sandbox: {
       tools: {
-        allow: ["bash", "process", "read", "write", "edit", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn"],
+        allow: ["bash", "process", "read", "write", "edit", "sessions_list", "sessions_history", "sessions_send", "sessions_spawn", "session_status"],
         deny: ["browser", "canvas", "nodes", "cron", "discord", "gateway"]
       }
     }

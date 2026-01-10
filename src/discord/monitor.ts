@@ -51,7 +51,7 @@ import { formatDurationSeconds } from "../infra/format-duration.js";
 import { recordProviderActivity } from "../infra/provider-activity.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
-import { detectMime } from "../media/mime.js";
+import { fetchRemoteMedia } from "../media/fetch.js";
 import { saveMediaBuffer } from "../media/store.js";
 import { buildPairingReply } from "../pairing/pairing-messages.js";
 import {
@@ -68,12 +68,17 @@ import { truncateUtf16Safe } from "../utils.js";
 import { loadWebMedia } from "../web/media.js";
 import { resolveDiscordAccount } from "./accounts.js";
 import { chunkDiscordText } from "./chunk.js";
+import { attachDiscordGatewayLogging } from "./gateway-logging.js";
 import {
   getDiscordGatewayEmitter,
   waitForDiscordGatewayStop,
 } from "./monitor.gateway.js";
 import { fetchDiscordApplicationId } from "./probe.js";
-import { reactMessageDiscord, sendMessageDiscord } from "./send.js";
+import {
+  reactMessageDiscord,
+  removeReactionDiscord,
+  sendMessageDiscord,
+} from "./send.js";
 import { normalizeDiscordToken } from "./token.js";
 
 export type MonitorDiscordOpts = {
@@ -499,12 +504,31 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
 
   const gateway = client.getPlugin<GatewayPlugin>("gateway");
   const gatewayEmitter = getDiscordGatewayEmitter(gateway);
-  const onGatewayWarning = (warning: unknown) => {
-    logVerbose(`discord gateway warning: ${String(warning)}`);
+  const stopGatewayLogging = attachDiscordGatewayLogging({
+    emitter: gatewayEmitter,
+    runtime,
+  });
+  // Timeout to detect zombie connections where HELLO is never received.
+  const HELLO_TIMEOUT_MS = 30000;
+  let helloTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  const onGatewayDebug = (msg: unknown) => {
+    const message = String(msg);
+    if (!message.includes("WebSocket connection opened")) return;
+    if (helloTimeoutId) clearTimeout(helloTimeoutId);
+    helloTimeoutId = setTimeout(() => {
+      if (!gateway?.isConnected) {
+        runtime.log?.(
+          danger(
+            `[discord] connection stalled: no HELLO received within ${HELLO_TIMEOUT_MS}ms, forcing reconnect`,
+          ),
+        );
+        gateway?.disconnect();
+        gateway?.connect(false);
+      }
+      helloTimeoutId = undefined;
+    }, HELLO_TIMEOUT_MS);
   };
-  if (shouldLogVerbose()) {
-    gatewayEmitter?.on("warning", onGatewayWarning);
-  }
+  gatewayEmitter?.on("debug", onGatewayDebug);
   try {
     await waitForDiscordGatewayStop({
       gateway: gateway
@@ -526,7 +550,10 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
       },
     });
   } finally {
-    gatewayEmitter?.removeListener("warning", onGatewayWarning);
+    stopGatewayLogging();
+    stopGatewayLogging();
+    if (helloTimeoutId) clearTimeout(helloTimeoutId);
+    gatewayEmitter?.removeListener("debug", onGatewayDebug);
   }
 }
 
@@ -935,6 +962,7 @@ export function createDiscordMessageHandler(params: {
         return;
       }
       const ackReaction = resolveAckReaction(cfg, route.agentId);
+      const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
       const shouldAckReaction = () => {
         if (!ackReaction) return false;
         if (ackReactionScope === "all") return true;
@@ -949,15 +977,19 @@ export function createDiscordMessageHandler(params: {
         }
         return false;
       };
-      if (shouldAckReaction()) {
-        reactMessageDiscord(message.channelId, message.id, ackReaction, {
-          rest: client.rest,
-        }).catch((err) => {
-          logVerbose(
-            `discord react failed for channel ${message.channelId}: ${String(err)}`,
-          );
-        });
-      }
+      const ackReactionPromise = shouldAckReaction()
+        ? reactMessageDiscord(message.channelId, message.id, ackReaction, {
+            rest: client.rest,
+          }).then(
+            () => true,
+            (err) => {
+              logVerbose(
+                `discord react failed for channel ${message.channelId}: ${String(err)}`,
+              );
+              return false;
+            },
+          )
+        : null;
 
       const fromLabel = isDirectMessage
         ? buildDirectLabel(author)
@@ -1177,6 +1209,24 @@ export function createDiscordMessageHandler(params: {
         logVerbose(
           `discord: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`,
         );
+      }
+      if (removeAckAfterReply && ackReactionPromise && ackReaction) {
+        const ackReactionValue = ackReaction;
+        void ackReactionPromise.then((didAck) => {
+          if (!didAck) return;
+          removeReactionDiscord(
+            message.channelId,
+            message.id,
+            ackReactionValue,
+            {
+              rest: client.rest,
+            },
+          ).catch((err) => {
+            logVerbose(
+              `discord: failed to remove ack reaction from ${message.channelId}/${message.id}: ${String(err)}`,
+            );
+          });
+        });
       }
       if (
         isGuildMessage &&
@@ -1829,19 +1879,16 @@ async function resolveMediaList(
   const out: DiscordMediaInfo[] = [];
   for (const attachment of attachments) {
     try {
-      const res = await fetch(attachment.url);
-      if (!res.ok) {
-        throw new Error(
-          `Failed to download discord attachment: HTTP ${res.status}`,
-        );
-      }
-      const buffer = Buffer.from(await res.arrayBuffer());
-      const mime = await detectMime({
-        buffer,
-        headerMime: attachment.content_type ?? res.headers.get("content-type"),
-        filePath: attachment.filename ?? attachment.url,
+      const fetched = await fetchRemoteMedia({
+        url: attachment.url,
+        filePathHint: attachment.filename ?? attachment.url,
       });
-      const saved = await saveMediaBuffer(buffer, mime, "inbound", maxBytes);
+      const saved = await saveMediaBuffer(
+        fetched.buffer,
+        fetched.contentType ?? attachment.content_type,
+        "inbound",
+        maxBytes,
+      );
       out.push({
         path: saved.path,
         contentType: saved.contentType,

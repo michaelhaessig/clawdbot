@@ -17,6 +17,7 @@ import {
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
+import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import type {
   ReasoningLevel,
   ThinkLevel,
@@ -25,43 +26,56 @@ import type {
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import { isCacheEnabled, resolveCacheTtlMs } from "../config/cache-utils.js";
 import type { ClawdbotConfig } from "../config/config.js";
+import { resolveProviderCapabilities } from "../config/provider-capabilities.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
 import { createSubsystemLogger } from "../logging.js";
-import { splitMediaFromOutput } from "../media/parse.js";
 import {
   type enqueueCommand,
   enqueueCommandInLane,
 } from "../process/command-queue.js";
+import { normalizeMessageProvider } from "../utils/message-provider.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveClawdbotAgentDir } from "./agent-paths.js";
+import { resolveSessionAgentIds } from "./agent-scope.js";
 import {
-  markAuthProfileCooldown,
+  markAuthProfileFailure,
   markAuthProfileGood,
   markAuthProfileUsed,
 } from "./auth-profiles.js";
 import type { BashElevatedDefaults } from "./bash-tools.js";
 import {
+  CONTEXT_WINDOW_HARD_MIN_TOKENS,
+  CONTEXT_WINDOW_WARN_BELOW_TOKENS,
+  evaluateContextWindowGuard,
+  resolveContextWindowInfo,
+} from "./context-window-guard.js";
+import {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
 } from "./defaults.js";
+import { FailoverError, resolveFailoverStatus } from "./failover-error.js";
 import {
   ensureAuthProfileStore,
   getApiKeyForModel,
   resolveAuthProfileOrder,
+  resolveModelAuthMode,
 } from "./model-auth.js";
 import { ensureClawdbotModelsJson } from "./models-config.js";
 import {
   buildBootstrapContextFiles,
+  classifyFailoverReason,
   type EmbeddedContextFile,
   ensureSessionHeader,
   formatAssistantErrorText,
   isAuthAssistantError,
-  isAuthErrorMessage,
+  isCloudCodeAssistFormatError,
   isContextOverflowError,
+  isFailoverAssistantError,
+  isFailoverErrorMessage,
   isGoogleModelApi,
   isRateLimitAssistantError,
-  isRateLimitErrorMessage,
+  isTimeoutErrorMessage,
   pickFallbackThinkingLevel,
   sanitizeGoogleTurnOrdering,
   sanitizeSessionMessagesImages,
@@ -74,7 +88,7 @@ import {
 import {
   extractAssistantText,
   extractAssistantThinking,
-  formatReasoningMarkdown,
+  formatReasoningMessage,
 } from "./pi-embedded-utils.js";
 import { setContextPruningRuntime } from "./pi-extensions/context-pruning/runtime.js";
 import { computeEffectiveSettings } from "./pi-extensions/context-pruning/settings.js";
@@ -86,11 +100,15 @@ import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
   loadWorkspaceSkillEntries,
+  resolveSkillsPromptForRun,
   type SkillSnapshot,
 } from "./skills.js";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
 import { normalizeUsage, type UsageLike } from "./usage.js";
-import { loadWorkspaceBootstrapFiles } from "./workspace.js";
+import {
+  filterBootstrapFilesForSession,
+  loadWorkspaceBootstrapFiles,
+} from "./workspace.js";
 
 // Optional features can be implemented as Pi extensions that run in the same Node process.
 
@@ -173,41 +191,13 @@ function resolveContextWindowTokens(params: {
   modelId: string;
   model: Model<Api> | undefined;
 }): number {
-  const fromModel =
-    typeof params.model?.contextWindow === "number" &&
-    Number.isFinite(params.model.contextWindow) &&
-    params.model.contextWindow > 0
-      ? params.model.contextWindow
-      : undefined;
-  if (fromModel) return fromModel;
-
-  const fromModelsConfig = (() => {
-    const providers = params.cfg?.models?.providers as
-      | Record<
-          string,
-          { models?: Array<{ id?: string; contextWindow?: number }> }
-        >
-      | undefined;
-    const providerEntry = providers?.[params.provider];
-    const models = Array.isArray(providerEntry?.models)
-      ? providerEntry.models
-      : [];
-    const match = models.find((m) => m?.id === params.modelId);
-    return typeof match?.contextWindow === "number" && match.contextWindow > 0
-      ? match.contextWindow
-      : undefined;
-  })();
-  if (fromModelsConfig) return fromModelsConfig;
-
-  const fromAgentConfig =
-    typeof params.cfg?.agents?.defaults?.contextTokens === "number" &&
-    Number.isFinite(params.cfg.agents.defaults.contextTokens) &&
-    params.cfg.agents.defaults.contextTokens > 0
-      ? Math.floor(params.cfg.agents.defaults.contextTokens)
-      : undefined;
-  if (fromAgentConfig) return fromAgentConfig;
-
-  return DEFAULT_CONTEXT_TOKENS;
+  return resolveContextWindowInfo({
+    cfg: params.cfg,
+    provider: params.provider,
+    modelId: params.modelId,
+    modelContextWindow: params.model?.contextWindow,
+    defaultTokens: DEFAULT_CONTEXT_TOKENS,
+  }).tokens;
 }
 
 function buildContextPruningExtension(params: {
@@ -574,12 +564,15 @@ function buildEmbeddedSystemPrompt(params: {
   ownerNumbers?: string[];
   reasoningTagHint: boolean;
   heartbeatPrompt?: string;
+  skillsPrompt?: string;
   runtimeInfo: {
     host: string;
     os: string;
     arch: string;
     node: string;
     model: string;
+    provider?: string;
+    capabilities?: string[];
   };
   sandboxInfo?: EmbeddedSandboxInfo;
   tools: AgentTool[];
@@ -595,6 +588,7 @@ function buildEmbeddedSystemPrompt(params: {
     ownerNumbers: params.ownerNumbers,
     reasoningTagHint: params.reasoningTagHint,
     heartbeatPrompt: params.heartbeatPrompt,
+    skillsPrompt: params.skillsPrompt,
     runtimeInfo: params.runtimeInfo,
     sandboxInfo: params.sandboxInfo,
     toolNames: params.tools.map((tool) => tool.name),
@@ -612,10 +606,8 @@ export function createSystemPromptOverride(
   return () => trimmed;
 }
 
-// Tool names are now capitalized (Bash, Read, Write, Edit) to bypass Anthropic's
-// OAuth token blocking of lowercase names. However, pi-coding-agent's SDK has
-// hardcoded lowercase names in its built-in tool registry, so we must pass ALL
-// tools as customTools to bypass the SDK's filtering.
+// We always pass tools via `customTools` so our policy filtering, sandbox integration,
+// and extended toolset remain consistent across providers.
 
 type AnyAgentTool = AgentTool;
 
@@ -626,9 +618,8 @@ export function splitSdkTools(options: {
   builtInTools: AnyAgentTool[];
   customTools: ReturnType<typeof toToolDefinitions>;
 } {
-  // Always pass all tools as customTools to bypass pi-coding-agent's built-in
-  // tool filtering, which expects lowercase names (bash, read, write, edit).
-  // Our tools are now capitalized (Bash, Read, Write, Edit) for OAuth compatibility.
+  // Always pass all tools as customTools so the SDK doesn't "helpfully" swap in
+  // its own built-in implementations (we need our tool wrappers + policy).
   const { tools } = options;
   return {
     builtInTools: [],
@@ -838,10 +829,19 @@ export async function compactEmbeddedPiSession(params: {
               skills: skillEntries ?? [],
               config: params.config,
             });
+        const skillsPrompt = resolveSkillsPromptForRun({
+          skillsSnapshot: params.skillsSnapshot,
+          entries: shouldLoadSkillEntries ? skillEntries : undefined,
+          config: params.config,
+          workspaceDir: effectiveWorkspace,
+        });
 
-        const bootstrapFiles =
-          await loadWorkspaceBootstrapFiles(effectiveWorkspace);
+        const bootstrapFiles = filterBootstrapFilesForSession(
+          await loadWorkspaceBootstrapFiles(effectiveWorkspace),
+          params.sessionKey ?? params.sessionId,
+        );
         const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
+        const runAbortController = new AbortController();
         const tools = createClawdbotCodingTools({
           bash: {
             ...params.config?.tools?.bash,
@@ -853,14 +853,30 @@ export async function compactEmbeddedPiSession(params: {
           sessionKey: params.sessionKey ?? params.sessionId,
           agentDir,
           config: params.config,
+          abortSignal: runAbortController.signal,
+          modelProvider: model.provider,
+          modelAuthMode: resolveModelAuthMode(model.provider, params.config),
+          // No currentChannelId/currentThreadTs for compaction - not in message context
         });
         const machineName = await getMachineDisplayName();
+        const runtimeProvider = normalizeMessageProvider(
+          params.messageProvider,
+        );
+        const runtimeCapabilities = runtimeProvider
+          ? (resolveProviderCapabilities({
+              cfg: params.config,
+              provider: runtimeProvider,
+              accountId: params.agentAccountId,
+            }) ?? [])
+          : undefined;
         const runtimeInfo = {
           host: machineName,
           os: `${os.type()} ${os.release()}`,
           arch: os.arch(),
           node: process.version,
           model: `${provider}/${modelId}`,
+          provider: runtimeProvider,
+          capabilities: runtimeCapabilities,
         };
         const sandboxInfo = buildEmbeddedSandboxInfo(sandbox);
         const reasoningTagHint = provider === "ollama";
@@ -868,15 +884,24 @@ export async function compactEmbeddedPiSession(params: {
           params.config?.agents?.defaults?.userTimezone,
         );
         const userTime = formatUserTime(new Date(), userTimezone);
+        // Only include heartbeat prompt for the default agent
+        const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
+          sessionKey: params.sessionKey,
+          config: params.config,
+        });
+        const isDefaultAgent = sessionAgentId === defaultAgentId;
         const appendPrompt = buildEmbeddedSystemPrompt({
           workspaceDir: effectiveWorkspace,
           defaultThinkLevel: params.thinkLevel,
           extraSystemPrompt: params.extraSystemPrompt,
           ownerNumbers: params.ownerNumbers,
           reasoningTagHint,
-          heartbeatPrompt: resolveHeartbeatPrompt(
-            params.config?.agents?.defaults?.heartbeat?.prompt,
-          ),
+          heartbeatPrompt: isDefaultAgent
+            ? resolveHeartbeatPrompt(
+                params.config?.agents?.defaults?.heartbeat?.prompt,
+              )
+            : undefined,
+          skillsPrompt,
           runtimeInfo,
           sandboxInfo,
           tools,
@@ -971,6 +996,14 @@ export async function runEmbeddedPiAgent(params: {
   sessionKey?: string;
   messageProvider?: string;
   agentAccountId?: string;
+  /** Current channel ID for auto-threading (Slack). */
+  currentChannelId?: string;
+  /** Current thread timestamp for auto-threading (Slack). */
+  currentThreadTs?: string;
+  /** Reply-to mode for Slack auto-threading. */
+  replyToMode?: "off" | "first" | "all";
+  /** Mutable ref to track if a reply was sent (for "first" mode). */
+  hasRepliedRef?: { value: boolean };
   sessionFile: string;
   workspaceDir: string;
   agentDir?: string;
@@ -995,6 +1028,7 @@ export async function runEmbeddedPiAgent(params: {
   onBlockReply?: (payload: {
     text?: string;
     mediaUrls?: string[];
+    audioAsVoice?: boolean;
   }) => void | Promise<void>;
   blockReplyBreak?: "text_end" | "message_end";
   blockReplyChunking?: BlockReplyChunking;
@@ -1023,6 +1057,7 @@ export async function runEmbeddedPiAgent(params: {
   const enqueueGlobal =
     params.enqueue ??
     ((task, opts) => enqueueCommandInLane(globalLane, task, opts));
+  const runAbortController = new AbortController();
   return enqueueCommandInLane(sessionLane, () =>
     enqueueGlobal(async () => {
       const started = Date.now();
@@ -1041,6 +1076,33 @@ export async function runEmbeddedPiAgent(params: {
       );
       if (!model) {
         throw new Error(error ?? `Unknown model: ${provider}/${modelId}`);
+      }
+
+      const ctxInfo = resolveContextWindowInfo({
+        cfg: params.config,
+        provider,
+        modelId,
+        modelContextWindow: model.contextWindow,
+        defaultTokens: DEFAULT_CONTEXT_TOKENS,
+      });
+      const ctxGuard = evaluateContextWindowGuard({
+        info: ctxInfo,
+        warnBelowTokens: CONTEXT_WINDOW_WARN_BELOW_TOKENS,
+        hardMinTokens: CONTEXT_WINDOW_HARD_MIN_TOKENS,
+      });
+      if (ctxGuard.shouldWarn) {
+        log.warn(
+          `low context window: ${provider}/${modelId} ctx=${ctxGuard.tokens} (warn<${CONTEXT_WINDOW_WARN_BELOW_TOKENS}) source=${ctxGuard.source}`,
+        );
+      }
+      if (ctxGuard.shouldBlock) {
+        log.error(
+          `blocked model (context window too small): ${provider}/${modelId} ctx=${ctxGuard.tokens} (min=${CONTEXT_WINDOW_HARD_MIN_TOKENS}) source=${ctxGuard.source}`,
+        );
+        throw new FailoverError(
+          `Model context window too small (${ctxGuard.tokens} tokens). Minimum is ${CONTEXT_WINDOW_HARD_MIN_TOKENS}.`,
+          { reason: "unknown", provider, model: modelId },
+        );
       }
       const authStore = ensureAuthProfileStore(agentDir);
       const explicitProfileId = params.authProfileId?.trim();
@@ -1149,9 +1211,17 @@ export async function runEmbeddedPiAgent(params: {
                 skills: skillEntries ?? [],
                 config: params.config,
               });
+          const skillsPrompt = resolveSkillsPromptForRun({
+            skillsSnapshot: params.skillsSnapshot,
+            entries: shouldLoadSkillEntries ? skillEntries : undefined,
+            config: params.config,
+            workspaceDir: effectiveWorkspace,
+          });
 
-          const bootstrapFiles =
-            await loadWorkspaceBootstrapFiles(effectiveWorkspace);
+          const bootstrapFiles = filterBootstrapFilesForSession(
+            await loadWorkspaceBootstrapFiles(effectiveWorkspace),
+            params.sessionKey ?? params.sessionId,
+          );
           const contextFiles = buildBootstrapContextFiles(bootstrapFiles);
           // Tool schemas must be provider-compatible (OpenAI requires top-level `type: "object"`).
           // `createClawdbotCodingTools()` normalizes schemas so the session can pass them through unchanged.
@@ -1166,6 +1236,13 @@ export async function runEmbeddedPiAgent(params: {
             sessionKey: params.sessionKey ?? params.sessionId,
             agentDir,
             config: params.config,
+            abortSignal: runAbortController.signal,
+            modelProvider: model.provider,
+            modelAuthMode: resolveModelAuthMode(model.provider, params.config),
+            currentChannelId: params.currentChannelId,
+            currentThreadTs: params.currentThreadTs,
+            replyToMode: params.replyToMode,
+            hasRepliedRef: params.hasRepliedRef,
           });
           const machineName = await getMachineDisplayName();
           const runtimeInfo = {
@@ -1181,15 +1258,24 @@ export async function runEmbeddedPiAgent(params: {
             params.config?.agents?.defaults?.userTimezone,
           );
           const userTime = formatUserTime(new Date(), userTimezone);
+          // Only include heartbeat prompt for the default agent
+          const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
+            sessionKey: params.sessionKey,
+            config: params.config,
+          });
+          const isDefaultAgent = sessionAgentId === defaultAgentId;
           const appendPrompt = buildEmbeddedSystemPrompt({
             workspaceDir: effectiveWorkspace,
             defaultThinkLevel: thinkLevel,
             extraSystemPrompt: params.extraSystemPrompt,
             ownerNumbers: params.ownerNumbers,
             reasoningTagHint,
-            heartbeatPrompt: resolveHeartbeatPrompt(
-              params.config?.agents?.defaults?.heartbeat?.prompt,
-            ),
+            heartbeatPrompt: isDefaultAgent
+              ? resolveHeartbeatPrompt(
+                  params.config?.agents?.defaults?.heartbeat?.prompt,
+                )
+              : undefined,
+            skillsPrompt,
             runtimeInfo,
             sandboxInfo,
             tools,
@@ -1264,6 +1350,7 @@ export async function runEmbeddedPiAgent(params: {
           const abortRun = (isTimeout = false) => {
             aborted = true;
             if (isTimeout) timedOut = true;
+            runAbortController.abort();
             void session.abort();
           };
           let subscription: ReturnType<typeof subscribeEmbeddedPiSession>;
@@ -1403,9 +1490,23 @@ export async function runEmbeddedPiAgent(params: {
                 },
               };
             }
+            const promptFailoverReason = classifyFailoverReason(errorText);
             if (
-              (isAuthErrorMessage(errorText) ||
-                isRateLimitErrorMessage(errorText)) &&
+              promptFailoverReason &&
+              promptFailoverReason !== "timeout" &&
+              lastProfileId
+            ) {
+              await markAuthProfileFailure({
+                store: authStore,
+                profileId: lastProfileId,
+                reason: promptFailoverReason,
+                cfg: params.config,
+                agentDir: params.agentDir,
+              });
+            }
+            if (
+              isFailoverErrorMessage(errorText) &&
+              promptFailoverReason !== "timeout" &&
               (await advanceAuthProfile())
             ) {
               continue;
@@ -1448,21 +1549,39 @@ export async function runEmbeddedPiAgent(params: {
             0;
           const authFailure = isAuthAssistantError(lastAssistant);
           const rateLimitFailure = isRateLimitAssistantError(lastAssistant);
+          const failoverFailure = isFailoverAssistantError(lastAssistant);
+          const assistantFailoverReason = classifyFailoverReason(
+            lastAssistant?.errorMessage ?? "",
+          );
+          const cloudCodeAssistFormatError = lastAssistant?.errorMessage
+            ? isCloudCodeAssistFormatError(lastAssistant.errorMessage)
+            : false;
 
           // Treat timeout as potential rate limit (Antigravity hangs on rate limit)
-          const shouldRotate =
-            (!aborted && (authFailure || rateLimitFailure)) || timedOut;
+          const shouldRotate = (!aborted && failoverFailure) || timedOut;
 
           if (shouldRotate) {
             // Mark current profile for cooldown before rotating
             if (lastProfileId) {
-              await markAuthProfileCooldown({
+              const reason =
+                timedOut || assistantFailoverReason === "timeout"
+                  ? "timeout"
+                  : (assistantFailoverReason ?? "unknown");
+              await markAuthProfileFailure({
                 store: authStore,
                 profileId: lastProfileId,
+                reason,
+                cfg: params.config,
+                agentDir: params.agentDir,
               });
               if (timedOut) {
                 log.warn(
                   `Profile ${lastProfileId} timed out (possible rate limit). Trying next account...`,
+                );
+              }
+              if (cloudCodeAssistFormatError) {
+                log.warn(
+                  `Profile ${lastProfileId} hit Cloud Code Assist format error. Tool calls will be sanitized on retry.`,
                 );
               }
             }
@@ -1480,8 +1599,19 @@ export async function runEmbeddedPiAgent(params: {
                   ? "LLM request timed out."
                   : rateLimitFailure
                     ? "LLM request rate limited."
-                    : "LLM request unauthorized.");
-              throw new Error(message);
+                    : authFailure
+                      ? "LLM request unauthorized."
+                      : "LLM request failed.");
+              const status =
+                resolveFailoverStatus(assistantFailoverReason ?? "unknown") ??
+                (isTimeoutErrorMessage(message) ? 408 : undefined);
+              throw new FailoverError(message, {
+                reason: assistantFailoverReason ?? "unknown",
+                provider,
+                model: modelId,
+                profileId: lastProfileId,
+                status,
+              });
             }
           }
 
@@ -1497,6 +1627,10 @@ export async function runEmbeddedPiAgent(params: {
             text: string;
             media?: string[];
             isError?: boolean;
+            audioAsVoice?: boolean;
+            replyToId?: string;
+            replyToTag?: boolean;
+            replyToCurrent?: boolean;
           }> = [];
 
           const errorText = lastAssistant
@@ -1513,42 +1647,81 @@ export async function runEmbeddedPiAgent(params: {
           if (inlineToolResults) {
             for (const { toolName, meta } of toolMetas) {
               const agg = formatToolAggregate(toolName, meta ? [meta] : []);
-              const { text: cleanedText, mediaUrls } =
-                splitMediaFromOutput(agg);
+              const {
+                text: cleanedText,
+                mediaUrls,
+                audioAsVoice,
+                replyToId,
+                replyToTag,
+                replyToCurrent,
+              } = parseReplyDirectives(agg);
               if (cleanedText)
-                replyItems.push({ text: cleanedText, media: mediaUrls });
+                replyItems.push({
+                  text: cleanedText,
+                  media: mediaUrls,
+                  audioAsVoice,
+                  replyToId,
+                  replyToTag,
+                  replyToCurrent,
+                });
             }
           }
 
-          const fallbackText = lastAssistant
-            ? (() => {
-                const base = extractAssistantText(lastAssistant);
-                if (params.reasoningLevel !== "on") return base;
-                const thinking = extractAssistantThinking(lastAssistant);
-                const formatted = thinking
-                  ? formatReasoningMarkdown(thinking)
-                  : "";
-                if (!formatted) return base;
-                return base ? `${formatted}\n\n${base}` : formatted;
-              })()
+          const reasoningText =
+            lastAssistant && params.reasoningLevel === "on"
+              ? formatReasoningMessage(extractAssistantThinking(lastAssistant))
+              : "";
+          if (reasoningText) replyItems.push({ text: reasoningText });
+
+          const fallbackAnswerText = lastAssistant
+            ? extractAssistantText(lastAssistant)
             : "";
-          for (const text of assistantTexts.length
+          const answerTexts = assistantTexts.length
             ? assistantTexts
-            : fallbackText
-              ? [fallbackText]
-              : []) {
-            const { text: cleanedText, mediaUrls } = splitMediaFromOutput(text);
-            if (!cleanedText && (!mediaUrls || mediaUrls.length === 0))
+            : fallbackAnswerText
+              ? [fallbackAnswerText]
+              : [];
+          for (const text of answerTexts) {
+            const {
+              text: cleanedText,
+              mediaUrls,
+              audioAsVoice,
+              replyToId,
+              replyToTag,
+              replyToCurrent,
+            } = parseReplyDirectives(text);
+            if (
+              !cleanedText &&
+              (!mediaUrls || mediaUrls.length === 0) &&
+              !audioAsVoice
+            )
               continue;
-            replyItems.push({ text: cleanedText, media: mediaUrls });
+            replyItems.push({
+              text: cleanedText,
+              media: mediaUrls,
+              audioAsVoice,
+              replyToId,
+              replyToTag,
+              replyToCurrent,
+            });
           }
 
+          // Check if any replyItem has audioAsVoice tag - if so, apply to all media payloads
+          const hasAudioAsVoiceTag = replyItems.some(
+            (item) => item.audioAsVoice,
+          );
           const payloads = replyItems
             .map((item) => ({
               text: item.text?.trim() ? item.text.trim() : undefined,
               mediaUrls: item.media?.length ? item.media : undefined,
               mediaUrl: item.media?.[0],
               isError: item.isError,
+              replyToId: item.replyToId,
+              replyToTag: item.replyToTag,
+              replyToCurrent: item.replyToCurrent,
+              // Apply audioAsVoice to media payloads if tag was found anywhere in response
+              audioAsVoice:
+                item.audioAsVoice || (hasAudioAsVoiceTag && item.media?.length),
             }))
             .filter(
               (p) =>

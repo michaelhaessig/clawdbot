@@ -8,6 +8,13 @@ import {
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { loadModelCatalog } from "../agents/model-catalog.js";
+import {
+  getModelRefStatus,
+  resolveConfiguredModelRef,
+  resolveHooksGmailModel,
+} from "../agents/model-selection.js";
 import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import {
@@ -73,6 +80,7 @@ import {
   shouldSuggestMemorySystem,
 } from "./doctor-workspace.js";
 import { healthCommand } from "./health.js";
+import { formatHealthCheckFailure } from "./health-format.js";
 import { applyWizardMetadata, printWizardHeader } from "./onboard-helpers.js";
 import { ensureSystemdUserLingerInteractive } from "./systemd-linger.js";
 
@@ -201,6 +209,48 @@ export async function doctorCommand(
 
   await noteSecurityWarnings(cfg);
 
+  if (cfg.hooks?.gmail?.model?.trim()) {
+    const hooksModelRef = resolveHooksGmailModel({
+      cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+    });
+    if (!hooksModelRef) {
+      note(
+        `- hooks.gmail.model "${cfg.hooks.gmail.model}" could not be resolved`,
+        "Hooks",
+      );
+    } else {
+      const { provider: defaultProvider, model: defaultModel } =
+        resolveConfiguredModelRef({
+          cfg,
+          defaultProvider: DEFAULT_PROVIDER,
+          defaultModel: DEFAULT_MODEL,
+        });
+      const catalog = await loadModelCatalog({ config: cfg });
+      const status = getModelRefStatus({
+        cfg,
+        catalog,
+        ref: hooksModelRef,
+        defaultProvider,
+        defaultModel,
+      });
+      const warnings: string[] = [];
+      if (!status.allowed) {
+        warnings.push(
+          `- hooks.gmail.model "${status.key}" not in agents.defaults.models allowlist (will use primary instead)`,
+        );
+      }
+      if (!status.inCatalog) {
+        warnings.push(
+          `- hooks.gmail.model "${status.key}" not in the model catalog (may fail at runtime)`,
+        );
+      }
+      if (warnings.length > 0) {
+        note(warnings.join("\n"), "Hooks");
+      }
+    }
+  }
+
   if (
     options.nonInteractive !== true &&
     process.platform === "linux" &&
@@ -261,7 +311,7 @@ export async function doctorCommand(
       note("Gateway not running.", "Gateway");
       note(gatewayDetails.message, "Gateway connection");
     } else {
-      runtime.error(`Health check failed: ${message}`);
+      runtime.error(formatHealthCheckFailure(err));
     }
   }
 
@@ -406,7 +456,7 @@ export async function doctorCommand(
               note("Gateway not running.", "Gateway");
               note(gatewayDetails.message, "Gateway connection");
             } else {
-              runtime.error(`Health check failed: ${message}`);
+              runtime.error(formatHealthCheckFailure(err));
             }
           }
         }

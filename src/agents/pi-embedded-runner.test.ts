@@ -2,6 +2,8 @@ import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { describe, expect, it, vi } from "vitest";
+import type { ClawdbotConfig } from "../config/config.js";
+import { resolveSessionAgentIds } from "./agent-scope.js";
 import {
   applyGoogleTurnOrderingFix,
   buildEmbeddedSandboxInfo,
@@ -57,6 +59,54 @@ describe("buildEmbeddedSandboxInfo", () => {
   });
 });
 
+describe("resolveSessionAgentIds", () => {
+  const cfg = {
+    agents: {
+      list: [{ id: "main" }, { id: "beta", default: true }],
+    },
+  } as ClawdbotConfig;
+
+  it("falls back to the configured default when sessionKey is missing", () => {
+    const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
+      config: cfg,
+    });
+    expect(defaultAgentId).toBe("beta");
+    expect(sessionAgentId).toBe("beta");
+  });
+
+  it("falls back to the configured default when sessionKey is non-agent", () => {
+    const { sessionAgentId } = resolveSessionAgentIds({
+      sessionKey: "telegram:slash:123",
+      config: cfg,
+    });
+    expect(sessionAgentId).toBe("beta");
+  });
+
+  it("falls back to the configured default for global sessions", () => {
+    const { sessionAgentId } = resolveSessionAgentIds({
+      sessionKey: "global",
+      config: cfg,
+    });
+    expect(sessionAgentId).toBe("beta");
+  });
+
+  it("keeps the agent id for provider-qualified agent sessions", () => {
+    const { sessionAgentId } = resolveSessionAgentIds({
+      sessionKey: "agent:beta:slack:channel:C1",
+      config: cfg,
+    });
+    expect(sessionAgentId).toBe("beta");
+  });
+
+  it("uses the agent id from agent session keys", () => {
+    const { sessionAgentId } = resolveSessionAgentIds({
+      sessionKey: "agent:main:main",
+      config: cfg,
+    });
+    expect(sessionAgentId).toBe("main");
+  });
+});
+
 function createStubTool(name: string): AgentTool {
   return {
     name,
@@ -68,12 +118,11 @@ function createStubTool(name: string): AgentTool {
 }
 
 describe("splitSdkTools", () => {
-  // Tool names are now capitalized (Bash, Read, etc.) to bypass Anthropic OAuth blocking
   const tools = [
-    createStubTool("Read"),
-    createStubTool("Bash"),
-    createStubTool("Edit"),
-    createStubTool("Write"),
+    createStubTool("read"),
+    createStubTool("bash"),
+    createStubTool("edit"),
+    createStubTool("write"),
     createStubTool("browser"),
   ];
 
@@ -84,27 +133,25 @@ describe("splitSdkTools", () => {
     });
     expect(builtInTools).toEqual([]);
     expect(customTools.map((tool) => tool.name)).toEqual([
-      "Read",
-      "Bash",
-      "Edit",
-      "Write",
+      "read",
+      "bash",
+      "edit",
+      "write",
       "browser",
     ]);
   });
 
-  it("routes all tools to customTools even when not sandboxed (for OAuth compatibility)", () => {
-    // All tools are now passed as customTools to bypass pi-coding-agent's
-    // built-in tool filtering, which expects lowercase names.
+  it("routes all tools to customTools even when not sandboxed", () => {
     const { builtInTools, customTools } = splitSdkTools({
       tools,
       sandboxEnabled: false,
     });
     expect(builtInTools).toEqual([]);
     expect(customTools.map((tool) => tool.name)).toEqual([
-      "Read",
-      "Bash",
-      "Edit",
-      "Write",
+      "read",
+      "bash",
+      "edit",
+      "write",
       "browser",
     ]);
   });

@@ -96,6 +96,21 @@ describe("resolveHeartbeatDeliveryTarget", () => {
     });
   });
 
+  it("normalizes explicit WhatsApp targets when allowFrom is '*'", () => {
+    const cfg: ClawdbotConfig = {
+      agents: {
+        defaults: {
+          heartbeat: { target: "whatsapp", to: "whatsapp:(555) 123" },
+        },
+      },
+      whatsapp: { allowFrom: ["*"] },
+    };
+    expect(resolveHeartbeatDeliveryTarget({ cfg, entry: baseEntry })).toEqual({
+      provider: "whatsapp",
+      to: "+555123",
+    });
+  });
+
   it("skips when last route is webchat", () => {
     const cfg: ClawdbotConfig = {};
     const entry = {
@@ -123,6 +138,36 @@ describe("resolveHeartbeatDeliveryTarget", () => {
       provider: "whatsapp",
       to: "+1555",
       reason: "allowFrom-fallback",
+    });
+  });
+
+  it("keeps WhatsApp group targets even with allowFrom set", () => {
+    const cfg: ClawdbotConfig = {
+      whatsapp: { allowFrom: ["+1555"] },
+    };
+    const entry = {
+      ...baseEntry,
+      lastProvider: "whatsapp" as const,
+      lastTo: "120363401234567890@g.us",
+    };
+    expect(resolveHeartbeatDeliveryTarget({ cfg, entry })).toEqual({
+      provider: "whatsapp",
+      to: "120363401234567890@g.us",
+    });
+  });
+
+  it("normalizes prefixed WhatsApp group targets for heartbeat delivery", () => {
+    const cfg: ClawdbotConfig = {
+      whatsapp: { allowFrom: ["+1555"] },
+    };
+    const entry = {
+      ...baseEntry,
+      lastProvider: "whatsapp" as const,
+      lastTo: "whatsapp:group:120363401234567890@G.US",
+    };
+    expect(resolveHeartbeatDeliveryTarget({ cfg, entry })).toEqual({
+      provider: "whatsapp",
+      to: "120363401234567890@g.us",
     });
   });
 
