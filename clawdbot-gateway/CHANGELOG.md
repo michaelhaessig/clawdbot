@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.16
+
+- Add `clawdbot` CLI to PATH - run `clawdbot configure`, `clawdbot models auth add`, etc. directly
+
 ## 2.0.15
 
 - Sync with upstream (2026.1.9 → 2026.1.10): OAuth refresh for Claude CLI, reasoning fixes for iMessage, dedupe message tool replies

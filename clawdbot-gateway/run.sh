@@ -353,6 +353,16 @@ if ! verify_installation; then
 fi
 
 # =============================================================================
+# Create clawdbot CLI wrapper in PATH
+# =============================================================================
+cat > /usr/local/bin/clawdbot << 'WRAPPER'
+#!/bin/sh
+exec node /config/clawdbot-app/dist/index.js "$@"
+WRAPPER
+chmod +x /usr/local/bin/clawdbot
+log_info "CLI available: clawdbot <command>"
+
+# =============================================================================
 # First Start Onboarding
 # =============================================================================
 
