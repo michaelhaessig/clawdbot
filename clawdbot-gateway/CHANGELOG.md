@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.15
+
+- Sync with upstream (2026.1.9 → 2026.1.10): OAuth refresh for Claude CLI, reasoning fixes for iMessage, dedupe message tool replies
+
 ## 2.0.14
 
 - Update gogcli to v0.5.4 (fixes path expansion and calendar timezone handling)
