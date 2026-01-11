@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.18
+
+- Add network diagnostic tools: `ping` and `nmap` for troubleshooting connectivity issues
+
 ## 2.0.17
 
 - Fix gateway token auto-generation: empty config now means "no auth" instead of auto-generating a token

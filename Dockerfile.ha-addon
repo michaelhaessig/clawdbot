@@ -25,6 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xxd \
     lsof \
     wget \
+    # Network diagnostics
+    iputils-ping \
+    nmap \
     # Skill dependencies
     jq \
     ffmpeg \
