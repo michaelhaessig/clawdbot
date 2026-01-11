@@ -270,13 +270,17 @@ if [ -n "${VACUUM_ENTITY:-}" ]; then
 fi
 
 # Gateway token handling
+# Empty config = no auth (for HA ingress which handles its own auth)
+# Non-empty config = use that token
+# Legacy: if token file exists and config is empty, use file token (migration)
 if [ -z "${GATEWAY_TOKEN}" ]; then
     if [ -f "${STATE_DIR}/.gateway_token" ]; then
+        # Migration: use existing token file, but warn user
         GATEWAY_TOKEN=$(cat "${STATE_DIR}/.gateway_token")
+        log_warn "Using legacy token from ${STATE_DIR}/.gateway_token"
+        log_warn "To disable auth, delete this file and restart"
     else
-        GATEWAY_TOKEN=$(head -c 32 /dev/urandom | xxd -p)
-        echo "${GATEWAY_TOKEN}" > "${STATE_DIR}/.gateway_token"
-        log_info "Generated new gateway token: ${GATEWAY_TOKEN}"
+        log_info "No gateway token configured - auth disabled (HA ingress handles auth)"
     fi
 fi
 export CLAWDBOT_GATEWAY_TOKEN="${GATEWAY_TOKEN}"

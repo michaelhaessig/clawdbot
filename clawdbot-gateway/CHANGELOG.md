@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.17
+
+- Fix gateway token auto-generation: empty config now means "no auth" instead of auto-generating a token
+- HA ingress handles authentication, so token auth is unnecessary for typical addon usage
+- Legacy token files still work with a warning to delete if auth should be disabled
+
 ## 2.0.16
 
 - Add `clawdbot` CLI to PATH - run `clawdbot configure`, `clawdbot models auth add`, etc. directly
