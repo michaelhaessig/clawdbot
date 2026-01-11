@@ -9,6 +9,26 @@ metadata: {"clawdbot":{"emoji":"🤖","skillKey":"ha-vacuum","requires":{"bins":
 
 Control Roborock and other vacuum cleaners via Home Assistant using the `hac` CLI.
 
+## Clarification Required
+
+**Always ask the user to clarify cleaning mode if their request is ambiguous.** When a user says something like "clean the kitchen" or "vacuum the house" without specifying details, ask them to choose:
+
+1. **Cleaning type**: Vacuum only, mop only, or both?
+2. **Intensity** (if relevant): Light/quick clean or deep clean?
+3. **Rooms** (if not specified): Which rooms? (show available rooms with `hac vacuum rooms`)
+
+Example clarification prompt:
+> "I can clean the kitchen for you. How would you like me to clean it?
+> - **Vacuum only** (no mopping)
+> - **Mop only** (no vacuuming)
+> - **Both vacuum and mop**
+> - **Deep clean** (both + multiple passes)"
+
+Only skip clarification when the user explicitly states:
+- The cleaning type (e.g., "just vacuum", "mop the floor", "vacuum and mop")
+- Specific settings (e.g., "turbo mode", "light water")
+- A known scenario (e.g., "quick clean" = balanced defaults)
+
 ## Prerequisites
 
 - Running as HA add-on (SUPERVISOR_TOKEN auto-injected), OR
