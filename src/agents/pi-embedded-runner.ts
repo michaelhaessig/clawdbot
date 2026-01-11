@@ -8,7 +8,12 @@ import type {
   AgentTool,
   ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
-import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  ImageContent,
+  Model,
+} from "@mariozechner/pi-ai";
 import {
   createAgentSession,
   discoverAuthStorage,
@@ -61,7 +66,14 @@ import {
   resolveAuthProfileOrder,
   resolveModelAuthMode,
 } from "./model-auth.js";
+import { normalizeModelCompat } from "./model-compat.js";
 import { ensureClawdbotModelsJson } from "./models-config.js";
+import type { MessagingToolSend } from "./pi-embedded-messaging.js";
+import { ensurePiCompactionReserveTokens } from "./pi-settings.js";
+import { acquireSessionWriteLock } from "./session-write-lock.js";
+
+export type { MessagingToolSend } from "./pi-embedded-messaging.js";
+
 import {
   buildBootstrapContextFiles,
   classifyFailoverReason,
@@ -96,6 +108,7 @@ import { makeToolPrunablePredicate } from "./pi-extensions/context-pruning/tools
 import { toToolDefinitions } from "./pi-tool-definition-adapter.js";
 import { createClawdbotCodingTools } from "./pi-tools.js";
 import { resolveSandboxContext } from "./sandbox.js";
+import { sanitizeToolUseResultPairing } from "./session-transcript-repair.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -104,6 +117,7 @@ import {
   type SkillSnapshot,
 } from "./skills.js";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
+import { buildToolSummaryMap } from "./tool-summaries.js";
 import { normalizeUsage, type UsageLike } from "./usage.js";
 import {
   filterBootstrapFilesForSession,
@@ -224,6 +238,21 @@ function buildContextPruningExtension(params: {
   };
 }
 
+function buildEmbeddedExtensionPaths(params: {
+  cfg: ClawdbotConfig | undefined;
+  sessionManager: SessionManager;
+  provider: string;
+  modelId: string;
+  model: Model<Api> | undefined;
+}): string[] {
+  const paths = [resolvePiExtensionPath("transcript-sanitize")];
+  const pruning = buildContextPruningExtension(params);
+  if (pruning.additionalExtensionPaths) {
+    paths.push(...pruning.additionalExtensionPaths);
+  }
+  return paths;
+}
+
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
   provider: string;
@@ -264,13 +293,6 @@ type ApiKeyInfo = {
   apiKey: string;
   profileId?: string;
   source: string;
-};
-
-export type MessagingToolSend = {
-  tool: string;
-  provider: string;
-  accountId?: string;
-  to?: string;
 };
 
 export type EmbeddedPiRunResult = {
@@ -377,9 +399,14 @@ async function sanitizeSessionHistory(params: {
   const sanitizedImages = await sanitizeSessionMessagesImages(
     params.messages,
     "session:history",
+    {
+      sanitizeToolCallIds: isGoogleModelApi(params.modelApi),
+      enforceToolCallLast: params.modelApi === "anthropic-messages",
+    },
   );
+  const repairedTools = sanitizeToolUseResultPairing(sanitizedImages);
   return applyGoogleTurnOrderingFix({
-    messages: sanitizedImages,
+    messages: repairedTools,
     modelApi: params.modelApi,
     sessionManager: params.sessionManager,
     sessionId: params.sessionId,
@@ -471,6 +498,14 @@ type EmbeddedSandboxInfo = {
   agentWorkspaceMount?: string;
   browserControlUrl?: string;
   browserNoVncUrl?: string;
+  hostBrowserAllowed?: boolean;
+  allowedControlUrls?: string[];
+  allowedControlHosts?: string[];
+  allowedControlPorts?: number[];
+  elevated?: {
+    allowed: boolean;
+    defaultLevel: "on" | "off";
+  };
 };
 
 function resolveSessionLane(key: string) {
@@ -544,8 +579,12 @@ function describeUnknownError(error: unknown): string {
 
 export function buildEmbeddedSandboxInfo(
   sandbox?: Awaited<ReturnType<typeof resolveSandboxContext>>,
+  bashElevated?: BashElevatedDefaults,
 ): EmbeddedSandboxInfo | undefined {
   if (!sandbox?.enabled) return undefined;
+  const elevatedAllowed = Boolean(
+    bashElevated?.enabled && bashElevated.allowed,
+  );
   return {
     enabled: true,
     workspaceDir: sandbox.workspaceDir,
@@ -554,12 +593,25 @@ export function buildEmbeddedSandboxInfo(
       sandbox.workspaceAccess === "ro" ? "/agent" : undefined,
     browserControlUrl: sandbox.browser?.controlUrl,
     browserNoVncUrl: sandbox.browser?.noVncUrl,
+    hostBrowserAllowed: sandbox.browserAllowHostControl,
+    allowedControlUrls: sandbox.browserAllowedControlUrls,
+    allowedControlHosts: sandbox.browserAllowedControlHosts,
+    allowedControlPorts: sandbox.browserAllowedControlPorts,
+    ...(elevatedAllowed
+      ? {
+          elevated: {
+            allowed: true,
+            defaultLevel: bashElevated?.defaultLevel ?? "off",
+          },
+        }
+      : {}),
   };
 }
 
 function buildEmbeddedSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
+  reasoningLevel?: ReasoningLevel;
   extraSystemPrompt?: string;
   ownerNumbers?: string[];
   reasoningTagHint: boolean;
@@ -584,6 +636,7 @@ function buildEmbeddedSystemPrompt(params: {
   return buildAgentSystemPrompt({
     workspaceDir: params.workspaceDir,
     defaultThinkLevel: params.defaultThinkLevel,
+    reasoningLevel: params.reasoningLevel,
     extraSystemPrompt: params.extraSystemPrompt,
     ownerNumbers: params.ownerNumbers,
     reasoningTagHint: params.reasoningTagHint,
@@ -592,6 +645,7 @@ function buildEmbeddedSystemPrompt(params: {
     runtimeInfo: params.runtimeInfo,
     sandboxInfo: params.sandboxInfo,
     toolNames: params.tools.map((tool) => tool.name),
+    toolSummaries: buildToolSummaryMap(params.tools),
     modelAliasLines: params.modelAliasLines,
     userTimezone: params.userTimezone,
     userTime: params.userTime,
@@ -727,7 +781,7 @@ function resolveModel(
       modelRegistry,
     };
   }
-  return { model, authStorage, modelRegistry };
+  return { model: normalizeModelCompat(model), authStorage, modelRegistry };
 }
 
 export async function compactEmbeddedPiSession(params: {
@@ -743,6 +797,7 @@ export async function compactEmbeddedPiSession(params: {
   provider?: string;
   model?: string;
   thinkLevel?: ThinkLevel;
+  reasoningLevel?: ReasoningLevel;
   bashElevated?: BashElevatedDefaults;
   customInstructions?: string;
   lane?: string;
@@ -765,8 +820,8 @@ export async function compactEmbeddedPiSession(params: {
       const provider =
         (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
       const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-      await ensureClawdbotModelsJson(params.config);
       const agentDir = params.agentDir ?? resolveClawdbotAgentDir();
+      await ensureClawdbotModelsJson(params.config, agentDir);
       const { model, error, authStorage, modelRegistry } = resolveModel(
         provider,
         modelId,
@@ -852,6 +907,7 @@ export async function compactEmbeddedPiSession(params: {
           agentAccountId: params.agentAccountId,
           sessionKey: params.sessionKey ?? params.sessionId,
           agentDir,
+          workspaceDir: effectiveWorkspace,
           config: params.config,
           abortSignal: runAbortController.signal,
           modelProvider: model.provider,
@@ -878,7 +934,10 @@ export async function compactEmbeddedPiSession(params: {
           provider: runtimeProvider,
           capabilities: runtimeCapabilities,
         };
-        const sandboxInfo = buildEmbeddedSandboxInfo(sandbox);
+        const sandboxInfo = buildEmbeddedSandboxInfo(
+          sandbox,
+          params.bashElevated,
+        );
         const reasoningTagHint = provider === "ollama";
         const userTimezone = resolveUserTimezone(
           params.config?.agents?.defaults?.userTimezone,
@@ -893,6 +952,7 @@ export async function compactEmbeddedPiSession(params: {
         const appendPrompt = buildEmbeddedSystemPrompt({
           workspaceDir: effectiveWorkspace,
           defaultThinkLevel: params.thinkLevel,
+          reasoningLevel: params.reasoningLevel ?? "off",
           extraSystemPrompt: params.extraSystemPrompt,
           ownerNumbers: params.ownerNumbers,
           reasoningTagHint,
@@ -912,70 +972,79 @@ export async function compactEmbeddedPiSession(params: {
         });
         const systemPrompt = createSystemPromptOverride(appendPrompt);
 
-        // Pre-warm session file to bring it into OS page cache
-        await prewarmSessionFile(params.sessionFile);
-        const sessionManager = SessionManager.open(params.sessionFile);
-        trackSessionManagerAccess(params.sessionFile);
-        const settingsManager = SettingsManager.create(
-          effectiveWorkspace,
-          agentDir,
-        );
-        const pruning = buildContextPruningExtension({
-          cfg: params.config,
-          sessionManager,
-          provider,
-          modelId,
-          model,
+        const sessionLock = await acquireSessionWriteLock({
+          sessionFile: params.sessionFile,
         });
-        const additionalExtensionPaths = pruning.additionalExtensionPaths;
-
-        const { builtInTools, customTools } = splitSdkTools({
-          tools,
-          sandboxEnabled: !!sandbox?.enabled,
-        });
-
-        let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
-        ({ session } = await createAgentSession({
-          cwd: resolvedWorkspace,
-          agentDir,
-          authStorage,
-          modelRegistry,
-          model,
-          thinkingLevel: mapThinkingLevel(params.thinkLevel),
-          systemPrompt,
-          tools: builtInTools,
-          customTools,
-          sessionManager,
-          settingsManager,
-          skills: [],
-          contextFiles: [],
-          additionalExtensionPaths,
-        }));
-
         try {
-          const prior = await sanitizeSessionHistory({
-            messages: session.messages,
-            modelApi: model.api,
+          // Pre-warm session file to bring it into OS page cache
+          await prewarmSessionFile(params.sessionFile);
+          const sessionManager = SessionManager.open(params.sessionFile);
+          trackSessionManagerAccess(params.sessionFile);
+          const settingsManager = SettingsManager.create(
+            effectiveWorkspace,
+            agentDir,
+          );
+          ensurePiCompactionReserveTokens({ settingsManager });
+          const additionalExtensionPaths = buildEmbeddedExtensionPaths({
+            cfg: params.config,
             sessionManager,
-            sessionId: params.sessionId,
+            provider,
+            modelId,
+            model,
           });
-          const validated = validateGeminiTurns(prior);
-          if (validated.length > 0) {
-            session.agent.replaceMessages(validated);
+
+          const { builtInTools, customTools } = splitSdkTools({
+            tools,
+            sandboxEnabled: !!sandbox?.enabled,
+          });
+
+          let session: Awaited<
+            ReturnType<typeof createAgentSession>
+          >["session"];
+          ({ session } = await createAgentSession({
+            cwd: resolvedWorkspace,
+            agentDir,
+            authStorage,
+            modelRegistry,
+            model,
+            thinkingLevel: mapThinkingLevel(params.thinkLevel),
+            systemPrompt,
+            tools: builtInTools,
+            customTools,
+            sessionManager,
+            settingsManager,
+            skills: [],
+            contextFiles: [],
+            additionalExtensionPaths,
+          }));
+
+          try {
+            const prior = await sanitizeSessionHistory({
+              messages: session.messages,
+              modelApi: model.api,
+              sessionManager,
+              sessionId: params.sessionId,
+            });
+            const validated = validateGeminiTurns(prior);
+            if (validated.length > 0) {
+              session.agent.replaceMessages(validated);
+            }
+            const result = await session.compact(params.customInstructions);
+            return {
+              ok: true,
+              compacted: true,
+              result: {
+                summary: result.summary,
+                firstKeptEntryId: result.firstKeptEntryId,
+                tokensBefore: result.tokensBefore,
+                details: result.details,
+              },
+            };
+          } finally {
+            session.dispose();
           }
-          const result = await session.compact(params.customInstructions);
-          return {
-            ok: true,
-            compacted: true,
-            result: {
-              summary: result.summary,
-              firstKeptEntryId: result.firstKeptEntryId,
-              tokensBefore: result.tokensBefore,
-              details: result.details,
-            },
-          };
         } finally {
-          session.dispose();
+          await sessionLock.release();
         }
       } catch (err) {
         return {
@@ -1010,6 +1079,8 @@ export async function runEmbeddedPiAgent(params: {
   config?: ClawdbotConfig;
   skillsSnapshot?: SkillSnapshot;
   prompt: string;
+  /** Optional image attachments for multimodal messages. */
+  images?: ImageContent[];
   provider?: string;
   model?: string;
   authProfileId?: string;
@@ -1067,8 +1138,8 @@ export async function runEmbeddedPiAgent(params: {
       const provider =
         (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
       const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-      await ensureClawdbotModelsJson(params.config);
       const agentDir = params.agentDir ?? resolveClawdbotAgentDir();
+      await ensureClawdbotModelsJson(params.config, agentDir);
       const { model, error, authStorage, modelRegistry } = resolveModel(
         provider,
         modelId,
@@ -1235,6 +1306,7 @@ export async function runEmbeddedPiAgent(params: {
             agentAccountId: params.agentAccountId,
             sessionKey: params.sessionKey ?? params.sessionId,
             agentDir,
+            workspaceDir: effectiveWorkspace,
             config: params.config,
             abortSignal: runAbortController.signal,
             modelProvider: model.provider,
@@ -1252,7 +1324,10 @@ export async function runEmbeddedPiAgent(params: {
             node: process.version,
             model: `${provider}/${modelId}`,
           };
-          const sandboxInfo = buildEmbeddedSandboxInfo(sandbox);
+          const sandboxInfo = buildEmbeddedSandboxInfo(
+            sandbox,
+            params.bashElevated,
+          );
           const reasoningTagHint = provider === "ollama";
           const userTimezone = resolveUserTimezone(
             params.config?.agents?.defaults?.userTimezone,
@@ -1267,6 +1342,7 @@ export async function runEmbeddedPiAgent(params: {
           const appendPrompt = buildEmbeddedSystemPrompt({
             workspaceDir: effectiveWorkspace,
             defaultThinkLevel: thinkLevel,
+            reasoningLevel: params.reasoningLevel ?? "off",
             extraSystemPrompt: params.extraSystemPrompt,
             ownerNumbers: params.ownerNumbers,
             reasoningTagHint,
@@ -1286,6 +1362,9 @@ export async function runEmbeddedPiAgent(params: {
           });
           const systemPrompt = createSystemPromptOverride(appendPrompt);
 
+          const sessionLock = await acquireSessionWriteLock({
+            sessionFile: params.sessionFile,
+          });
           // Pre-warm session file to bring it into OS page cache
           await prewarmSessionFile(params.sessionFile);
           const sessionManager = SessionManager.open(params.sessionFile);
@@ -1294,14 +1373,14 @@ export async function runEmbeddedPiAgent(params: {
             effectiveWorkspace,
             agentDir,
           );
-          const pruning = buildContextPruningExtension({
+          ensurePiCompactionReserveTokens({ settingsManager });
+          const additionalExtensionPaths = buildEmbeddedExtensionPaths({
             cfg: params.config,
             sessionManager,
             provider,
             modelId,
             model,
           });
-          const additionalExtensionPaths = pruning.additionalExtensionPaths;
 
           const { builtInTools, customTools } = splitSdkTools({
             tools,
@@ -1343,6 +1422,7 @@ export async function runEmbeddedPiAgent(params: {
             }
           } catch (err) {
             session.dispose();
+            await sessionLock.release();
             throw err;
           }
           let aborted = Boolean(params.abortSignal?.aborted);
@@ -1372,6 +1452,7 @@ export async function runEmbeddedPiAgent(params: {
             });
           } catch (err) {
             session.dispose();
+            await sessionLock.release();
             throw err;
           }
           const {
@@ -1434,7 +1515,9 @@ export async function runEmbeddedPiAgent(params: {
               `embedded run prompt start: runId=${params.runId} sessionId=${params.sessionId}`,
             );
             try {
-              await session.prompt(params.prompt);
+              await session.prompt(params.prompt, {
+                images: params.images,
+              });
             } catch (err) {
               promptError = err;
             } finally {
@@ -1466,6 +1549,7 @@ export async function runEmbeddedPiAgent(params: {
               notifyEmbeddedRunEnded(params.sessionId);
             }
             session.dispose();
+            await sessionLock.release();
             params.abortSignal?.removeEventListener?.("abort", onAbort);
           }
           if (promptError && !aborted) {
@@ -1593,7 +1677,10 @@ export async function runEmbeddedPiAgent(params: {
               const message =
                 lastAssistant?.errorMessage?.trim() ||
                 (lastAssistant
-                  ? formatAssistantErrorText(lastAssistant)
+                  ? formatAssistantErrorText(lastAssistant, {
+                      cfg: params.config,
+                      sessionKey: params.sessionKey ?? params.sessionId,
+                    })
                   : "") ||
                 (timedOut
                   ? "LLM request timed out."
@@ -1634,7 +1721,10 @@ export async function runEmbeddedPiAgent(params: {
           }> = [];
 
           const errorText = lastAssistant
-            ? formatAssistantErrorText(lastAssistant)
+            ? formatAssistantErrorText(lastAssistant, {
+                cfg: params.config,
+                sessionKey: params.sessionKey ?? params.sessionId,
+              })
             : undefined;
 
           if (errorText) replyItems.push({ text: errorText, isError: true });

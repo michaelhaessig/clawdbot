@@ -10,6 +10,12 @@ type StubSession = {
 type SessionEventHandler = (evt: unknown) => void;
 
 describe("subscribeEmbeddedPiSession", () => {
+  const THINKING_TAG_CASES = [
+    { tag: "think", open: "<think>", close: "</think>" },
+    { tag: "thinking", open: "<thinking>", close: "</thinking>" },
+    { tag: "thought", open: "<thought>", close: "</thought>" },
+    { tag: "antthinking", open: "<antthinking>", close: "</antthinking>" },
+  ] as const;
   it("filters to <final> and falls back when tags are malformed", () => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
@@ -167,7 +173,12 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(onBlockReply.mock.calls[1][0].text).toBe("Final answer");
   });
 
-  it("promotes <think> tags to thinking blocks at write-time", () => {
+  it.each(
+    THINKING_TAG_CASES,
+  )("promotes <%s> tags to thinking blocks at write-time", ({
+    open,
+    close,
+  }) => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
       subscribe: (fn) => {
@@ -193,7 +204,7 @@ describe("subscribeEmbeddedPiSession", () => {
       content: [
         {
           type: "text",
-          text: "<think>\nBecause it helps\n</think>\n\nFinal answer",
+          text: `${open}\nBecause it helps\n${close}\n\nFinal answer`,
         },
       ],
     } as AssistantMessage;
@@ -212,7 +223,12 @@ describe("subscribeEmbeddedPiSession", () => {
     ]);
   });
 
-  it("streams <think> reasoning via onReasoningStream without leaking into final text", () => {
+  it.each(
+    THINKING_TAG_CASES,
+  )("streams <%s> reasoning via onReasoningStream without leaking into final text", ({
+    open,
+    close,
+  }) => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
       subscribe: (fn) => {
@@ -240,7 +256,7 @@ describe("subscribeEmbeddedPiSession", () => {
       message: { role: "assistant" },
       assistantMessageEvent: {
         type: "text_delta",
-        delta: "<think>\nBecause",
+        delta: `${open}\nBecause`,
       },
     });
 
@@ -249,7 +265,7 @@ describe("subscribeEmbeddedPiSession", () => {
       message: { role: "assistant" },
       assistantMessageEvent: {
         type: "text_delta",
-        delta: " it helps\n</think>\n\nFinal answer",
+        delta: ` it helps\n${close}\n\nFinal answer`,
       },
     });
 
@@ -258,7 +274,7 @@ describe("subscribeEmbeddedPiSession", () => {
       content: [
         {
           type: "text",
-          text: "<think>\nBecause it helps\n</think>\n\nFinal answer",
+          text: `${open}\nBecause it helps\n${close}\n\nFinal answer`,
         },
       ],
     } as AssistantMessage;
@@ -279,10 +295,9 @@ describe("subscribeEmbeddedPiSession", () => {
     ]);
   });
 
-  it.each([
-    { tag: "think", open: "<think>", close: "</think>" },
-    { tag: "thinking", open: "<thinking>", close: "</thinking>" },
-  ])("suppresses <%s> blocks across chunk boundaries", ({ open, close }) => {
+  it.each(
+    THINKING_TAG_CASES,
+  )("suppresses <%s> blocks across chunk boundaries", ({ open, close }) => {
     let handler: ((evt: unknown) => void) | undefined;
     const session: StubSession = {
       subscribe: (fn) => {
@@ -399,6 +414,68 @@ describe("subscribeEmbeddedPiSession", () => {
 
     handler?.({ type: "message_end", message: assistantMessage });
 
+    expect(subscription.assistantTexts).toEqual(["Final answer"]);
+  });
+
+  it("suppresses partial replies when reasoning is enabled and block replies are disabled", () => {
+    let handler: ((evt: unknown) => void) | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const onPartialReply = vi.fn();
+
+    const subscription = subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<
+        typeof subscribeEmbeddedPiSession
+      >[0]["session"],
+      runId: "run",
+      reasoningMode: "on",
+      onPartialReply,
+    });
+
+    handler?.({ type: "message_start", message: { role: "assistant" } });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "Draft ",
+      },
+    });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_delta",
+        delta: "reply",
+      },
+    });
+
+    expect(onPartialReply).not.toHaveBeenCalled();
+
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Because it helps" },
+        { type: "text", text: "Final answer" },
+      ],
+    } as AssistantMessage;
+
+    handler?.({ type: "message_end", message: assistantMessage });
+    handler?.({
+      type: "message_update",
+      message: { role: "assistant" },
+      assistantMessageEvent: {
+        type: "text_end",
+        content: "Draft reply",
+      },
+    });
+
+    expect(onPartialReply).not.toHaveBeenCalled();
     expect(subscription.assistantTexts).toEqual(["Final answer"]);
   });
 
@@ -556,6 +633,53 @@ describe("subscribeEmbeddedPiSession", () => {
     handler?.({ type: "message_end", message: assistantMessage });
 
     expect(onBlockReply).not.toHaveBeenCalled();
+  });
+
+  it("does not suppress message_end replies when message tool reports error", () => {
+    let handler: ((evt: unknown) => void) | undefined;
+    const session: StubSession = {
+      subscribe: (fn) => {
+        handler = fn;
+        return () => {};
+      },
+    };
+
+    const onBlockReply = vi.fn();
+
+    subscribeEmbeddedPiSession({
+      session: session as unknown as Parameters<
+        typeof subscribeEmbeddedPiSession
+      >[0]["session"],
+      runId: "run",
+      onBlockReply,
+      blockReplyBreak: "message_end",
+    });
+
+    const messageText = "Please retry the send.";
+
+    handler?.({
+      type: "tool_execution_start",
+      toolName: "message",
+      toolCallId: "tool-message-err",
+      args: { action: "send", to: "+1555", message: messageText },
+    });
+
+    handler?.({
+      type: "tool_execution_end",
+      toolName: "message",
+      toolCallId: "tool-message-err",
+      isError: false,
+      result: { details: { status: "error" } },
+    });
+
+    const assistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: messageText }],
+    } as AssistantMessage;
+
+    handler?.({ type: "message_end", message: assistantMessage });
+
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
   });
 
   it("clears block reply state on message_start", () => {
