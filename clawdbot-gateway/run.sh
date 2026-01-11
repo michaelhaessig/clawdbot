@@ -410,9 +410,15 @@ if (!cfg.gateway.mode) { cfg.gateway.mode = 'local'; changed = true; }
 if (cfg.gateway.bind !== 'lan') { cfg.gateway.bind = 'lan'; changed = true; }
 // Set auth mode based on whether token is configured
 if (!cfg.gateway.auth) cfg.gateway.auth = {};
-const wantMode = token ? 'token' : 'none';
-if (cfg.gateway.auth.mode !== wantMode) { cfg.gateway.auth.mode = wantMode; changed = true; }
-if (token && cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
+if (token) {
+  // Token auth enabled
+  if (cfg.gateway.auth.mode !== 'token') { cfg.gateway.auth.mode = 'token'; changed = true; }
+  if (cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
+} else {
+  // No auth - delete mode field (resolveGatewayAuth defaults to 'none')
+  if (cfg.gateway.auth.mode) { delete cfg.gateway.auth.mode; changed = true; }
+  if (cfg.gateway.auth.token) { delete cfg.gateway.auth.token; changed = true; }
+}
 if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
 " 2>/dev/null || true
 fi

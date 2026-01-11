@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.19
+
+- Fix gateway auth validation error: don't set `mode: 'none'` (not a valid schema value), instead omit mode field when auth is disabled
+
 ## 2.0.18
 
 - Add network diagnostic tools: `ping` and `nmap` for troubleshooting connectivity issues
