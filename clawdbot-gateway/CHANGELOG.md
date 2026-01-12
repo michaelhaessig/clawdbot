@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.22
+
+- Gemini cli
+
 ## 2.0.19
 
 - Fix gateway auth validation error: don't set `mode: 'none'` (not a valid schema value), instead omit mode field when auth is disabled
