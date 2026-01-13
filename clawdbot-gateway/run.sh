@@ -264,6 +264,13 @@ export CLAWDBOT_STATE_DIR="$STATE_DIR"
 export CLAWDBOT_WORKSPACE_DIR="$WORKSPACE"
 export HOME="$STATE_DIR"
 
+# Symlink /root/.gemini to persistent storage so Gemini CLI works in interactive shells
+# (interactive shells have HOME=/root, but we want credentials to persist)
+if [ ! -L /root/.gemini ] && [ ! -d /root/.gemini ]; then
+    mkdir -p "$STATE_DIR/.gemini"
+    ln -s "$STATE_DIR/.gemini" /root/.gemini
+fi
+
 # Export vacuum entity for hac CLI (if configured)
 if [ -n "${VACUUM_ENTITY:-}" ]; then
     export HAC_VACUUM_ENTITY="$VACUUM_ENTITY"
