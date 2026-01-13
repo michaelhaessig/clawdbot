@@ -271,11 +271,11 @@ without WhatsApp/Telegram.
 
 ### Telegram: what goes in `allowFrom`?
 
-`telegram.allowFrom` is **the human sender’s Telegram user ID** (numeric, recommended) or `@username`. It is not the bot username. To find your ID, DM `@userinfobot` or read the `from.id` in the gateway log for a DM. See [/providers/telegram](/providers/telegram#access-control-dms--groups).
+`channels.telegram.allowFrom` is **the human sender’s Telegram user ID** (numeric, recommended) or `@username`. It is not the bot username. To find your ID, DM `@userinfobot` or read the `from.id` in the gateway log for a DM. See [/channels/telegram](/channels/telegram#access-control-dms--groups).
 
 ### Can multiple people use one WhatsApp number with different Clawdbots?
 
-Yes, via **multi‑agent routing**. Bind each sender’s WhatsApp **DM** (peer `kind: "dm"`, sender E.164 like `+15551234567`) to a different `agentId`, so each person gets their own workspace and session store. Replies still come from the **same WhatsApp account**, and DM access control (`whatsapp.dmPolicy` / `whatsapp.allowFrom`) is global per WhatsApp account. See [Multi-Agent Routing](/concepts/multi-agent) and [WhatsApp](/providers/whatsapp).
+Yes, via **multi‑agent routing**. Bind each sender’s WhatsApp **DM** (peer `kind: "dm"`, sender E.164 like `+15551234567`) to a different `agentId`, so each person gets their own workspace and session store. Replies still come from the **same WhatsApp account**, and DM access control (`channels.whatsapp.dmPolicy` / `channels.whatsapp.allowFrom`) is global per WhatsApp account. See [Multi-Agent Routing](/concepts/multi-agent) and [WhatsApp](/channels/whatsapp).
 
 ### Can I run a "fast chat" agent and an "Opus for coding" agent?
 
@@ -548,7 +548,7 @@ The Gateway watches the config and supports hot‑reload:
 
 The common pattern is **one Gateway** (e.g. Raspberry Pi) plus **nodes** and **agents**:
 
-- **Gateway (central):** owns providers (Signal/WhatsApp), routing, and sessions.
+- **Gateway (central):** owns channels (Signal/WhatsApp), routing, and sessions.
 - **Nodes (devices):** Macs/iOS/Android connect as peripherals and expose local tools (`system.run`, `canvas`, `camera`).
 - **Agents (workers):** separate brains/workspaces for special roles (e.g. “Hetzner ops”, “Personal data”).
 - **Sub‑agents:** spawn background work from a main agent when you want parallelism.
@@ -605,7 +605,7 @@ Yes. `config.apply` validates + writes the full config and restarts the Gateway 
 ```json5
 {
   agents: { defaults: { workspace: "~/clawd" } },
-  whatsapp: { allowFrom: ["+15555550123"] }
+  channels: { whatsapp: { allowFrom: ["+15555550123"] } }
 }
 ```
 
@@ -788,9 +788,11 @@ If you want only **you** to be able to trigger group replies:
 
 ```json5
 {
-  whatsapp: {
-    groupPolicy: "allowlist",
-    groupAllowFrom: ["+15551234567"]
+  channels: {
+    whatsapp: {
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["+15551234567"]
+    }
   }
 }
 ```
@@ -799,7 +801,7 @@ If you want only **you** to be able to trigger group replies:
 
 Two common causes:
 - Mention gating is on (default). You must @mention the bot (or match `mentionPatterns`).
-- You configured `whatsapp.groups` without `"*"` and the group isn’t allowlisted.
+- You configured `channels.whatsapp.groups` without `"*"` and the group isn’t allowlisted.
 
 See [Groups](/concepts/groups) and [Group messages](/concepts/group-messages).
 
@@ -1254,7 +1256,7 @@ If you run the gateway manually, `clawdbot gateway --force` can reclaim the port
 
 ### What’s the fastest way to get more details when something fails?
 
-Start the Gateway with `--verbose` to get more console detail. Then inspect the log file for provider auth, model routing, and RPC errors.
+Start the Gateway with `--verbose` to get more console detail. Then inspect the log file for channel auth, model routing, and RPC errors.
 
 ## Media & attachments
 
@@ -1276,10 +1278,10 @@ Note: images are resized/recompressed (max side 2048px) to hit size limits. See 
 
 Treat inbound DMs as untrusted input. Defaults are designed to reduce risk:
 
-- Default behavior on DM‑capable providers is **pairing**:
+- Default behavior on DM‑capable channels is **pairing**:
   - Unknown senders receive a pairing code; the bot does not process their message.
-  - Approve with: `clawdbot pairing approve <provider> <code>`
-  - Pending requests are capped at **3 per provider**; check `clawdbot pairing list <provider>` if a code didn’t arrive.
+  - Approve with: `clawdbot pairing approve <channel> <code>`
+  - Pending requests are capped at **3 per channel**; check `clawdbot pairing list <channel>` if a code didn’t arrive.
 - Opening DMs publicly requires explicit opt‑in (`dmPolicy: "open"` and allowlist `"*"`).
 
 Run `clawdbot doctor` to surface risky DM policies.
@@ -1300,7 +1302,7 @@ List pending requests:
 clawdbot pairing list whatsapp
 ```
 
-Wizard phone number prompt: it’s used to set your **allowlist/owner** so your own DMs are permitted. It’s not used for auto-sending. If you run on your personal WhatsApp number, use that number and enable `whatsapp.selfChatMode`.
+Wizard phone number prompt: it’s used to set your **allowlist/owner** so your own DMs are permitted. It’s not used for auto-sending. If you run on your personal WhatsApp number, use that number and enable `channels.whatsapp.selfChatMode`.
 
 ## Chat commands, aborting tasks, and “it won’t stop”
 
@@ -1355,22 +1357,24 @@ Enable self-chat mode and allowlist your own number:
 
 ```json5
 {
-  whatsapp: {
-    selfChatMode: true,
-    dmPolicy: "allowlist",
-    allowFrom: ["+15555550123"]
+  channels: {
+    whatsapp: {
+      selfChatMode: true,
+      dmPolicy: "allowlist",
+      allowFrom: ["+15555550123"]
+    }
   }
 }
 ```
 
-See [WhatsApp setup](/providers/whatsapp).
+See [WhatsApp setup](/channels/whatsapp).
 
 ### WhatsApp logged me out. How do I re‑auth?
 
 Run the login command again and scan the QR code:
 
 ```bash
-clawdbot providers login
+clawdbot channels login
 ```
 
 ### Build errors on `main` — what’s the standard fix path?
@@ -1424,15 +1428,15 @@ Notes:
 
 Block streaming only sends **completed text blocks**. Common reasons you see a single message:
 - `agents.defaults.blockStreamingDefault` is still `"off"`.
-- `telegram.blockStreaming` is set to `false`.
-- `telegram.streamMode` is `partial` or `block` **and draft streaming is active**
+- `channels.telegram.blockStreaming` is set to `false`.
+- `channels.telegram.streamMode` is `partial` or `block` **and draft streaming is active**
   (private chat + topics). Draft streaming disables block streaming in that case.
 - Your `minChars` / coalesce settings are too high, so chunks get merged.
 - The model emits one large text block (no mid‑reply flush points).
 
 Fix checklist:
 1) Put block streaming settings under `agents.defaults`, not the root.
-2) Set `telegram.streamMode: "off"` if you want real multi‑message block replies.
+2) Set `channels.telegram.streamMode: "off"` if you want real multi‑message block replies.
 3) Use smaller chunk/coalesce thresholds while debugging.
 
 See [Streaming](/concepts/streaming).
@@ -1440,17 +1444,17 @@ See [Streaming](/concepts/streaming).
 ### Discord doesn’t reply in my server even with `requireMention: false`. Why?
 
 `requireMention` only controls mention‑gating **after** the channel passes allowlists.
-By default `discord.groupPolicy` is **allowlist**, so guild channels must be explicitly enabled.
+By default `channels.discord.groupPolicy` is **allowlist**, so guild channels must be explicitly enabled.
 
 Fix checklist:
-1) Set `discord.groupPolicy: "open"` **or** add the guild/channel allowlist.
-2) Use **numeric channel IDs** in `discord.guilds.<guildId>.channels`.
-3) Put `requireMention: false` **under** `discord.guilds` (global or per‑channel).
-   Top‑level `discord.requireMention` is not a supported key.
+1) Set `channels.discord.groupPolicy: "open"` **or** add the guild/channel allowlist.
+2) Use **numeric channel IDs** in `channels.discord.guilds.<guildId>.channels`.
+3) Put `requireMention: false` **under** `channels.discord.guilds` (global or per‑channel).
+   Top‑level `channels.discord.requireMention` is not a supported key.
 4) Ensure the bot has **Message Content Intent** and channel permissions.
-5) Run `clawdbot providers status --probe` for audit hints.
+5) Run `clawdbot channels status --probe` for audit hints.
 
-Docs: [Discord](/providers/discord), [Providers troubleshooting](/providers/troubleshooting).
+Docs: [Discord](/channels/discord), [Channels troubleshooting](/channels/troubleshooting).
 
 ### Cloud Code Assist API error: invalid tool schema (400). What now?
 
