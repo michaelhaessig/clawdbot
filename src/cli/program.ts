@@ -10,6 +10,7 @@ import {
   configureCommand,
   configureCommandWithSections,
 } from "../commands/configure.js";
+import { dashboardCommand } from "../commands/dashboard.js";
 import { doctorCommand } from "../commands/doctor.js";
 import { healthCommand } from "../commands/health.js";
 import { messageCommand } from "../commands/message.js";
@@ -263,7 +264,7 @@ export function buildProgram() {
     .option("--mode <mode>", "Wizard mode: local|remote")
     .option(
       "--auth-choice <choice>",
-      "Auth: setup-token|claude-cli|token|openai-codex|openai-api-key|openrouter-api-key|moonshot-api-key|codex-cli|antigravity|gemini-api-key|zai-api-key|apiKey|minimax-api|minimax-api-lightning|opencode-zen|skip",
+      "Auth: setup-token|claude-cli|token|chutes|openai-codex|openai-api-key|openrouter-api-key|moonshot-api-key|synthetic-api-key|codex-cli|antigravity|gemini-api-key|zai-api-key|apiKey|minimax-api|minimax-api-lightning|opencode-zen|skip",
     )
     .option(
       "--token-provider <id>",
@@ -288,9 +289,10 @@ export function buildProgram() {
     .option("--gemini-api-key <key>", "Gemini API key")
     .option("--zai-api-key <key>", "Z.AI API key")
     .option("--minimax-api-key <key>", "MiniMax API key")
+    .option("--synthetic-api-key <key>", "Synthetic API key")
     .option("--opencode-zen-api-key <key>", "OpenCode Zen API key")
     .option("--gateway-port <port>", "Gateway port")
-    .option("--gateway-bind <mode>", "Gateway bind: loopback|lan|tailnet|auto")
+    .option("--gateway-bind <mode>", "Gateway bind: loopback|lan|auto|custom")
     .option("--gateway-auth <mode>", "Gateway auth: off|token|password")
     .option("--gateway-token <token>", "Gateway token (token auth)")
     .option("--gateway-password <password>", "Gateway password (password auth)")
@@ -329,10 +331,12 @@ export function buildProgram() {
               | "setup-token"
               | "claude-cli"
               | "token"
+              | "chutes"
               | "openai-codex"
               | "openai-api-key"
               | "openrouter-api-key"
               | "moonshot-api-key"
+              | "synthetic-api-key"
               | "codex-cli"
               | "antigravity"
               | "gemini-api-key"
@@ -356,6 +360,7 @@ export function buildProgram() {
             geminiApiKey: opts.geminiApiKey as string | undefined,
             zaiApiKey: opts.zaiApiKey as string | undefined,
             minimaxApiKey: opts.minimaxApiKey as string | undefined,
+            syntheticApiKey: opts.syntheticApiKey as string | undefined,
             opencodeZenApiKey: opts.opencodeZenApiKey as string | undefined,
             gatewayPort:
               typeof opts.gatewayPort === "string"
@@ -364,8 +369,8 @@ export function buildProgram() {
             gatewayBind: opts.gatewayBind as
               | "loopback"
               | "lan"
-              | "tailnet"
               | "auto"
+              | "custom"
               | undefined,
             gatewayAuth: opts.gatewayAuth as
               | "off"
@@ -475,6 +480,21 @@ export function buildProgram() {
           nonInteractive: Boolean(opts.nonInteractive),
           generateGatewayToken: Boolean(opts.generateGatewayToken),
           deep: Boolean(opts.deep),
+        });
+      } catch (err) {
+        defaultRuntime.error(String(err));
+        defaultRuntime.exit(1);
+      }
+    });
+
+  program
+    .command("dashboard")
+    .description("Open the Control UI with your current token")
+    .option("--no-open", "Print URL but do not launch a browser", false)
+    .action(async (opts) => {
+      try {
+        await dashboardCommand(defaultRuntime, {
+          noOpen: Boolean(opts.noOpen),
         });
       } catch (err) {
         defaultRuntime.error(String(err));
@@ -595,7 +615,10 @@ Examples:
   clawdbot message poll --provider discord --to channel:123 --poll-question "Snack?" --poll-option Pizza --poll-option Sushi
   clawdbot message react --provider discord --to 123 --message-id 456 --emoji "✅"
 
-${theme.muted("Docs:")} ${formatDocsLink("/message", "docs.clawd.bot/message")}`,
+${theme.muted("Docs:")} ${formatDocsLink(
+          "/cli/message",
+          "docs.clawd.bot/cli/message",
+        )}`,
     )
     .action(() => {
       message.help({ error: true });
@@ -604,7 +627,7 @@ ${theme.muted("Docs:")} ${formatDocsLink("/message", "docs.clawd.bot/message")}`
   const withMessageBase = (command: Command) =>
     command
       .option("--provider <provider>", `Provider: ${messageProviderOptions}`)
-      .option("--account <id>", "Provider account id")
+      .option("--account <id>", "Provider account id (accountId)")
       .option("--json", "Output result as JSON", false)
       .option("--dry-run", "Print payload and skip sending", false)
       .option("--verbose", "Verbose logging", false);
@@ -629,15 +652,20 @@ ${theme.muted("Docs:")} ${formatDocsLink("/message", "docs.clawd.bot/message")}`
     try {
       await messageCommand(
         {
-          ...opts,
+          ...(() => {
+            const { account, ...rest } = opts;
+            return {
+              ...rest,
+              accountId: typeof account === "string" ? account : undefined,
+            };
+          })(),
           action,
-          account: opts.account as string | undefined,
         },
         deps,
         defaultRuntime,
       );
     } catch (err) {
-      defaultRuntime.error(String(err));
+      defaultRuntime.error(danger(String(err)));
       defaultRuntime.exit(1);
     }
   };
@@ -654,7 +682,7 @@ ${theme.muted("Docs:")} ${formatDocsLink("/message", "docs.clawd.bot/message")}`
         "Attach media (image/audio/video/document). Accepts local paths or URLs.",
       )
       .option(
-        "--buttons-json <json>",
+        "--buttons <json>",
         "Telegram inline keyboard buttons as JSON (array of button rows)",
       )
       .option("--reply-to <id>", "Reply-to message id")

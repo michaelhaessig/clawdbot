@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {
   resolveAgentConfig,
+  resolveAgentModelFallbacksOverride,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
@@ -31,7 +32,11 @@ import {
   DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
   stripHeartbeatToken,
 } from "../auto-reply/heartbeat.js";
-import { normalizeThinkLevel } from "../auto-reply/thinking.js";
+import {
+  formatXHighModelHint,
+  normalizeThinkLevel,
+  supportsXHighThinking,
+} from "../auto-reply/thinking.js";
 import type { CliDeps } from "../cli/deps.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import {
@@ -251,10 +256,11 @@ export async function runCronIsolatedAgentTurn(params: {
   const agentId = agentConfigOverride
     ? (normalizedRequested ?? defaultAgentId)
     : defaultAgentId;
-  const agentCfg: AgentDefaultsConfig = {
-    ...(params.cfg.agents?.defaults ?? {}),
-    ...(agentOverrideRest as Partial<AgentDefaultsConfig>),
-  };
+  const agentCfg: AgentDefaultsConfig = Object.assign(
+    {},
+    params.cfg.agents?.defaults,
+    agentOverrideRest as Partial<AgentDefaultsConfig>,
+  );
   if (typeof overrideModel === "string") {
     agentCfg.model = { primary: overrideModel };
   } else if (overrideModel) {
@@ -262,7 +268,7 @@ export async function runCronIsolatedAgentTurn(params: {
   }
   const cfgWithAgentDefaults: ClawdbotConfig = {
     ...params.cfg,
-    agents: { ...(params.cfg.agents ?? {}), defaults: agentCfg },
+    agents: Object.assign({}, params.cfg.agents, { defaults: agentCfg }),
   };
 
   const baseSessionKey = (
@@ -365,6 +371,11 @@ export async function runCronIsolatedAgentTurn(params: {
       catalog: await loadCatalog(),
     });
   }
+  if (thinkLevel === "xhigh" && !supportsXHighThinking(provider, model)) {
+    throw new Error(
+      `Thinking level "xhigh" is only supported for ${formatXHighModelHint()}.`,
+    );
+  }
 
   const timeoutMs = resolveAgentTimeoutMs({
     cfg: cfgWithAgentDefaults,
@@ -448,6 +459,10 @@ export async function runCronIsolatedAgentTurn(params: {
       cfg: cfgWithAgentDefaults,
       provider,
       model,
+      fallbacksOverride: resolveAgentModelFallbacksOverride(
+        params.cfg,
+        agentId,
+      ),
       run: (providerOverride, modelOverride) => {
         if (isCliProvider(providerOverride, cfgWithAgentDefaults)) {
           const cliSessionId = getCliSessionId(

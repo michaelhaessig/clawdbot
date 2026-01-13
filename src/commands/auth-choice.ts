@@ -1,9 +1,5 @@
-import {
-  loginOpenAICodex,
-  type OAuthCredentials,
-  type OAuthProvider,
-} from "@mariozechner/pi-ai";
-import { resolveAgentConfig } from "../agents/agent-scope.js";
+import { loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { resolveAgentModelPrimary } from "../agents/agent-scope.js";
 import {
   CLAUDE_CLI_PROFILE_ID,
   CODEX_CLI_PROFILE_ID,
@@ -21,6 +17,7 @@ import { loadModelCatalog } from "../agents/model-catalog.js";
 import { resolveConfiguredModelRef } from "../agents/model-selection.js";
 import type { ClawdbotConfig } from "../config/config.js";
 import { upsertSharedEnvVar } from "../infra/env-file.js";
+import { githubCopilotLoginCommand } from "../providers/github-copilot-auth.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import {
@@ -31,10 +28,12 @@ import {
   buildTokenProfileId,
   validateAnthropicSetupToken,
 } from "./auth-token.js";
+import { loginChutes } from "./chutes-oauth.js";
 import {
   applyGoogleGeminiModelDefault,
   GOOGLE_GEMINI_DEFAULT_MODEL,
 } from "./google-gemini-model-default.js";
+import { createVpsAwareOAuthHandlers } from "./oauth-flow.js";
 import {
   applyAuthProfileConfig,
   applyMinimaxApiConfig,
@@ -47,15 +46,19 @@ import {
   applyOpencodeZenProviderConfig,
   applyOpenrouterConfig,
   applyOpenrouterProviderConfig,
+  applySyntheticConfig,
+  applySyntheticProviderConfig,
   applyZaiConfig,
   MOONSHOT_DEFAULT_MODEL_REF,
   OPENROUTER_DEFAULT_MODEL_REF,
+  SYNTHETIC_DEFAULT_MODEL_REF,
   setAnthropicApiKey,
   setGeminiApiKey,
   setMinimaxApiKey,
   setMoonshotApiKey,
   setOpencodeZenApiKey,
   setOpenrouterApiKey,
+  setSyntheticApiKey,
   setZaiApiKey,
   writeOAuthCredentials,
   ZAI_DEFAULT_MODEL_REF,
@@ -95,8 +98,8 @@ function normalizeApiKeyInput(raw: string): string {
   return withoutSemicolon.trim();
 }
 
-const validateApiKeyInput = (value: unknown) =>
-  normalizeApiKeyInput(String(value ?? "")).length > 0 ? undefined : "Required";
+const validateApiKeyInput = (value: string) =>
+  normalizeApiKeyInput(value).length > 0 ? undefined : "Required";
 
 function formatApiKeyPreview(
   raw: string,
@@ -117,13 +120,39 @@ function formatApiKeyPreview(
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`;
 }
 
+async function applyDefaultModelChoice(params: {
+  config: ClawdbotConfig;
+  setDefaultModel: boolean;
+  defaultModel: string;
+  applyDefaultConfig: (config: ClawdbotConfig) => ClawdbotConfig;
+  applyProviderConfig: (config: ClawdbotConfig) => ClawdbotConfig;
+  noteDefault?: string;
+  noteAgentModel: (model: string) => Promise<void>;
+  prompter: WizardPrompter;
+}): Promise<{ config: ClawdbotConfig; agentModelOverride?: string }> {
+  if (params.setDefaultModel) {
+    const next = params.applyDefaultConfig(params.config);
+    if (params.noteDefault) {
+      await params.prompter.note(
+        `Default model set to ${params.noteDefault}`,
+        "Model configured",
+      );
+    }
+    return { config: next };
+  }
+
+  const next = params.applyProviderConfig(params.config);
+  await params.noteAgentModel(params.defaultModel);
+  return { config: next, agentModelOverride: params.defaultModel };
+}
+
 export async function warnIfModelConfigLooksOff(
   config: ClawdbotConfig,
   prompter: WizardPrompter,
   options?: { agentId?: string; agentDir?: string },
 ) {
   const agentModelOverride = options?.agentId
-    ? resolveAgentConfig(config, options.agentId)?.model?.trim()
+    ? resolveAgentModelPrimary(config, options.agentId)
     : undefined;
   const configWithModel =
     agentModelOverride && agentModelOverride.length > 0
@@ -484,16 +513,19 @@ export async function applyAuthChoice(params: {
         mode,
       });
     }
-    if (params.setDefaultModel) {
-      nextConfig = applyOpenrouterConfig(nextConfig);
-      await params.prompter.note(
-        `Default model set to ${OPENROUTER_DEFAULT_MODEL_REF}`,
-        "Model configured",
-      );
-    } else {
-      nextConfig = applyOpenrouterProviderConfig(nextConfig);
-      agentModelOverride = OPENROUTER_DEFAULT_MODEL_REF;
-      await noteAgentModel(OPENROUTER_DEFAULT_MODEL_REF);
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: OPENROUTER_DEFAULT_MODEL_REF,
+        applyDefaultConfig: applyOpenrouterConfig,
+        applyProviderConfig: applyOpenrouterProviderConfig,
+        noteDefault: OPENROUTER_DEFAULT_MODEL_REF,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
     }
   } else if (params.authChoice === "moonshot-api-key") {
     let hasCredential = false;
@@ -523,12 +555,101 @@ export async function applyAuthChoice(params: {
       provider: "moonshot",
       mode: "api_key",
     });
-    if (params.setDefaultModel) {
-      nextConfig = applyMoonshotConfig(nextConfig);
-    } else {
-      nextConfig = applyMoonshotProviderConfig(nextConfig);
-      agentModelOverride = MOONSHOT_DEFAULT_MODEL_REF;
-      await noteAgentModel(MOONSHOT_DEFAULT_MODEL_REF);
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: MOONSHOT_DEFAULT_MODEL_REF,
+        applyDefaultConfig: applyMoonshotConfig,
+        applyProviderConfig: applyMoonshotProviderConfig,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
+    }
+  } else if (params.authChoice === "chutes") {
+    const isRemote = isRemoteEnvironment();
+    const redirectUri =
+      process.env.CHUTES_OAUTH_REDIRECT_URI?.trim() ||
+      "http://127.0.0.1:1456/oauth-callback";
+    const scopes =
+      process.env.CHUTES_OAUTH_SCOPES?.trim() || "openid profile chutes:invoke";
+    const clientId =
+      process.env.CHUTES_CLIENT_ID?.trim() ||
+      String(
+        await params.prompter.text({
+          message: "Enter Chutes OAuth client id",
+          placeholder: "cid_xxx",
+          validate: (value) => (value?.trim() ? undefined : "Required"),
+        }),
+      ).trim();
+    const clientSecret = process.env.CHUTES_CLIENT_SECRET?.trim() || undefined;
+
+    await params.prompter.note(
+      isRemote
+        ? [
+            "You are running in a remote/VPS environment.",
+            "A URL will be shown for you to open in your LOCAL browser.",
+            "After signing in, paste the redirect URL back here.",
+            "",
+            `Redirect URI: ${redirectUri}`,
+          ].join("\n")
+        : [
+            "Browser will open for Chutes authentication.",
+            "If the callback doesn't auto-complete, paste the redirect URL.",
+            "",
+            `Redirect URI: ${redirectUri}`,
+          ].join("\n"),
+      "Chutes OAuth",
+    );
+
+    const spin = params.prompter.progress("Starting OAuth flow…");
+    try {
+      const { onAuth, onPrompt } = createVpsAwareOAuthHandlers({
+        isRemote,
+        prompter: params.prompter,
+        runtime: params.runtime,
+        spin,
+        openUrl,
+        localBrowserMessage: "Complete sign-in in browser…",
+      });
+
+      const creds = await loginChutes({
+        app: {
+          clientId,
+          clientSecret,
+          redirectUri,
+          scopes: scopes.split(/\s+/).filter(Boolean),
+        },
+        manual: isRemote,
+        onAuth,
+        onPrompt,
+        onProgress: (msg) => spin.update(msg),
+      });
+
+      spin.stop("Chutes OAuth complete");
+      const email = creds.email?.trim() || "default";
+      const profileId = `chutes:${email}`;
+
+      await writeOAuthCredentials("chutes", creds, params.agentDir);
+      nextConfig = applyAuthProfileConfig(nextConfig, {
+        profileId,
+        provider: "chutes",
+        mode: "oauth",
+      });
+    } catch (err) {
+      spin.stop("Chutes OAuth failed");
+      params.runtime.error(String(err));
+      await params.prompter.note(
+        [
+          "Trouble with OAuth?",
+          "Verify CHUTES_CLIENT_ID (and CHUTES_CLIENT_SECRET if required).",
+          `Verify the OAuth app redirect URI includes: ${redirectUri}`,
+          "Chutes docs: https://chutes.ai/docs/sign-in-with-chutes/overview",
+        ].join("\n"),
+        "OAuth help",
+      );
     }
   } else if (params.authChoice === "openai-codex") {
     const isRemote = isRemoteEnvironment();
@@ -547,47 +668,24 @@ export async function applyAuthChoice(params: {
       "OpenAI Codex OAuth",
     );
     const spin = params.prompter.progress("Starting OAuth flow…");
-    let manualCodePromise: Promise<string> | undefined;
     try {
+      const { onAuth, onPrompt } = createVpsAwareOAuthHandlers({
+        isRemote,
+        prompter: params.prompter,
+        runtime: params.runtime,
+        spin,
+        openUrl,
+        localBrowserMessage: "Complete sign-in in browser…",
+      });
+
       const creds = await loginOpenAICodex({
-        onAuth: async ({ url }) => {
-          if (isRemote) {
-            spin.stop("OAuth URL ready");
-            params.runtime.log(
-              `\nOpen this URL in your LOCAL browser:\n\n${url}\n`,
-            );
-            manualCodePromise = params.prompter
-              .text({
-                message: "Paste the redirect URL (or authorization code)",
-                validate: (value) => (value?.trim() ? undefined : "Required"),
-              })
-              .then((value) => String(value));
-          } else {
-            spin.update("Complete sign-in in browser…");
-            await openUrl(url);
-            params.runtime.log(`Open: ${url}`);
-          }
-        },
-        onPrompt: async (prompt) => {
-          if (manualCodePromise) {
-            return manualCodePromise;
-          }
-          const code = await params.prompter.text({
-            message: prompt.message,
-            placeholder: prompt.placeholder,
-            validate: (value) => (value?.trim() ? undefined : "Required"),
-          });
-          return String(code);
-        },
+        onAuth,
+        onPrompt,
         onProgress: (msg) => spin.update(msg),
       });
       spin.stop("OpenAI OAuth complete");
       if (creds) {
-        await writeOAuthCredentials(
-          "openai-codex" as unknown as OAuthProvider,
-          creds,
-          params.agentDir,
-        );
+        await writeOAuthCredentials("openai-codex", creds, params.agentDir);
         nextConfig = applyAuthProfileConfig(nextConfig, {
           profileId: "openai-codex:default",
           provider: "openai-codex",
@@ -759,10 +857,7 @@ export async function applyAuthChoice(params: {
         message: "Enter Gemini API key",
         validate: validateApiKeyInput,
       });
-      await setGeminiApiKey(
-        normalizeApiKeyInput(String(key)),
-        params.agentDir,
-      );
+      await setGeminiApiKey(normalizeApiKeyInput(String(key)), params.agentDir);
     }
     nextConfig = applyAuthProfileConfig(nextConfig, {
       profileId: "google:default",
@@ -807,33 +902,61 @@ export async function applyAuthChoice(params: {
       provider: "zai",
       mode: "api_key",
     });
-    if (params.setDefaultModel) {
-      nextConfig = applyZaiConfig(nextConfig);
-      await params.prompter.note(
-        `Default model set to ${ZAI_DEFAULT_MODEL_REF}`,
-        "Model configured",
-      );
-    } else {
-      nextConfig = {
-        ...nextConfig,
-        agents: {
-          ...nextConfig.agents,
-          defaults: {
-            ...nextConfig.agents?.defaults,
-            models: {
-              ...nextConfig.agents?.defaults?.models,
-              [ZAI_DEFAULT_MODEL_REF]: {
-                ...nextConfig.agents?.defaults?.models?.[ZAI_DEFAULT_MODEL_REF],
-                alias:
-                  nextConfig.agents?.defaults?.models?.[ZAI_DEFAULT_MODEL_REF]
-                    ?.alias ?? "GLM",
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: ZAI_DEFAULT_MODEL_REF,
+        applyDefaultConfig: applyZaiConfig,
+        applyProviderConfig: (config) => ({
+          ...config,
+          agents: {
+            ...config.agents,
+            defaults: {
+              ...config.agents?.defaults,
+              models: {
+                ...config.agents?.defaults?.models,
+                [ZAI_DEFAULT_MODEL_REF]: {
+                  ...config.agents?.defaults?.models?.[ZAI_DEFAULT_MODEL_REF],
+                  alias:
+                    config.agents?.defaults?.models?.[ZAI_DEFAULT_MODEL_REF]
+                      ?.alias ?? "GLM",
+                },
               },
             },
           },
-        },
-      };
-      agentModelOverride = ZAI_DEFAULT_MODEL_REF;
-      await noteAgentModel(ZAI_DEFAULT_MODEL_REF);
+        }),
+        noteDefault: ZAI_DEFAULT_MODEL_REF,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
+    }
+  } else if (params.authChoice === "synthetic-api-key") {
+    const key = await params.prompter.text({
+      message: "Enter Synthetic API key",
+      validate: (value) => (value?.trim() ? undefined : "Required"),
+    });
+    await setSyntheticApiKey(String(key).trim(), params.agentDir);
+    nextConfig = applyAuthProfileConfig(nextConfig, {
+      profileId: "synthetic:default",
+      provider: "synthetic",
+      mode: "api_key",
+    });
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: SYNTHETIC_DEFAULT_MODEL_REF,
+        applyDefaultConfig: applySyntheticConfig,
+        applyProviderConfig: applySyntheticProviderConfig,
+        noteDefault: SYNTHETIC_DEFAULT_MODEL_REF,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
     }
   } else if (params.authChoice === "apiKey") {
     let hasCredential = false;
@@ -899,21 +1022,89 @@ export async function applyAuthChoice(params: {
       provider: "minimax",
       mode: "api_key",
     });
-    if (params.setDefaultModel) {
-      nextConfig = applyMinimaxApiConfig(nextConfig, modelId);
-    } else {
+    {
       const modelRef = `minimax/${modelId}`;
-      nextConfig = applyMinimaxApiProviderConfig(nextConfig, modelId);
-      agentModelOverride = modelRef;
-      await noteAgentModel(modelRef);
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: modelRef,
+        applyDefaultConfig: (config) => applyMinimaxApiConfig(config, modelId),
+        applyProviderConfig: (config) =>
+          applyMinimaxApiProviderConfig(config, modelId),
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
+    }
+  } else if (params.authChoice === "github-copilot") {
+    await params.prompter.note(
+      [
+        "This will open a GitHub device login to authorize Copilot.",
+        "Requires an active GitHub Copilot subscription.",
+      ].join("\n"),
+      "GitHub Copilot",
+    );
+
+    if (!process.stdin.isTTY) {
+      await params.prompter.note(
+        "GitHub Copilot login requires an interactive TTY.",
+        "GitHub Copilot",
+      );
+      return { config: nextConfig, agentModelOverride };
+    }
+
+    try {
+      await githubCopilotLoginCommand({ yes: true }, params.runtime);
+    } catch (err) {
+      await params.prompter.note(
+        `GitHub Copilot login failed: ${String(err)}`,
+        "GitHub Copilot",
+      );
+      return { config: nextConfig, agentModelOverride };
+    }
+
+    nextConfig = applyAuthProfileConfig(nextConfig, {
+      profileId: "github-copilot:github",
+      provider: "github-copilot",
+      mode: "token",
+    });
+
+    if (params.setDefaultModel) {
+      const model = "github-copilot/gpt-4o";
+      nextConfig = {
+        ...nextConfig,
+        agents: {
+          ...nextConfig.agents,
+          defaults: {
+            ...nextConfig.agents?.defaults,
+            model: {
+              ...(typeof nextConfig.agents?.defaults?.model === "object"
+                ? nextConfig.agents.defaults.model
+                : undefined),
+              primary: model,
+            },
+          },
+        },
+      };
+      await params.prompter.note(
+        `Default model set to ${model}`,
+        "Model configured",
+      );
     }
   } else if (params.authChoice === "minimax") {
-    if (params.setDefaultModel) {
-      nextConfig = applyMinimaxConfig(nextConfig);
-    } else {
-      nextConfig = applyMinimaxProviderConfig(nextConfig);
-      agentModelOverride = "lmstudio/minimax-m2.1-gs32";
-      await noteAgentModel("lmstudio/minimax-m2.1-gs32");
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: "lmstudio/minimax-m2.1-gs32",
+        applyDefaultConfig: applyMinimaxConfig,
+        applyProviderConfig: applyMinimaxProviderConfig,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
     }
   } else if (params.authChoice === "opencode-zen") {
     await params.prompter.note(
@@ -951,16 +1142,19 @@ export async function applyAuthChoice(params: {
       provider: "opencode",
       mode: "api_key",
     });
-    if (params.setDefaultModel) {
-      nextConfig = applyOpencodeZenConfig(nextConfig);
-      await params.prompter.note(
-        `Default model set to ${OPENCODE_ZEN_DEFAULT_MODEL}`,
-        "Model configured",
-      );
-    } else {
-      nextConfig = applyOpencodeZenProviderConfig(nextConfig);
-      agentModelOverride = OPENCODE_ZEN_DEFAULT_MODEL;
-      await noteAgentModel(OPENCODE_ZEN_DEFAULT_MODEL);
+    {
+      const applied = await applyDefaultModelChoice({
+        config: nextConfig,
+        setDefaultModel: params.setDefaultModel,
+        defaultModel: OPENCODE_ZEN_DEFAULT_MODEL,
+        applyDefaultConfig: applyOpencodeZenConfig,
+        applyProviderConfig: applyOpencodeZenProviderConfig,
+        noteDefault: OPENCODE_ZEN_DEFAULT_MODEL,
+        noteAgentModel,
+        prompter: params.prompter,
+      });
+      nextConfig = applied.config;
+      agentModelOverride = applied.agentModelOverride ?? agentModelOverride;
     }
   }
 
@@ -970,37 +1164,29 @@ export async function applyAuthChoice(params: {
 export function resolvePreferredProviderForAuthChoice(
   choice: AuthChoice,
 ): string | undefined {
-  switch (choice) {
-    case "oauth":
-    case "setup-token":
-    case "claude-cli":
-    case "token":
-    case "apiKey":
-      return "anthropic";
-    case "openai-codex":
-    case "codex-cli":
-      return "openai-codex";
-    case "openai-api-key":
-      return "openai";
-    case "openrouter-api-key":
-      return "openrouter";
-    case "moonshot-api-key":
-      return "moonshot";
-    case "gemini-api-key":
-      return "google";
-    case "zai-api-key":
-      return "zai";
-    case "antigravity":
-      return "google-antigravity";
-    case "minimax-cloud":
-    case "minimax-api":
-    case "minimax-api-lightning":
-      return "minimax";
-    case "minimax":
-      return "lmstudio";
-    case "opencode-zen":
-      return "opencode";
-    default:
-      return undefined;
-  }
+  return PREFERRED_PROVIDER_BY_AUTH_CHOICE[choice];
 }
+
+const PREFERRED_PROVIDER_BY_AUTH_CHOICE: Partial<Record<AuthChoice, string>> = {
+  oauth: "anthropic",
+  "setup-token": "anthropic",
+  "claude-cli": "anthropic",
+  token: "anthropic",
+  apiKey: "anthropic",
+  "openai-codex": "openai-codex",
+  "codex-cli": "openai-codex",
+  chutes: "chutes",
+  "openai-api-key": "openai",
+  "openrouter-api-key": "openrouter",
+  "moonshot-api-key": "moonshot",
+  "gemini-api-key": "google",
+  "zai-api-key": "zai",
+  antigravity: "google-antigravity",
+  "synthetic-api-key": "synthetic",
+  "github-copilot": "github-copilot",
+  "minimax-cloud": "minimax",
+  "minimax-api": "minimax",
+  "minimax-api-lightning": "minimax",
+  minimax: "lmstudio",
+  "opencode-zen": "opencode",
+};

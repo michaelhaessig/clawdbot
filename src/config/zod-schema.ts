@@ -8,6 +8,7 @@ const ModelApiSchema = z.union([
   z.literal("openai-responses"),
   z.literal("anthropic-messages"),
   z.literal("google-generative-ai"),
+  z.literal("github-copilot"),
 ]);
 
 const ModelCompatSchema = z
@@ -247,6 +248,14 @@ const ToolsAudioTranscriptionSchema = z
   })
   .optional();
 
+const NativeCommandsSettingSchema = z.union([z.boolean(), z.literal("auto")]);
+
+const ProviderCommandsSchema = z
+  .object({
+    native: NativeCommandsSettingSchema.optional(),
+  })
+  .optional();
+
 const TelegramTopicSchema = z.object({
   requireMention: z.boolean().optional(),
   skills: z.array(z.string()).optional(),
@@ -268,6 +277,7 @@ const TelegramAccountSchemaBase = z.object({
   name: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  commands: ProviderCommandsSchema,
   dmPolicy: DmPolicySchema.optional().default("pairing"),
   botToken: z.string().optional(),
   tokenFile: z.string().optional(),
@@ -349,6 +359,7 @@ const DiscordGuildChannelSchema = z.object({
   enabled: z.boolean().optional(),
   users: z.array(z.union([z.string(), z.number()])).optional(),
   systemPrompt: z.string().optional(),
+  autoThread: z.boolean().optional(),
 });
 
 const DiscordGuildSchema = z.object({
@@ -365,7 +376,9 @@ const DiscordAccountSchema = z.object({
   name: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  commands: ProviderCommandsSchema,
   token: z.string().optional(),
+  allowBots: z.boolean().optional(),
   groupPolicy: GroupPolicySchema.optional().default("allowlist"),
   historyLimit: z.number().int().min(0).optional(),
   dmHistoryLimit: z.number().int().min(0).optional(),
@@ -437,6 +450,7 @@ const SlackAccountSchema = z.object({
   name: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
+  commands: ProviderCommandsSchema,
   botToken: z.string().optional(),
   appToken: z.string().optional(),
   allowBots: z.boolean().optional(),
@@ -708,14 +722,17 @@ const MessagesSchema = z
 
 const CommandsSchema = z
   .object({
-    native: z.boolean().optional(),
+    native: NativeCommandsSettingSchema.optional().default("auto"),
     text: z.boolean().optional(),
+    bash: z.boolean().optional(),
+    bashForegroundMs: z.number().int().min(0).max(30_000).optional(),
     config: z.boolean().optional(),
     debug: z.boolean().optional(),
     restart: z.boolean().optional(),
     useAccessGroups: z.boolean().optional(),
   })
-  .optional();
+  .optional()
+  .default({ native: "auto" });
 
 const HeartbeatSchema = z
   .object({
@@ -822,6 +839,15 @@ const ToolPolicySchema = z
   })
   .optional();
 
+const ToolProfileSchema = z
+  .union([
+    z.literal("minimal"),
+    z.literal("coding"),
+    z.literal("messaging"),
+    z.literal("full"),
+  ])
+  .optional();
+
 // Provider docking: allowlists keyed by provider id (no schema updates when adding providers).
 const ElevatedAllowFromSchema = z
   .record(z.string(), z.array(z.union([z.string(), z.number()])))
@@ -851,6 +877,7 @@ const AgentSandboxSchema = z
 
 const AgentToolsSchema = z
   .object({
+    profile: ToolProfileSchema,
     allow: z.array(z.string()).optional(),
     deny: z.array(z.string()).optional(),
     elevated: z
@@ -871,6 +898,13 @@ const MemorySearchSchema = z
   .object({
     enabled: z.boolean().optional(),
     provider: z.union([z.literal("openai"), z.literal("local")]).optional(),
+    remote: z
+      .object({
+        baseUrl: z.string().optional(),
+        apiKey: z.string().optional(),
+        headers: z.record(z.string(), z.string()).optional(),
+      })
+      .optional(),
     fallback: z.union([z.literal("openai"), z.literal("none")]).optional(),
     model: z.string().optional(),
     local: z
@@ -908,14 +942,20 @@ const MemorySearchSchema = z
       .optional(),
   })
   .optional();
-
+const AgentModelSchema = z.union([
+  z.string(),
+  z.object({
+    primary: z.string().optional(),
+    fallbacks: z.array(z.string()).optional(),
+  }),
+]);
 const AgentEntrySchema = z.object({
   id: z.string(),
   default: z.boolean().optional(),
   name: z.string().optional(),
   workspace: z.string().optional(),
   agentDir: z.string().optional(),
-  model: z.string().optional(),
+  model: AgentModelSchema.optional(),
   memorySearch: MemorySearchSchema,
   humanDelay: HumanDelaySchema.optional(),
   identity: IdentitySchema,
@@ -923,6 +963,15 @@ const AgentEntrySchema = z.object({
   subagents: z
     .object({
       allowAgents: z.array(z.string()).optional(),
+      model: z
+        .union([
+          z.string(),
+          z.object({
+            primary: z.string().optional(),
+            fallbacks: z.array(z.string()).optional(),
+          }),
+        ])
+        .optional(),
     })
     .optional(),
   sandbox: AgentSandboxSchema,
@@ -931,6 +980,7 @@ const AgentEntrySchema = z.object({
 
 const ToolsSchema = z
   .object({
+    profile: ToolProfileSchema,
     allow: z.array(z.string()).optional(),
     deny: z.array(z.string()).optional(),
     audio: z
@@ -1138,6 +1188,7 @@ const AgentDefaultsSchema = z
       .optional(),
     workspace: z.string().optional(),
     skipBootstrap: z.boolean().optional(),
+    bootstrapMaxChars: z.number().int().positive().optional(),
     userTimezone: z.string().optional(),
     contextTokens: z.number().int().positive().optional(),
     cliBackends: z.record(z.string(), CliBackendSchema).optional(),
@@ -1178,6 +1229,9 @@ const AgentDefaultsSchema = z
       .optional(),
     compaction: z
       .object({
+        mode: z
+          .union([z.literal("default"), z.literal("safeguard")])
+          .optional(),
         reserveTokensFloor: z.number().int().nonnegative().optional(),
         memoryFlush: z
           .object({
@@ -1196,6 +1250,7 @@ const AgentDefaultsSchema = z
         z.literal("low"),
         z.literal("medium"),
         z.literal("high"),
+        z.literal("xhigh"),
       ])
       .optional(),
     verboseDefault: z.union([z.literal("off"), z.literal("on")]).optional(),
@@ -1226,6 +1281,15 @@ const AgentDefaultsSchema = z
       .object({
         maxConcurrent: z.number().int().positive().optional(),
         archiveAfterMinutes: z.number().int().positive().optional(),
+        model: z
+          .union([
+            z.string(),
+            z.object({
+              primary: z.string().optional(),
+              fallbacks: z.array(z.string()).optional(),
+            }),
+          ])
+          .optional(),
       })
       .optional(),
     sandbox: z
@@ -1724,6 +1788,7 @@ export const ClawdbotSchema = z
       })
       .optional(),
   })
+  .passthrough()
   .superRefine((cfg, ctx) => {
     const agents = cfg.agents?.list ?? [];
     if (agents.length === 0) return;

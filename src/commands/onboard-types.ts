@@ -8,10 +8,12 @@ export type AuthChoice =
   | "setup-token"
   | "claude-cli"
   | "token"
+  | "chutes"
   | "openai-codex"
   | "openai-api-key"
   | "openrouter-api-key"
   | "moonshot-api-key"
+  | "synthetic-api-key"
   | "codex-cli"
   | "antigravity"
   | "apiKey"
@@ -22,10 +24,11 @@ export type AuthChoice =
   | "minimax-api"
   | "minimax-api-lightning"
   | "opencode-zen"
+  | "github-copilot"
   | "skip";
 export type GatewayAuthChoice = "off" | "token" | "password";
 export type ResetScope = "config" | "config+creds+sessions" | "full";
-export type GatewayBind = "loopback" | "lan" | "tailnet" | "auto";
+export type GatewayBind = "loopback" | "lan" | "auto" | "custom";
 export type TailscaleMode = "off" | "serve" | "funnel";
 export type NodeManagerChoice = "npm" | "pnpm" | "bun";
 export type ProviderChoice = ChatProviderId;
@@ -52,6 +55,7 @@ export type OnboardOptions = {
   geminiApiKey?: string;
   zaiApiKey?: string;
   minimaxApiKey?: string;
+  syntheticApiKey?: string;
   opencodeZenApiKey?: string;
   gatewayPort?: number;
   gatewayBind?: GatewayBind;

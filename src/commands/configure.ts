@@ -8,7 +8,7 @@ import {
   text as clackText,
 } from "@clack/prompts";
 import { ensureAuthProfileStore } from "../agents/auth-profiles.js";
-import type { ClawdbotConfig } from "../config/config.js";
+import type { ClawdbotConfig, GatewayAuthConfig } from "../config/config.js";
 import {
   CONFIG_PATH_CLAWDBOT,
   readConfigFileSnapshot,
@@ -25,6 +25,7 @@ import {
 import { resolveGatewayService } from "../daemon/service.js";
 import { buildServiceEnvironment } from "../daemon/service-env.js";
 import { ensureControlUiAssetsBuilt } from "../infra/control-ui-assets.js";
+import { findTailscaleBinary } from "../infra/tailscale.js";
 import { listChatProviders } from "../providers/registry.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { defaultRuntime } from "../runtime.js";
@@ -157,6 +158,27 @@ const CONFIGURE_SECTION_OPTIONS: {
 
 type ConfigureSectionChoice = WizardSection | "__continue";
 
+type GatewayAuthChoice = "off" | "token" | "password";
+
+export function buildGatewayAuthConfig(params: {
+  existing?: GatewayAuthConfig;
+  mode: GatewayAuthChoice;
+  token?: string;
+  password?: string;
+}): GatewayAuthConfig | undefined {
+  const allowTailscale = params.existing?.allowTailscale;
+  const base: GatewayAuthConfig = {};
+  if (typeof allowTailscale === "boolean") base.allowTailscale = allowTailscale;
+
+  if (params.mode === "off") {
+    return Object.keys(base).length > 0 ? base : undefined;
+  }
+  if (params.mode === "token") {
+    return { ...base, mode: "token", token: params.token };
+  }
+  return { ...base, mode: "password", password: params.password };
+}
+
 async function promptConfigureSection(
   runtime: RuntimeEnv,
   hasSelection: boolean,
@@ -199,16 +221,61 @@ async function promptGatewayConfig(
 
   let bind = guardCancel(
     await select({
-      message: "Gateway bind",
+      message: "Gateway bind mode",
       options: [
-        { value: "loopback", label: "Loopback (127.0.0.1)" },
-        { value: "lan", label: "LAN" },
-        { value: "tailnet", label: "Tailnet" },
-        { value: "auto", label: "Auto" },
+        {
+          value: "auto",
+          label: "Auto (Tailnet → LAN)",
+          hint: "Prefer Tailnet IP, fall back to all interfaces if unavailable",
+        },
+        {
+          value: "lan",
+          label: "LAN (All interfaces)",
+          hint: "Bind to 0.0.0.0 - accessible from anywhere on your network",
+        },
+        {
+          value: "loopback",
+          label: "Loopback (Local only)",
+          hint: "Bind to 127.0.0.1 - secure, local-only access",
+        },
+        {
+          value: "custom",
+          label: "Custom IP",
+          hint: "Specify a specific IP address, with 0.0.0.0 fallback if unavailable",
+        },
       ],
     }),
     runtime,
-  ) as "loopback" | "lan" | "tailnet" | "auto";
+  ) as "auto" | "lan" | "loopback" | "custom";
+
+  let customBindHost: string | undefined;
+  if (bind === "custom") {
+    const input = guardCancel(
+      await text({
+        message: "Custom IP address",
+        placeholder: "192.168.1.100",
+        validate: (value) => {
+          if (!value) return "IP address is required for custom bind mode";
+          const trimmed = value.trim();
+          const parts = trimmed.split(".");
+          if (parts.length !== 4)
+            return "Invalid IPv4 address (e.g., 192.168.1.100)";
+          if (
+            parts.every((part) => {
+              const n = parseInt(part, 10);
+              return (
+                !Number.isNaN(n) && n >= 0 && n <= 255 && part === String(n)
+              );
+            })
+          )
+            return undefined;
+          return "Invalid IPv4 address (each octet must be 0-255)";
+        },
+      }),
+      runtime,
+    );
+    customBindHost = typeof input === "string" ? input : undefined;
+  }
 
   let authMode = guardCancel(
     await select({
@@ -225,7 +292,7 @@ async function promptGatewayConfig(
       initialValue: "token",
     }),
     runtime,
-  ) as "off" | "token" | "password";
+  ) as GatewayAuthChoice;
 
   const tailscaleMode = guardCancel(
     await select({
@@ -246,6 +313,23 @@ async function promptGatewayConfig(
     }),
     runtime,
   ) as "off" | "serve" | "funnel";
+
+  // Detect Tailscale binary before proceeding with serve/funnel setup
+  if (tailscaleMode !== "off") {
+    const tailscaleBin = await findTailscaleBinary();
+    if (!tailscaleBin) {
+      note(
+        [
+          "Tailscale binary not found in PATH or /Applications.",
+          "Ensure Tailscale is installed from:",
+          "  https://tailscale.com/download/mac",
+          "",
+          "You can continue setup, but serve/funnel will fail at runtime.",
+        ].join("\n"),
+        "Tailscale Warning",
+      );
+    }
+  }
 
   let tailscaleResetOnExit = false;
   if (tailscaleMode !== "off") {
@@ -287,6 +371,7 @@ async function promptGatewayConfig(
   }
 
   let gatewayToken: string | undefined;
+  let gatewayPassword: string | undefined;
   let next = cfg;
 
   if (authMode === "token") {
@@ -298,13 +383,6 @@ async function promptGatewayConfig(
       runtime,
     );
     gatewayToken = String(tokenInput).trim() || randomToken();
-    next = {
-      ...next,
-      gateway: {
-        ...next.gateway,
-        auth: { ...next.gateway?.auth, mode: "token", token: gatewayToken },
-      },
-    };
   }
 
   if (authMode === "password") {
@@ -315,18 +393,15 @@ async function promptGatewayConfig(
       }),
       runtime,
     );
-    next = {
-      ...next,
-      gateway: {
-        ...next.gateway,
-        auth: {
-          ...next.gateway?.auth,
-          mode: "password",
-          password: String(password).trim(),
-        },
-      },
-    };
+    gatewayPassword = String(password).trim();
   }
+
+  const authConfig = buildGatewayAuthConfig({
+    existing: next.gateway?.auth,
+    mode: authMode,
+    token: gatewayToken,
+    password: gatewayPassword,
+  });
 
   next = {
     ...next,
@@ -335,6 +410,8 @@ async function promptGatewayConfig(
       mode: "local",
       port,
       bind,
+      auth: authConfig,
+      ...(customBindHost && { customBindHost }),
       tailscale: {
         ...next.gateway?.tailscale,
         mode: tailscaleMode,
@@ -396,6 +473,7 @@ async function maybeInstallDaemon(params: {
 }) {
   const service = resolveGatewayService();
   const loaded = await service.isLoaded({
+    env: process.env,
     profile: process.env.CLAWDBOT_PROFILE,
   });
   let shouldCheckLinger = false;
@@ -415,6 +493,7 @@ async function maybeInstallDaemon(params: {
     );
     if (action === "restart") {
       await service.restart({
+        env: process.env,
         profile: process.env.CLAWDBOT_PROFILE,
         stdout: process.stdout,
       });
@@ -573,7 +652,7 @@ export async function runConfigureWizard(
     const prompter = createClackPrompter();
 
     const snapshot = await readConfigFileSnapshot();
-    let baseConfig: ClawdbotConfig = snapshot.valid ? snapshot.config : {};
+    const baseConfig: ClawdbotConfig = snapshot.valid ? snapshot.config : {};
 
     if (snapshot.exists) {
       const title = snapshot.valid
@@ -591,14 +670,11 @@ export async function runConfigureWizard(
         );
       }
       if (!snapshot.valid) {
-        const reset = guardCancel(
-          await confirm({
-            message: "Config invalid. Start fresh?",
-            initialValue: true,
-          }),
-          runtime,
+        outro(
+          "Config invalid. Run `clawdbot doctor` to repair it, then re-run configure.",
         );
-        if (reset) baseConfig = {};
+        runtime.exit(1);
+        return;
       }
     }
 
@@ -933,16 +1009,32 @@ export async function runConfigureWizard(
     const links = resolveControlUiLinks({
       bind,
       port: gatewayPort,
+      customBindHost: nextConfig.gateway?.customBindHost,
       basePath: nextConfig.gateway?.controlUi?.basePath,
     });
-    const gatewayProbe = await probeGatewayReachable({
+    // Try both new and old passwords since gateway may still have old config
+    const newPassword =
+      nextConfig.gateway?.auth?.password ??
+      process.env.CLAWDBOT_GATEWAY_PASSWORD;
+    const oldPassword =
+      baseConfig.gateway?.auth?.password ??
+      process.env.CLAWDBOT_GATEWAY_PASSWORD;
+    const token =
+      nextConfig.gateway?.auth?.token ?? process.env.CLAWDBOT_GATEWAY_TOKEN;
+
+    let gatewayProbe = await probeGatewayReachable({
       url: links.wsUrl,
-      token:
-        nextConfig.gateway?.auth?.token ?? process.env.CLAWDBOT_GATEWAY_TOKEN,
-      password:
-        nextConfig.gateway?.auth?.password ??
-        process.env.CLAWDBOT_GATEWAY_PASSWORD,
+      token,
+      password: newPassword,
     });
+    // If new password failed and it's different from old password, try old too
+    if (!gatewayProbe.ok && newPassword !== oldPassword && oldPassword) {
+      gatewayProbe = await probeGatewayReachable({
+        url: links.wsUrl,
+        token,
+        password: oldPassword,
+      });
+    }
     const gatewayStatusLine = gatewayProbe.ok
       ? "Gateway: reachable"
       : `Gateway: not detected${gatewayProbe.detail ? ` (${gatewayProbe.detail})` : ""}`;

@@ -359,6 +359,8 @@ export type TelegramAccountConfig = {
   name?: string;
   /** Optional provider capability tags used for agent/runtime guidance. */
   capabilities?: string[];
+  /** Override native command registration for Telegram (bool or "auto"). */
+  commands?: ProviderCommandsConfig;
   /**
    * Controls how Telegram direct chats (DMs) are handled:
    * - "pairing" (default): unknown senders get a pairing code; owner must approve
@@ -510,9 +512,13 @@ export type DiscordAccountConfig = {
   name?: string;
   /** Optional provider capability tags used for agent/runtime guidance. */
   capabilities?: string[];
+  /** Override native command registration for Discord (bool or "auto"). */
+  commands?: ProviderCommandsConfig;
   /** If false, do not start this Discord account. Default: true. */
   enabled?: boolean;
   token?: string;
+  /** Allow bot-authored messages to trigger replies (default: false). */
+  allowBots?: boolean;
   /**
    * Controls how guild channel messages are handled:
    * - "open": guild channels bypass allowlists; mention-gating applies
@@ -619,6 +625,8 @@ export type SlackAccountConfig = {
   name?: string;
   /** Optional provider capability tags used for agent/runtime guidance. */
   capabilities?: string[];
+  /** Override native command registration for Slack (bool or "auto"). */
+  commands?: ProviderCommandsConfig;
   /** If false, do not start this Slack account. Default: true. */
   enabled?: boolean;
   botToken?: string;
@@ -914,6 +922,8 @@ export type SandboxDockerSettings = {
   dns?: string[];
   /** Extra host mappings (e.g. ["api.local:10.0.0.2"]). */
   extraHosts?: string[];
+  /** Additional bind mounts (host:container:mode format, e.g. ["/host/path:/container/path:rw"]). */
+  binds?: string[];
 };
 
 export type SandboxBrowserSettings = {
@@ -978,7 +988,11 @@ export type QueueConfig = {
   drop?: QueueDropPolicy;
 };
 
+export type ToolProfileId = "minimal" | "coding" | "messaging" | "full";
+
 export type AgentToolsConfig = {
+  /** Base tool profile applied before allow/deny lists. */
+  profile?: ToolProfileId;
   allow?: string[];
   deny?: string[];
   /** Per-agent elevated exec gate (can only further restrict global tools.elevated). */
@@ -1001,6 +1015,11 @@ export type MemorySearchConfig = {
   enabled?: boolean;
   /** Embedding provider mode. */
   provider?: "openai" | "local";
+  remote?: {
+    baseUrl?: string;
+    apiKey?: string;
+    headers?: Record<string, string>;
+  };
   /** Fallback behavior when local embeddings fail. */
   fallback?: "openai" | "none";
   /** Embedding model id (remote) or alias (local). */
@@ -1038,6 +1057,8 @@ export type MemorySearchConfig = {
 };
 
 export type ToolsConfig = {
+  /** Base tool profile applied before allow/deny lists. */
+  profile?: ToolProfileId;
   allow?: string[];
   deny?: string[];
   audio?: {
@@ -1090,6 +1111,8 @@ export type ToolsConfig = {
   };
   /** Sub-agent tool policy defaults (deny wins). */
   subagents?: {
+    /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
+    model?: string | { primary?: string; fallbacks?: string[] };
     tools?: {
       allow?: string[];
       deny?: string[];
@@ -1104,13 +1127,22 @@ export type ToolsConfig = {
   };
 };
 
+export type AgentModelConfig =
+  | string
+  | {
+      /** Primary model (provider/model). */
+      primary?: string;
+      /** Per-agent model fallbacks (provider/model). */
+      fallbacks?: string[];
+    };
+
 export type AgentConfig = {
   id: string;
   default?: boolean;
   name?: string;
   workspace?: string;
   agentDir?: string;
-  model?: string;
+  model?: AgentModelConfig;
   memorySearch?: MemorySearchConfig;
   /** Human-like delay between block replies for this agent. */
   humanDelay?: HumanDelayConfig;
@@ -1119,6 +1151,8 @@ export type AgentConfig = {
   subagents?: {
     /** Allow spawning sub-agents under other agent ids. Use "*" to allow any. */
     allowAgents?: string[];
+    /** Per-agent default model for spawned sub-agents (string or {primary,fallbacks}). */
+    model?: string | { primary?: string; fallbacks?: string[] };
   };
   sandbox?: {
     mode?: "off" | "non-main" | "all";
@@ -1203,11 +1237,17 @@ export type MessagesConfig = {
   removeAckAfterReply?: boolean;
 };
 
+export type NativeCommandsSetting = boolean | "auto";
+
 export type CommandsConfig = {
-  /** Enable native command registration when supported (default: false). */
-  native?: boolean;
+  /** Enable native command registration when supported (default: "auto"). */
+  native?: NativeCommandsSetting;
   /** Enable text command parsing (default: true). */
   text?: boolean;
+  /** Allow bash chat command (`!`; `/bash` alias) (default: false). */
+  bash?: boolean;
+  /** How long bash waits before backgrounding (default: 2000; 0 backgrounds immediately). */
+  bashForegroundMs?: number;
   /** Allow /config command (default: false). */
   config?: boolean;
   /** Allow /debug command (default: false). */
@@ -1218,17 +1258,22 @@ export type CommandsConfig = {
   useAccessGroups?: boolean;
 };
 
-export type BridgeBindMode = "auto" | "lan" | "tailnet" | "loopback";
+export type ProviderCommandsConfig = {
+  /** Override native command registration for this provider (bool or "auto"). */
+  native?: NativeCommandsSetting;
+};
+
+export type BridgeBindMode = "auto" | "lan" | "loopback" | "custom";
 
 export type BridgeConfig = {
   enabled?: boolean;
   port?: number;
   /**
    * Bind address policy for the node bridge server.
-   * - auto: prefer tailnet IP when present, else LAN (0.0.0.0)
-   * - lan:  0.0.0.0 (reachable on local network + any forwarded interfaces)
-   * - tailnet: bind to the Tailscale interface IP (100.64.0.0/10) plus loopback
-   * - loopback: 127.0.0.1
+   * - auto: Tailnet IPv4 if available, else 0.0.0.0 (fallback to all interfaces)
+   * - lan: 0.0.0.0 (all interfaces, no fallback)
+   * - loopback: 127.0.0.1 (local-only)
+   * - custom: User-specified IP, fallback to 0.0.0.0 if unavailable (requires customBindHost on gateway)
    */
   bind?: BridgeBindMode;
 };
@@ -1343,9 +1388,15 @@ export type GatewayConfig = {
   mode?: "local" | "remote";
   /**
    * Bind address policy for the Gateway WebSocket + Control UI HTTP server.
+   * - auto: Tailnet IPv4 if available, else 0.0.0.0 (fallback to all interfaces)
+   * - lan: 0.0.0.0 (all interfaces, no fallback)
+   * - loopback: 127.0.0.1 (local-only)
+   * - custom: User-specified IP, fallback to 0.0.0.0 if unavailable (requires customBindHost)
    * Default: loopback (127.0.0.1).
    */
   bind?: BridgeBindMode;
+  /** Custom IP address for bind="custom" mode. Fallback: 0.0.0.0. */
+  customBindHost?: string;
   controlUi?: GatewayControlUiConfig;
   auth?: GatewayAuthConfig;
   tailscale?: GatewayTailscaleConfig;
@@ -1407,7 +1458,8 @@ export type ModelApi =
   | "openai-completions"
   | "openai-responses"
   | "anthropic-messages"
-  | "google-generative-ai";
+  | "google-generative-ai"
+  | "github-copilot";
 
 export type ModelCompatConfig = {
   supportsStore?: boolean;
@@ -1566,6 +1618,8 @@ export type AgentDefaultsConfig = {
   workspace?: string;
   /** Skip bootstrap (BOOTSTRAP.md creation, etc.) for pre-configured deployments. */
   skipBootstrap?: boolean;
+  /** Max chars for injected bootstrap files before truncation (default: 20000). */
+  bootstrapMaxChars?: number;
   /** Optional IANA timezone for the user (used in system prompt; defaults to host timezone). */
   userTimezone?: string;
   /** Optional display-only context window override (used for % in status UIs). */
@@ -1579,7 +1633,7 @@ export type AgentDefaultsConfig = {
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
   /** Default thinking level when no /think directive is present. */
-  thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high";
+  thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Default verbose level when no /verbose directive is present. */
   verboseDefault?: "off" | "on";
   /** Default elevated level when no /elevated directive is present. */
@@ -1646,6 +1700,8 @@ export type AgentDefaultsConfig = {
     maxConcurrent?: number;
     /** Auto-archive sub-agent sessions after N minutes (default: 60). */
     archiveAfterMinutes?: number;
+    /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
+    model?: string | { primary?: string; fallbacks?: string[] };
   };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: {
@@ -1679,7 +1735,11 @@ export type AgentDefaultsConfig = {
   };
 };
 
+export type AgentCompactionMode = "default" | "safeguard";
+
 export type AgentCompactionConfig = {
+  /** Compaction summarization mode. */
+  mode?: AgentCompactionMode;
   /** Minimum reserve tokens enforced for Pi compaction (0 disables the floor). */
   reserveTokensFloor?: number;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRoleSnapshotFromAriaSnapshot } from "./pw-role-snapshot.js";
+import {
+  buildRoleSnapshotFromAriaSnapshot,
+  getRoleSnapshotStats,
+  parseRoleRef,
+} from "./pw-role-snapshot.js";
 
 describe("pw-role-snapshot", () => {
   it("adds refs for interactive elements", () => {
@@ -41,5 +45,30 @@ describe("pw-role-snapshot", () => {
     expect(res.snapshot).toContain('- region "Main"');
     expect(res.snapshot).toContain("  - group");
     expect(res.snapshot).not.toContain("button");
+  });
+
+  it("computes stats", () => {
+    const aria = ['- button "OK"', '- button "Cancel"'].join("\n");
+    const res = buildRoleSnapshotFromAriaSnapshot(aria);
+    const stats = getRoleSnapshotStats(res.snapshot, res.refs);
+    expect(stats.refs).toBe(2);
+    expect(stats.interactive).toBe(2);
+    expect(stats.lines).toBeGreaterThan(0);
+    expect(stats.chars).toBeGreaterThan(0);
+  });
+
+  it("returns a helpful message when no interactive elements exist", () => {
+    const aria = ['- heading "Hello"', "- paragraph: world"].join("\n");
+    const res = buildRoleSnapshotFromAriaSnapshot(aria, { interactive: true });
+    expect(res.snapshot).toBe("(no interactive elements)");
+    expect(Object.keys(res.refs)).toEqual([]);
+  });
+
+  it("parses role refs", () => {
+    expect(parseRoleRef("e12")).toBe("e12");
+    expect(parseRoleRef("@e12")).toBe("e12");
+    expect(parseRoleRef("ref=e12")).toBe("e12");
+    expect(parseRoleRef("12")).toBeNull();
+    expect(parseRoleRef("")).toBeNull();
   });
 });

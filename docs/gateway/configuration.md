@@ -569,7 +569,9 @@ Inbound messages are routed to an agent via bindings.
   - `name`: display name for the agent.
   - `workspace`: default `~/clawd-<agentId>` (for `main`, falls back to `agents.defaults.workspace`).
   - `agentDir`: default `~/.clawdbot/agents/<agentId>/agent`.
-  - `model`: per-agent default model (provider/model), overrides `agents.defaults.model` for that agent.
+  - `model`: per-agent default model, overrides `agents.defaults.model` for that agent.
+    - string form: `"provider/model"`, overrides only `agents.defaults.model.primary`
+    - object form: `{ primary, fallbacks }` (fallbacks override `agents.defaults.model.fallbacks`; `[]` disables global fallbacks for that agent)
   - `identity`: per-agent name/theme/emoji (used for mention patterns + ack reactions).
   - `groupChat`: per-agent mention-gating (`mentionPatterns`).
   - `sandbox`: per-agent sandbox config (overrides `agents.defaults.sandbox`).
@@ -583,6 +585,7 @@ Inbound messages are routed to an agent via bindings.
   - `subagents`: per-agent sub-agent defaults.
     - `allowAgents`: allowlist of agent ids for `sessions_spawn` from this agent (`["*"]` = allow any; default: only same agent)
   - `tools`: per-agent tool restrictions (applied before sandbox tool policy).
+    - `profile`: base tool profile (applied before allow/deny)
     - `allow`: array of allowed tool names
     - `deny`: array of denied tool names (deny wins)
 - `agents.defaults`: shared agent defaults (model, workspace, sandbox, etc.).
@@ -743,8 +746,10 @@ Controls how chat commands are enabled across connectors.
 ```json5
 {
   commands: {
-    native: false,          // register native commands when supported
+    native: "auto",         // register native commands when supported (auto)
     text: true,             // parse slash commands in chat messages
+    bash: false,            // allow ! (alias: /bash) (host-only; requires tools.elevated allowlists)
+    bashForegroundMs: 2000, // bash foreground window (0 backgrounds immediately)
     config: false,          // allow /config (writes to disk)
     debug: false,           // allow /debug (runtime-only overrides)
     restart: false,         // allow /restart + gateway restart tool
@@ -756,8 +761,10 @@ Controls how chat commands are enabled across connectors.
 Notes:
 - Text commands must be sent as a **standalone** message and use the leading `/` (no plain-text aliases).
 - `commands.text: false` disables parsing chat messages for commands.
-- `commands.native: true` registers native commands on supported connectors (Discord/Slack/Telegram). Platforms without native commands still rely on text commands.
-- `commands.native: false` skips native registration; Discord/Telegram clear previously registered commands on startup. Slack commands are managed in the Slack app.
+- `commands.native: "auto"` (default) turns on native commands for Discord/Telegram and leaves Slack off; unsupported providers stay text-only.
+- Set `commands.native: true|false` to force all, or override per provider with `discord.commands.native`, `telegram.commands.native`, `slack.commands.native` (bool or `"auto"`). `false` clears previously registered commands on Discord/Telegram at startup; Slack commands are managed in the Slack app.
+- `commands.bash: true` enables `! <cmd>` to run host shell commands (`/bash <cmd>` also works as an alias). Requires `tools.elevated.enabled` and allowlisting the sender in `tools.elevated.allowFrom.<provider>`.
+- `commands.bashForegroundMs` controls how long bash waits before backgrounding. While a bash job is running, new `! <cmd>` requests are rejected (one at a time).
 - `commands.config: true` enables `/config` (reads/writes `clawdbot.json`).
 - `commands.debug: true` enables `/debug` (runtime-only overrides).
 - `commands.restart: true` enables `/restart` and the gateway tool restart action.
@@ -852,6 +859,7 @@ Multi-account support lives under `discord.accounts` (see the multi-account sect
     enabled: true,
     token: "your-bot-token",
     mediaMaxMb: 8,                          // clamp inbound media size
+    allowBots: false,                       // allow bot-authored messages
     actions: {                              // tool action gates (false disables)
       reactions: true,
       stickers: true,
@@ -910,6 +918,7 @@ Multi-account support lives under `discord.accounts` (see the multi-account sect
 
 Clawdbot starts Discord only when a `discord` config section exists. The token is resolved from `DISCORD_BOT_TOKEN` or `discord.token` (unless `discord.enabled` is `false`). Use `user:<id>` (DM) or `channel:<id>` (guild channel) when specifying delivery targets for cron/CLI commands; bare numeric IDs are ambiguous and rejected.
 Guild slugs are lowercase with spaces replaced by `-`; channel keys use the slugged channel name (no leading `#`). Prefer guild ids as keys to avoid rename ambiguity.
+Bot-authored messages are ignored by default. Enable with `discord.allowBots` (own messages are still filtered to prevent self-reply loops).
 Reaction notification modes:
 - `off`: no reaction events.
 - `own`: reactions on the bot's own messages (default).
@@ -1073,6 +1082,20 @@ Use this for pre-seeded deployments where your workspace files come from a repo.
 }
 ```
 
+### `agents.defaults.bootstrapMaxChars`
+
+Max characters of each workspace bootstrap file injected into the system prompt
+before truncation. Default: `20000`.
+
+When a file exceeds this limit, Clawdbot logs a warning and injects a truncated
+head/tail with a marker.
+
+```json5
+{
+  agents: { defaults: { bootstrapMaxChars: 20000 } }
+}
+```
+
 ### `agents.defaults.userTimezone`
 
 Sets the user’s timezone for **system prompt context** (not for timestamps in
@@ -1194,6 +1217,27 @@ is already present in `agents.defaults.models`:
 
 If you configure the same alias name (case-insensitive) yourself, your value wins (defaults never override).
 
+Example: Opus 4.5 primary with MiniMax M2.1 fallback (hosted MiniMax):
+
+```json5
+{
+  agents: {
+    defaults: {
+      models: {
+        "anthropic/claude-opus-4-5": { alias: "opus" },
+        "minimax/MiniMax-M2.1": { alias: "minimax" }
+      },
+      model: {
+        primary: "anthropic/claude-opus-4-5",
+        fallbacks: ["minimax/MiniMax-M2.1"]
+      }
+    }
+  }
+}
+```
+
+MiniMax auth: set `MINIMAX_API_KEY` (env) or configure `models.providers.minimax`.
+
 #### `agents.defaults.cliBackends` (CLI fallback)
 
 Optional CLI backends for text-only fallback runs (no tool calls). These are useful as a
@@ -1276,6 +1320,7 @@ Example:
       },
       maxConcurrent: 3,
       subagents: {
+        model: "minimax/MiniMax-M2.1",
         maxConcurrent: 1,
         archiveAfterMinutes: 60
       },
@@ -1375,6 +1420,8 @@ See [/concepts/session-pruning](/concepts/session-pruning) for behavior details.
 
 #### `agents.defaults.compaction` (reserve headroom + memory flush)
 
+`agents.defaults.compaction.mode` selects the compaction summarization strategy. Defaults to `default`; set `safeguard` to enable chunked summarization for very long histories. See [/compaction](/compaction).
+
 `agents.defaults.compaction.reserveTokensFloor` enforces a minimum `reserveTokens`
 value for Pi compaction (default: `20000`). Set it to `0` to disable the floor.
 
@@ -1396,6 +1443,7 @@ Example (tuned):
   agents: {
     defaults: {
       compaction: {
+        mode: "safeguard",
         reserveTokensFloor: 24000,
         memoryFlush: {
           enabled: true,
@@ -1478,9 +1526,38 @@ Note: `applyPatch` is only under `tools.exec` (no `tools.bash` alias).
 Legacy: `tools.bash` is still accepted as an alias.
 
 `agents.defaults.subagents` configures sub-agent defaults:
+- `model`: default model for spawned sub-agents (string or `{ primary, fallbacks }`). If omitted, sub-agents inherit the caller’s model unless overridden per agent or per call.
 - `maxConcurrent`: max concurrent sub-agent runs (default 1)
 - `archiveAfterMinutes`: auto-archive sub-agent sessions after N minutes (default 60; set `0` to disable)
 - Per-subagent tool policy: `tools.subagents.tools.allow` / `tools.subagents.tools.deny` (deny wins)
+
+`tools.profile` sets a **base tool allowlist** before `tools.allow`/`tools.deny`:
+- `minimal`: `session_status` only
+- `coding`: `group:fs`, `group:runtime`, `group:sessions`, `group:memory`, `image`
+- `messaging`: `group:messaging`, `sessions_list`, `sessions_history`, `sessions_send`, `session_status`
+- `full`: no restriction (same as unset)
+
+Per-agent override: `agents.list[].tools.profile`.
+
+Example (messaging-only by default, allow Slack + Discord tools too):
+```json5
+{
+  tools: {
+    profile: "messaging",
+    allow: ["slack", "discord"]
+  }
+}
+```
+
+Example (coding profile, but deny exec/process everywhere):
+```json5
+{
+  tools: {
+    profile: "coding",
+    deny: ["group:runtime"]
+  }
+}
+```
 
 `tools.allow` / `tools.deny` configure a global tool allow/deny policy (deny wins).
 This is applied even when the Docker sandbox is **off**.
@@ -1491,6 +1568,17 @@ Example (disable browser/canvas everywhere):
   tools: { deny: ["browser", "canvas"] }
 }
 ```
+
+Tool groups (shorthands) work in **global** and **per-agent** tool policies:
+- `group:runtime`: `exec`, `bash`, `process`
+- `group:fs`: `read`, `write`, `edit`, `apply_patch`
+- `group:sessions`: `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `session_status`
+- `group:memory`: `memory_search`, `memory_get`
+- `group:ui`: `browser`, `canvas`
+- `group:automation`: `cron`, `gateway`
+- `group:messaging`: `message`
+- `group:nodes`: `nodes`
+- `group:clawdbot`: all built-in Clawdbot tools (excludes provider plugins)
 
 `tools.elevated` controls elevated (host) exec access:
 - `enabled`: allow elevated mode (default true)
@@ -1560,6 +1648,7 @@ Defaults (if enabled):
 - auto-prune: idle > 24h OR age > 7d
 - tool policy: allow only `exec`, `process`, `read`, `write`, `edit`, `apply_patch`, `sessions_list`, `sessions_history`, `sessions_send`, `sessions_spawn`, `session_status` (deny wins)
   - configure via `tools.sandbox.tools`, override per-agent via `agents.list[].tools.sandbox.tools`
+  - tool group shorthands supported in sandbox policy: `group:runtime`, `group:fs`, `group:sessions`, `group:memory` (see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated#tool-groups-shorthands))
 - optional sandboxed browser (Chromium + CDP, noVNC observer)
 - hardening knobs: `network`, `user`, `pidsLimit`, `memory`, `cpus`, `ulimits`, `seccompProfile`, `apparmorProfile`
 
@@ -1601,7 +1690,8 @@ Legacy: `perSession` is still supported (`true` → `scope: "session"`,
           seccompProfile: "/path/to/seccomp.json",
           apparmorProfile: "clawdbot-sandbox",
           dns: ["1.1.1.1", "8.8.8.8"],
-          extraHosts: ["internal.service:10.0.0.5"]
+          extraHosts: ["internal.service:10.0.0.5"],
+          binds: ["/var/run/docker.sock:/var/run/docker.sock", "/home/user/source:/source:rw"]
         },
         browser: {
           enabled: false,
@@ -1646,6 +1736,8 @@ Note: sandbox containers default to `network: "none"`; set `agents.defaults.sand
 to `"bridge"` (or your custom network) if the agent needs outbound access.
 
 Note: inbound attachments are staged into the active workspace at `media/inbound/*`. With `workspaceAccess: "rw"`, that means files are written into the agent workspace.
+
+Note: `docker.binds` mounts additional host directories; global and per-agent binds are merged.
 
 Build the optional browser image with:
 ```bash
@@ -1811,38 +1903,35 @@ Notes:
 - Model ref: `moonshot/kimi-k2-0905-preview`.
 - Use `https://api.moonshot.cn/v1` if you need the China endpoint.
 
-### Local models (LM Studio) — recommended setup
+### Synthetic (Anthropic-compatible)
 
-Best current local setup (what we’re running): **MiniMax M2.1** on a powerful local machine
-via **LM Studio** using the **Responses API**.
+Use Synthetic's Anthropic-compatible endpoint:
 
 ```json5
 {
+  env: { SYNTHETIC_API_KEY: "sk-..." },
   agents: {
     defaults: {
-      model: { primary: "lmstudio/minimax-m2.1-gs32" },
-      models: {
-        "anthropic/claude-opus-4-5": { alias: "Opus" },
-        "lmstudio/minimax-m2.1-gs32": { alias: "Minimax" }
-      }
+      model: { primary: "synthetic/hf:MiniMaxAI/MiniMax-M2.1" },
+      models: { "synthetic/hf:MiniMaxAI/MiniMax-M2.1": { alias: "MiniMax M2.1" } }
     }
   },
   models: {
     mode: "merge",
     providers: {
-      lmstudio: {
-        baseUrl: "http://127.0.0.1:1234/v1",
-        apiKey: "lmstudio",
-        api: "openai-responses",
+      synthetic: {
+        baseUrl: "https://api.synthetic.new/anthropic",
+        apiKey: "${SYNTHETIC_API_KEY}",
+        api: "anthropic-messages",
         models: [
           {
-            id: "minimax-m2.1-gs32",
-            name: "MiniMax M2.1 GS32",
+            id: "hf:MiniMaxAI/MiniMax-M2.1",
+            name: "MiniMax M2.1",
             reasoning: false,
             input: ["text"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 196608,
-            maxTokens: 8192
+            contextWindow: 192000,
+            maxTokens: 65536
           }
         ]
       }
@@ -1852,9 +1941,13 @@ via **LM Studio** using the **Responses API**.
 ```
 
 Notes:
-- LM Studio must have the model loaded and the local server enabled (default URL above).
-- Responses API enables clean reasoning/output separation; WhatsApp sees only final text.
-- Adjust `contextWindow`/`maxTokens` if your LM Studio context length differs.
+- Set `SYNTHETIC_API_KEY` or use `clawdbot onboard --auth-choice synthetic-api-key`.
+- Model ref: `synthetic/hf:MiniMaxAI/MiniMax-M2.1`.
+- Base URL should omit `/v1` because the Anthropic client appends it.
+
+### Local models (LM Studio) — recommended setup
+
+See [/gateway/local-models](/gateway/local-models) for the current local guidance. TL;DR: run MiniMax M2.1 via LM Studio Responses API on serious hardware; keep hosted models merged for fallback.
 
 ### MiniMax M2.1
 
@@ -2168,7 +2261,12 @@ Auth and Tailscale:
 - `gateway.auth.token` stores the shared token for token auth (used by the CLI on the same machine).
 - When `gateway.auth.mode` is set, only that method is accepted (plus optional Tailscale headers).
 - `gateway.auth.password` can be set here, or via `CLAWDBOT_GATEWAY_PASSWORD` (recommended).
-- `gateway.auth.allowTailscale` controls whether Tailscale identity headers can satisfy auth.
+- `gateway.auth.allowTailscale` allows Tailscale Serve identity headers
+  (`tailscale-user-login`) to satisfy auth when the request arrives on loopback
+  with `x-forwarded-for`, `x-forwarded-proto`, and `x-forwarded-host`. When
+  `true`, Serve requests do not need a token/password; set `false` to require
+  explicit credentials. Defaults to `true` when `tailscale.mode = "serve"` and
+  auth mode is not `password`.
 - `gateway.tailscale.mode: "serve"` uses Tailscale Serve (tailnet only, loopback bind).
 - `gateway.tailscale.mode: "funnel"` exposes the dashboard publicly; requires auth.
 - `gateway.tailscale.resetOnExit` resets Serve/Funnel config on shutdown.

@@ -64,6 +64,8 @@ Tip: `--json` does **not** imply non-interactive mode. Use `--non-interactive` (
 
 1) **Existing config detection**
    - If `~/.clawdbot/clawdbot.json` exists, choose **Keep / Modify / Reset**.
+   - If the config is invalid or contains legacy keys, the wizard stops and asks
+     you to run `clawdbot doctor` before continuing.
    - Reset uses `trash` (never `rm`) and offers scopes:
      - Config only
      - Config + credentials + sessions
@@ -82,6 +84,8 @@ Tip: `--json` does **not** imply non-interactive mode. Use `--non-interactive` (
    - **API key**: stores the key for you.
    - **MiniMax M2.1**: config is auto-written.
    - More detail: [MiniMax](/providers/minimax)
+   - **Synthetic (Anthropic-compatible)**: prompts for `SYNTHETIC_API_KEY`.
+   - More detail: [Synthetic](/providers/synthetic)
    - **Moonshot (Kimi K2)**: config is auto-written.
    - More detail: [Moonshot AI](/providers/moonshot)
    - **Skip**: no auth configured yet.
@@ -115,7 +119,7 @@ Tip: `--json` does **not** imply non-interactive mode. Use `--non-interactive` (
    - Linux (and Windows via WSL2): systemd user unit
      - Wizard attempts to enable lingering via `loginctl enable-linger <user>` so the Gateway stays up after logout.
      - May prompt for sudo (writes `/var/lib/systemd/linger`); it tries without sudo first.
-   - **Runtime selection:** Node (recommended; required for WhatsApp) or Bun (faster, but incompatible with WhatsApp).
+   - **Runtime selection:** Node (recommended; required for WhatsApp/Telegram). Bun is **not recommended**.
 
 7) **Health check**
    - Starts the Gateway (if needed) and runs `clawdbot health`.
@@ -123,7 +127,7 @@ Tip: `--json` does **not** imply non-interactive mode. Use `--non-interactive` (
 
 8) **Skills (recommended)**
    - Reads the available skills and checks requirements.
-   - Lets you choose a node manager: **npm / pnpm / bun**.
+   - Lets you choose a node manager: **npm / pnpm** (bun not recommended).
    - Installs optional dependencies (some use Homebrew on macOS).
 
 9) **Finish**
@@ -208,6 +212,17 @@ clawdbot onboard --non-interactive \
   --mode local \
   --auth-choice moonshot-api-key \
   --moonshot-api-key "$MOONSHOT_API_KEY" \
+  --gateway-port 18789 \
+  --gateway-bind loopback
+```
+
+Synthetic example:
+
+```bash
+clawdbot onboard --non-interactive \
+  --mode local \
+  --auth-choice synthetic-api-key \
+  --synthetic-api-key "$SYNTHETIC_API_KEY" \
   --gateway-port 18789 \
   --gateway-bind loopback
 ```

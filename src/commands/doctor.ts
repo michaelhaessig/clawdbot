@@ -62,6 +62,7 @@ import {
   maybeRepairGatewayServiceConfig,
   maybeScanExtraGatewayServices,
 } from "./doctor-gateway-services.js";
+import { noteSourceInstallIssues } from "./doctor-install.js";
 import {
   maybeMigrateLegacyConfigFile,
   normalizeLegacyConfigValues,
@@ -80,6 +81,7 @@ import {
   detectLegacyStateMigrations,
   runLegacyStateMigrations,
 } from "./doctor-state-migrations.js";
+import { maybeRepairUiProtocolFreshness } from "./doctor-ui.js";
 import {
   detectLegacyWorkspaceDirs,
   formatLegacyWorkspaceWarning,
@@ -186,6 +188,12 @@ export async function doctorCommand(
   printWizardHeader(runtime);
   intro("Clawdbot doctor");
 
+  const root = await resolveClawdbotPackageRoot({
+    moduleUrl: import.meta.url,
+    argv1: process.argv[1],
+    cwd: process.cwd(),
+  });
+
   const updateInProgress = process.env.CLAWDBOT_UPDATE_IN_PROGRESS === "1";
   const canOfferUpdate =
     !updateInProgress &&
@@ -194,11 +202,6 @@ export async function doctorCommand(
     options.repair !== true &&
     Boolean(process.stdin.isTTY);
   if (canOfferUpdate) {
-    const root = await resolveClawdbotPackageRoot({
-      moduleUrl: import.meta.url,
-      argv1: process.argv[1],
-      cwd: process.cwd(),
-    });
     if (root) {
       const git = await detectClawdbotGitCheckout(root);
       if (git === "git") {
@@ -247,6 +250,9 @@ export async function doctorCommand(
       }
     }
   }
+
+  await maybeRepairUiProtocolFreshness(runtime, prompter);
+  noteSourceInstallIssues(root);
 
   await maybeMigrateLegacyConfigFile(runtime);
 
@@ -447,6 +453,7 @@ export async function doctorCommand(
     let loaded = false;
     try {
       loaded = await service.isLoaded({
+        env: process.env,
         profile: process.env.CLAWDBOT_PROFILE,
       });
     } catch {
@@ -572,6 +579,7 @@ export async function doctorCommand(
   if (!healthOk) {
     const service = resolveGatewayService();
     const loaded = await service.isLoaded({
+      env: process.env,
       profile: process.env.CLAWDBOT_PROFILE,
     });
     let serviceRuntime:
@@ -673,6 +681,7 @@ export async function doctorCommand(
         });
         if (start) {
           await service.restart({
+            env: process.env,
             profile: process.env.CLAWDBOT_PROFILE,
             stdout: process.stdout,
           });
@@ -695,6 +704,7 @@ export async function doctorCommand(
         });
         if (restart) {
           await service.restart({
+            env: process.env,
             profile: process.env.CLAWDBOT_PROFILE,
             stdout: process.stdout,
           });
