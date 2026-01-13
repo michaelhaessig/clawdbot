@@ -9,6 +9,54 @@ metadata: {"clawdbot":{"emoji":"🤖","skillKey":"ha-vacuum","requires":{"bins":
 
 Control Roborock and other vacuum cleaners via Home Assistant using the `hac` CLI.
 
+## Cleaning Type Clarification
+
+When the user's request is ambiguous about what type of cleaning they want, **ask them to clarify** before proceeding. Use these options:
+
+| Cleaning Type | Description | When to suggest |
+|---------------|-------------|-----------------|
+| **Vacuum only** | Suction only, no mopping | Dry debris, pet hair, dust |
+| **Mop only** | Mopping only, no suction | Already vacuumed, light dirt, sticky spots |
+| **Vacuum + Mop** | Both together | General cleaning, full clean |
+| **Quick clean** | Default settings, fast | Maintenance clean |
+| **Deep clean** | High power, multiple passes | Heavy dirt, thorough cleaning |
+
+**Ask when:**
+- User says "clean the kitchen" (unclear if vacuum, mop, or both)
+- User says "clean up" without specifying method
+- User mentions a mess but not how to clean it
+
+**Don't ask when:**
+- User explicitly says "vacuum", "mop", "sweep", or "deep clean"
+- User specifies settings like "use turbo mode" or "no water"
+- User references a previous cleaning preference
+- Request is clearly about status, location, or non-cleaning actions
+
+Example prompt: "Would you like me to vacuum only, mop only, or do both? I can also do a deep clean with multiple passes if it's a thorough cleaning."
+
+## Power & Water Settings
+
+Use sensible defaults for most cleaning requests. Only ask about settings when the situation warrants it.
+
+### Default Settings (use without asking)
+
+| Cleaning Type | Fan Speed | Water Level | Mop Mode |
+|---------------|-----------|-------------|----------|
+| Vacuum only | `turbo` | `off` | `off` |
+| Mop only | `off` | `medium` | `standard` |
+| Vacuum + Mop | `balanced` | `medium` | `standard` |
+| Quick clean | `balanced` | `medium` | `standard` |
+| Deep clean | `turbo` | `high` | `deep` |
+
+### When to adjust without asking
+
+- **Heavy dirt / stains mentioned**: bump water to `high`, fan to `turbo`
+- **Pet hair / dusty**: bump fan to `turbo`
+- **Sticky spill mentioned**: use `high` water
+- **Light maintenance**: keep defaults
+- **User says "quick"**: use defaults, single pass
+- **User says "thorough" or "deep"**: use deep clean settings
+
 ## Prerequisites
 
 - Running as HA add-on (SUPERVISOR_TOKEN auto-injected), OR
