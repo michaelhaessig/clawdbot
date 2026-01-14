@@ -1,5 +1,5 @@
 name: Clawdbot Gateway
-version: "2.0.25"
+version: "2.0.26"
 slug: clawdbot-gateway
 description: Self-updating WhatsApp gateway with AI agent capabilities
 url: https://github.com/michaelhaessig/clawdbot
@@ -43,6 +43,7 @@ options:
   gateway_token: ""
   workspace: "/share/clawdbot"
   vacuum_entity: ""
+  gog_keyring: ""
   # Self-update settings
   clawdbot_repo: "https://github.com/clawdbot/clawdbot.git"
   clawdbot_version: "main"
@@ -56,6 +57,7 @@ schema:
   gateway_token: str?
   workspace: str
   vacuum_entity: str?
+  gog_keyring: str?
   # Self-update settings
   clawdbot_repo: url?
   clawdbot_version: str?

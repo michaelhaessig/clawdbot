@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.26
+
+- Add `gog_keyring` config option to set `GOG_KEYRING_PASSWORD` env var for gogcli
+
 ## 2.0.22
 
 - Gemini cli

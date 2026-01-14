@@ -30,6 +30,7 @@ BRIDGE_PORT=$(bashio::config 'bridge_port')
 GATEWAY_TOKEN=$(bashio::config 'gateway_token')
 WORKSPACE=$(bashio::config 'workspace')
 VACUUM_ENTITY=$(bashio::config 'vacuum_entity' || true)
+GOG_KEYRING=$(bashio::config 'gog_keyring' || true)
 
 # === Logging Helpers ===
 log_info() { bashio::log.info "$1"; }
@@ -274,6 +275,11 @@ fi
 # Export vacuum entity for hac CLI (if configured)
 if [ -n "${VACUUM_ENTITY:-}" ]; then
     export HAC_VACUUM_ENTITY="$VACUUM_ENTITY"
+fi
+
+# Export GOG keyring password (if configured)
+if [ -n "${GOG_KEYRING:-}" ]; then
+    export GOG_KEYRING_PASSWORD="$GOG_KEYRING"
 fi
 
 # Gateway token handling
