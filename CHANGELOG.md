@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.1.14
+
+### Fixes
+- Gateway/Dev: ensure `pnpm gateway:dev` always uses the dev profile config + state (`~/.clawdbot-dev`).
+- Telegram: honor `channels.telegram.timeoutSeconds` for grammY API requests. (#863) — thanks @Snaver.
+
+## 2026.1.13
+
+### Fixes
+- Postinstall: treat already-applied pnpm patches as no-ops to avoid npm/bun install failures.
+- Packaging: pin `@mariozechner/pi-ai` to 0.45.7 and refresh patched dependency to match npm resolution.
+
 ## 2026.1.12-2
 
 ### Fixes
