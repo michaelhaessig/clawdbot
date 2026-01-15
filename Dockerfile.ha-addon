@@ -96,15 +96,11 @@ COPY clawdbot-gateway/build-tools.sh /opt/build-tools.sh
 RUN chmod +x /run.sh /opt/build-tools.sh
 
 # Create addon directories (may be empty)
-RUN mkdir -p /opt/addon-tools /opt/addon-skills
+RUN mkdir -p /opt/addon-tools
 
 # Copy addon-specific tools if they exist (each tool is a subdirectory)
 # Tools are built into binaries at image build time
 COPY clawdbot-gateway/tools/ /opt/addon-tools/
-
-# Copy addon-bundled skills if they exist (each skill is a subdirectory)
-# Skills are installed to managed skills dir at runtime
-COPY clawdbot-gateway/skills/ /opt/addon-skills/
 
 # Build addon tools (supports TypeScript/bun, Go, and pre-built binaries)
 RUN /opt/build-tools.sh

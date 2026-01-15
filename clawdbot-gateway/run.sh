@@ -227,30 +227,8 @@ mkdir -p "$STATE_DIR/credentials"
 mkdir -p "$WORKSPACE"
 mkdir -p "$WORKSPACE/memory"
 
-# =============================================================================
-# Skills Setup - skills are loaded from workspace: $WORKSPACE/skills
-# =============================================================================
-
+# Log workspace skills
 WORKSPACE_SKILLS_DIR="$WORKSPACE/skills"
-mkdir -p "$WORKSPACE_SKILLS_DIR"
-
-# Install addon-bundled skills to workspace
-ADDON_SKILLS_DIR="/opt/addon-skills"
-if [ -d "$ADDON_SKILLS_DIR" ] && [ "$(ls -A "$ADDON_SKILLS_DIR" 2>/dev/null)" ]; then
-    log_info "Installing addon-bundled skills to workspace..."
-    for skill_dir in "$ADDON_SKILLS_DIR"/*; do
-        [ -d "$skill_dir" ] || continue
-        skill_name=$(basename "$skill_dir")
-        [ "$skill_name" = ".gitkeep" ] && continue
-        target_dir="$WORKSPACE_SKILLS_DIR/$skill_name"
-        # Always update addon skills (overwrite with latest from image)
-        rm -rf "$target_dir"
-        cp -r "$skill_dir" "$target_dir"
-        log_info "  Installed: $skill_name"
-    done
-fi
-
-# Log all workspace skills
 if [ -d "$WORKSPACE_SKILLS_DIR" ] && [ "$(ls -A "$WORKSPACE_SKILLS_DIR" 2>/dev/null)" ]; then
     log_info "Workspace skills:"
     for skill_dir in "$WORKSPACE_SKILLS_DIR"/*; do
