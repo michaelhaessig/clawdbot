@@ -30,6 +30,7 @@ import {
 import {
   ConfigApplyParamsSchema,
   ConfigGetParamsSchema,
+  ConfigPatchParamsSchema,
   ConfigSchemaParamsSchema,
   ConfigSchemaResponseSchema,
   ConfigSetParamsSchema,
@@ -84,11 +85,7 @@ import {
   SessionsResetParamsSchema,
   SessionsResolveParamsSchema,
 } from "./sessions.js";
-import {
-  PresenceEntrySchema,
-  SnapshotSchema,
-  StateVersionSchema,
-} from "./snapshot.js";
+import { PresenceEntrySchema, SnapshotSchema, StateVersionSchema } from "./snapshot.js";
 import {
   WizardCancelParamsSchema,
   WizardNextParamsSchema,
@@ -135,6 +132,7 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   ConfigGetParams: ConfigGetParamsSchema,
   ConfigSetParams: ConfigSetParamsSchema,
   ConfigApplyParams: ConfigApplyParamsSchema,
+  ConfigPatchParams: ConfigPatchParamsSchema,
   ConfigSchemaParams: ConfigSchemaParamsSchema,
   ConfigSchemaResponse: ConfigSchemaResponseSchema,
   WizardStartParams: WizardStartParamsSchema,

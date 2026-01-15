@@ -1,4 +1,5 @@
 import { formatTokenCount } from "../utils/usage-format.js";
+import { formatRawAssistantErrorForUi } from "../agents/pi-embedded-helpers.js";
 
 export function resolveFinalAssistantText(params: {
   finalText?: string | null;
@@ -11,10 +12,7 @@ export function resolveFinalAssistantText(params: {
   return "(no output)";
 }
 
-function extractTextBlocks(
-  content: unknown,
-  opts?: { includeThinking?: boolean },
-): string {
+function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
@@ -41,7 +39,14 @@ export function extractTextFromMessage(
 ): string {
   if (!message || typeof message !== "object") return "";
   const record = message as Record<string, unknown>;
-  return extractTextBlocks(record.content, opts);
+  const text = extractTextBlocks(record.content, opts);
+  if (text) return text;
+
+  const stopReason = typeof record.stopReason === "string" ? record.stopReason : "";
+  if (stopReason !== "error") return "";
+
+  const errorMessage = typeof record.errorMessage === "string" ? record.errorMessage : "";
+  return formatRawAssistantErrorForUi(errorMessage);
 }
 
 export function formatTokens(total?: number | null, context?: number | null) {
@@ -52,9 +57,7 @@ export function formatTokens(total?: number | null, context?: number | null) {
     typeof total === "number" && context > 0
       ? Math.min(999, Math.round((total / context) * 100))
       : null;
-  return `tokens ${totalLabel}/${formatTokenCount(context)}${
-    pct !== null ? ` (${pct}%)` : ""
-  }`;
+  return `tokens ${totalLabel}/${formatTokenCount(context)}${pct !== null ? ` (${pct}%)` : ""}`;
 }
 
 export function formatContextUsageLine(params: {
@@ -63,18 +66,11 @@ export function formatContextUsageLine(params: {
   remaining?: number | null;
   percent?: number | null;
 }) {
-  const totalLabel =
-    typeof params.total === "number" ? formatTokenCount(params.total) : "?";
-  const ctxLabel =
-    typeof params.context === "number" ? formatTokenCount(params.context) : "?";
-  const pct =
-    typeof params.percent === "number"
-      ? Math.min(999, Math.round(params.percent))
-      : null;
+  const totalLabel = typeof params.total === "number" ? formatTokenCount(params.total) : "?";
+  const ctxLabel = typeof params.context === "number" ? formatTokenCount(params.context) : "?";
+  const pct = typeof params.percent === "number" ? Math.min(999, Math.round(params.percent)) : null;
   const remainingLabel =
-    typeof params.remaining === "number"
-      ? `${formatTokenCount(params.remaining)} left`
-      : null;
+    typeof params.remaining === "number" ? `${formatTokenCount(params.remaining)} left` : null;
   const pctLabel = pct !== null ? `${pct}%` : null;
   const extra = [remainingLabel, pctLabel].filter(Boolean).join(", ");
   return `tokens ${totalLabel}/${ctxLabel}${extra ? ` (${extra})` : ""}`;

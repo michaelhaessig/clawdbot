@@ -1,8 +1,4 @@
-import type {
-  AnyMessageContent,
-  proto,
-  WAMessage,
-} from "@whiskeysockets/baileys";
+import type { AnyMessageContent, proto, WAMessage } from "@whiskeysockets/baileys";
 import { DisconnectReason, isJidGroup } from "@whiskeysockets/baileys";
 import { formatLocationText } from "../../channels/location.js";
 import { logVerbose, shouldLogVerbose } from "../../globals.js";
@@ -10,11 +6,7 @@ import { recordChannelActivity } from "../../infra/channel-activity.js";
 import { createSubsystemLogger, getChildLogger } from "../../logging.js";
 import { saveMediaBuffer } from "../../media/store.js";
 import { jidToE164, resolveJidToE164 } from "../../utils.js";
-import {
-  createWaSocket,
-  getStatusCode,
-  waitForWaConnection,
-} from "../session.js";
+import { createWaSocket, getStatusCode, waitForWaConnection } from "../session.js";
 import { checkInboundAccessControl } from "./access-control.js";
 import { isRecentInboundMessage } from "./dedupe.js";
 import {
@@ -34,11 +26,11 @@ export async function monitorWebInbox(options: {
   authDir: string;
   onMessage: (msg: WebInboundMessage) => Promise<void>;
   mediaMaxMb?: number;
+  /** Send read receipts for incoming messages (default true). */
+  sendReadReceipts?: boolean;
 }) {
   const inboundLogger = getChildLogger({ module: "web-inbound" });
-  const inboundConsoleLog = createSubsystemLogger(
-    "gateway/channels/whatsapp",
-  ).child("inbound");
+  const inboundConsoleLog = createSubsystemLogger("gateway/channels/whatsapp").child("inbound");
   const sock = await createWaSocket(false, options.verbose, {
     authDir: options.authDir,
   });
@@ -57,12 +49,9 @@ export async function monitorWebInbox(options: {
 
   try {
     await sock.sendPresenceUpdate("available");
-    if (shouldLogVerbose())
-      logVerbose("Sent global 'available' presence on connect");
+    if (shouldLogVerbose()) logVerbose("Sent global 'available' presence on connect");
   } catch (err) {
-    logVerbose(
-      `Failed to send 'available' presence on connect: ${String(err)}`,
-    );
+    logVerbose(`Failed to send 'available' presence on connect: ${String(err)}`);
   }
 
   const selfJid = sock.user?.id;
@@ -74,9 +63,7 @@ export async function monitorWebInbox(options: {
   const GROUP_META_TTL_MS = 5 * 60 * 1000; // 5 minutes
   const lidLookup = sock.signalRepository?.lidMapping;
 
-  const resolveInboundJid = async (
-    jid: string | null | undefined,
-  ): Promise<string | null> =>
+  const resolveInboundJid = async (jid: string | null | undefined): Promise<string | null> =>
     resolveJidToE164(jid, { authDir: options.authDir, lidLookup });
 
   const getGroupMeta = async (jid: string) => {
@@ -106,10 +93,7 @@ export async function monitorWebInbox(options: {
     }
   };
 
-  const handleMessagesUpsert = async (upsert: {
-    type?: string;
-    messages?: Array<WAMessage>;
-  }) => {
+  const handleMessagesUpsert = async (upsert: { type?: string; messages?: Array<WAMessage> }) => {
     if (upsert.type !== "notify" && upsert.type !== "append") return;
     for (const msg of upsert.messages ?? []) {
       recordChannelActivity({
@@ -120,8 +104,7 @@ export async function monitorWebInbox(options: {
       const id = msg.key?.id ?? undefined;
       const remoteJid = msg.key?.remoteJid;
       if (!remoteJid) continue;
-      if (remoteJid.endsWith("@status") || remoteJid.endsWith("@broadcast"))
-        continue;
+      if (remoteJid.endsWith("@status") || remoteJid.endsWith("@broadcast")) continue;
 
       const group = isJidGroup(remoteJid) === true;
       if (id) {
@@ -158,17 +141,13 @@ export async function monitorWebInbox(options: {
       });
       if (!access.allowed) continue;
 
-      if (id && !access.isSelfChat) {
+      if (id && !access.isSelfChat && options.sendReadReceipts !== false) {
         const participant = msg.key?.participant;
         try {
-          await sock.readMessages([
-            { remoteJid, id, participant, fromMe: false },
-          ]);
+          await sock.readMessages([{ remoteJid, id, participant, fromMe: false }]);
           if (shouldLogVerbose()) {
             const suffix = participant ? ` (participant ${participant})` : "";
-            logVerbose(
-              `Marked message ${id} as read for ${remoteJid}${suffix}`,
-            );
+            logVerbose(`Marked message ${id} as read for ${remoteJid}${suffix}`);
           }
         } catch (err) {
           logVerbose(`Failed to mark message ${id} read: ${String(err)}`);
@@ -191,17 +170,12 @@ export async function monitorWebInbox(options: {
         body = extractMediaPlaceholder(msg.message ?? undefined);
         if (!body) continue;
       }
-      const replyContext = describeReplyContext(
-        msg.message as proto.IMessage | undefined,
-      );
+      const replyContext = describeReplyContext(msg.message as proto.IMessage | undefined);
 
       let mediaPath: string | undefined;
       let mediaType: string | undefined;
       try {
-        const inboundMedia = await downloadInboundMedia(
-          msg as proto.IWebMessageInfo,
-          sock,
-        );
+        const inboundMedia = await downloadInboundMedia(msg as proto.IWebMessageInfo, sock);
         if (inboundMedia) {
           const maxMb =
             typeof options.mediaMaxMb === "number" && options.mediaMaxMb > 0
@@ -235,12 +209,8 @@ export async function monitorWebInbox(options: {
       const sendMedia = async (payload: AnyMessageContent) => {
         await sock.sendMessage(chatJid, payload);
       };
-      const timestamp = msg.messageTimestamp
-        ? Number(msg.messageTimestamp) * 1000
-        : undefined;
-      const mentionedJids = extractMentionedJids(
-        msg.message as proto.IMessage | undefined,
-      );
+      const timestamp = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : undefined;
+      const mentionedJids = extractMentionedJids(msg.message as proto.IMessage | undefined);
       const senderName = msg.pushName ?? undefined;
 
       inboundLogger.info(
@@ -280,22 +250,12 @@ export async function monitorWebInbox(options: {
           }),
         );
         void task.catch((err) => {
-          inboundLogger.error(
-            { error: String(err) },
-            "failed handling inbound web message",
-          );
-          inboundConsoleLog.error(
-            `Failed handling inbound web message: ${String(err)}`,
-          );
+          inboundLogger.error({ error: String(err) }, "failed handling inbound web message");
+          inboundConsoleLog.error(`Failed handling inbound web message: ${String(err)}`);
         });
       } catch (err) {
-        inboundLogger.error(
-          { error: String(err) },
-          "failed handling inbound web message",
-        );
-        inboundConsoleLog.error(
-          `Failed handling inbound web message: ${String(err)}`,
-        );
+        inboundLogger.error({ error: String(err) }, "failed handling inbound web message");
+        inboundConsoleLog.error(`Failed handling inbound web message: ${String(err)}`);
       }
     }
   };
@@ -314,10 +274,7 @@ export async function monitorWebInbox(options: {
         });
       }
     } catch (err) {
-      inboundLogger.error(
-        { error: String(err) },
-        "connection.update handler error",
-      );
+      inboundLogger.error({ error: String(err) }, "connection.update handler error");
       resolveClose({ status: undefined, isLoggedOut: false, error: err });
     }
   };
@@ -325,10 +282,8 @@ export async function monitorWebInbox(options: {
 
   const sendApi = createWebSendApi({
     sock: {
-      sendMessage: (jid: string, content: AnyMessageContent) =>
-        sock.sendMessage(jid, content),
-      sendPresenceUpdate: (presence, jid?: string) =>
-        sock.sendPresenceUpdate(presence, jid),
+      sendMessage: (jid: string, content: AnyMessageContent) => sock.sendMessage(jid, content),
+      sendPresenceUpdate: (presence, jid?: string) => sock.sendPresenceUpdate(presence, jid),
     },
     defaultAccountId: options.accountId,
   });
@@ -338,10 +293,7 @@ export async function monitorWebInbox(options: {
       try {
         const ev = sock.ev as unknown as {
           off?: (event: string, listener: (...args: unknown[]) => void) => void;
-          removeListener?: (
-            event: string,
-            listener: (...args: unknown[]) => void,
-          ) => void;
+          removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
         };
         const messagesUpsertHandler = handleMessagesUpsert as unknown as (
           ...args: unknown[]
@@ -363,9 +315,7 @@ export async function monitorWebInbox(options: {
     },
     onClose,
     signalClose: (reason?: WebListenerCloseReason) => {
-      resolveClose(
-        reason ?? { status: undefined, isLoggedOut: false, error: "closed" },
-      );
+      resolveClose(reason ?? { status: undefined, isLoggedOut: false, error: "closed" });
     },
     // IPC surface (sendMessage/sendPoll/sendReaction/sendComposingTo)
     ...sendApi,

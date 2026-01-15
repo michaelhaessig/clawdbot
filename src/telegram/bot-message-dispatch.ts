@@ -1,5 +1,9 @@
 // @ts-nocheck
-import { resolveEffectiveMessagesConfig } from "../agents/identity.js";
+import { resolveEffectiveMessagesConfig, resolveIdentityName } from "../agents/identity.js";
+import {
+  extractShortModelName,
+  type ResponsePrefixContext,
+} from "../auto-reply/reply/response-prefix-template.js";
 import { EmbeddedBlockChunker } from "../agents/pi-embedded-block-chunker.js";
 import { clearHistoryEntries } from "../auto-reply/reply/history.js";
 import { dispatchReplyWithBufferedBlockDispatcher } from "../auto-reply/reply/provider-dispatcher.js";
@@ -60,9 +64,7 @@ export const dispatchTelegramMessage = async ({
     draftStream && streamMode === "block"
       ? resolveTelegramDraftStreamingChunking(cfg, route.accountId)
       : undefined;
-  const draftChunker = draftChunking
-    ? new EmbeddedBlockChunker(draftChunking)
-    : undefined;
+  const draftChunker = draftChunking ? new EmbeddedBlockChunker(draftChunking) : undefined;
   let lastPartialText = "";
   let draftText = "";
   const updateDraftFromPartial = (text?: string) => {
@@ -114,17 +116,20 @@ export const dispatchTelegramMessage = async ({
 
   const disableBlockStreaming =
     Boolean(draftStream) ||
-    (typeof telegramCfg.blockStreaming === "boolean"
-      ? !telegramCfg.blockStreaming
-      : undefined);
+    (typeof telegramCfg.blockStreaming === "boolean" ? !telegramCfg.blockStreaming : undefined);
+
+  // Create mutable context for response prefix template interpolation
+  let prefixContext: ResponsePrefixContext = {
+    identityName: resolveIdentityName(cfg, route.agentId),
+  };
 
   let didSendReply = false;
   const { queuedFinal } = await dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg,
     dispatcherOptions: {
-      responsePrefix: resolveEffectiveMessagesConfig(cfg, route.agentId)
-        .responsePrefix,
+      responsePrefix: resolveEffectiveMessagesConfig(cfg, route.agentId).responsePrefix,
+      responsePrefixContextProvider: () => prefixContext,
       deliver: async (payload, info) => {
         if (info.kind === "final") {
           await flushDraft();
@@ -143,23 +148,26 @@ export const dispatchTelegramMessage = async ({
         didSendReply = true;
       },
       onError: (err, info) => {
-        runtime.error?.(
-          danger(`telegram ${info.kind} reply failed: ${String(err)}`),
-        );
+        runtime.error?.(danger(`telegram ${info.kind} reply failed: ${String(err)}`));
       },
       onReplyStart: sendTyping,
     },
     replyOptions: {
       skillFilter,
-      onPartialReply: draftStream
-        ? (payload) => updateDraftFromPartial(payload.text)
-        : undefined,
+      onPartialReply: draftStream ? (payload) => updateDraftFromPartial(payload.text) : undefined,
       onReasoningStream: draftStream
         ? (payload) => {
             if (payload.text) draftStream.update(payload.text);
           }
         : undefined,
       disableBlockStreaming,
+      onModelSelected: (ctx) => {
+        // Mutate the object directly instead of reassigning to ensure the closure sees updates
+        prefixContext.provider = ctx.provider;
+        prefixContext.model = extractShortModelName(ctx.model);
+        prefixContext.modelFull = `${ctx.provider}/${ctx.model}`;
+        prefixContext.thinkingLevel = ctx.thinkLevel ?? "off";
+      },
     },
   });
   draftStream?.stop();
@@ -169,12 +177,7 @@ export const dispatchTelegramMessage = async ({
     }
     return;
   }
-  if (
-    removeAckAfterReply &&
-    ackReactionPromise &&
-    msg.message_id &&
-    reactionApi
-  ) {
+  if (removeAckAfterReply && ackReactionPromise && msg.message_id && reactionApi) {
     void ackReactionPromise.then((didAck) => {
       if (!didAck) return;
       reactionApi(chatId, msg.message_id, []).catch((err) => {

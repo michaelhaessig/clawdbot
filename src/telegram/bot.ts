@@ -4,11 +4,9 @@ import { apiThrottler } from "@grammyjs/transformer-throttler";
 import type { ApiClientOptions } from "grammy";
 import { Bot, webhookCallback } from "grammy";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { isControlCommandMessage } from "../auto-reply/command-detection.js";
 import { resolveTextChunkLimit } from "../auto-reply/chunk.js";
-import {
-  DEFAULT_GROUP_HISTORY_LIMIT,
-  type HistoryEntry,
-} from "../auto-reply/reply/history.js";
+import { DEFAULT_GROUP_HISTORY_LIMIT, type HistoryEntry } from "../auto-reply/reply/history.js";
 import {
   isNativeCommandsExplicitlyDisabled,
   resolveNativeCommandsEnabled,
@@ -24,10 +22,7 @@ import { logVerbose, shouldLogVerbose } from "../globals.js";
 import { getChildLogger } from "../logging.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { resolveTelegramAccount } from "./accounts.js";
-import {
-  resolveTelegramForumThreadId,
-  resolveTelegramStreamMode,
-} from "./bot/helpers.js";
+import { resolveTelegramForumThreadId, resolveTelegramStreamMode } from "./bot/helpers.js";
 import type { TelegramContext, TelegramMessage } from "./bot/types.js";
 import { registerTelegramHandlers } from "./bot-handlers.js";
 import { createTelegramMessageProcessor } from "./bot-message.js";
@@ -72,15 +67,22 @@ export function getTelegramSequentialKey(ctx: {
     ctx.update?.edited_message ??
     ctx.update?.callback_query?.message;
   const chatId = msg?.chat?.id ?? ctx.chat?.id;
+  const rawText = msg?.text ?? msg?.caption;
+  const botUsername = (ctx as { me?: { username?: string } }).me?.username;
+  if (
+    rawText &&
+    isControlCommandMessage(rawText, undefined, botUsername ? { botUsername } : undefined)
+  ) {
+    if (typeof chatId === "number") return `telegram:${chatId}:control`;
+    return "telegram:control";
+  }
   const isForum = (msg?.chat as { is_forum?: boolean } | undefined)?.is_forum;
   const threadId = resolveTelegramForumThreadId({
     isForum,
     messageThreadId: msg?.message_thread_id,
   });
   if (typeof chatId === "number") {
-    return threadId != null
-      ? `telegram:${chatId}:topic:${threadId}`
-      : `telegram:${chatId}`;
+    return threadId != null ? `telegram:${chatId}:topic:${threadId}` : `telegram:${chatId}`;
   }
   return "telegram:unknown";
 }
@@ -104,8 +106,7 @@ export function createTelegramBot(opts: TelegramBotOptions) {
   const isBun = "Bun" in globalThis || Boolean(process?.versions?.bun);
   const shouldProvideFetch = Boolean(opts.proxyFetch) || isBun;
   const timeoutSeconds =
-    typeof telegramCfg?.timeoutSeconds === "number" &&
-    Number.isFinite(telegramCfg.timeoutSeconds)
+    typeof telegramCfg?.timeoutSeconds === "number" && Number.isFinite(telegramCfg.timeoutSeconds)
       ? Math.max(1, Math.floor(telegramCfg.timeoutSeconds))
       : undefined;
   const client: ApiClientOptions | undefined =
@@ -124,9 +125,7 @@ export function createTelegramBot(opts: TelegramBotOptions) {
 
   const recentUpdates = createTelegramUpdateDedupe();
   let lastUpdateId =
-    typeof opts.updateOffset?.lastUpdateId === "number"
-      ? opts.updateOffset.lastUpdateId
-      : null;
+    typeof opts.updateOffset?.lastUpdateId === "number" ? opts.updateOffset.lastUpdateId : null;
 
   const recordUpdateId = (ctx: TelegramUpdateKeyContext) => {
     const updateId = resolveTelegramUpdateId(ctx);
@@ -184,8 +183,7 @@ export function createTelegramBot(opts: TelegramBotOptions) {
   });
   const useAccessGroups = cfg.commands?.useAccessGroups !== false;
   const ackReactionScope = cfg.messages?.ackReactionScope ?? "group-mentions";
-  const mediaMaxBytes =
-    (opts.mediaMaxMb ?? telegramCfg.mediaMaxMb ?? 5) * 1024 * 1024;
+  const mediaMaxBytes = (opts.mediaMaxMb ?? telegramCfg.mediaMaxMb ?? 5) * 1024 * 1024;
   const logger = getChildLogger({ module: "telegram-auto-reply" });
   let botHasTopicsEnabled: boolean | undefined;
   const resolveBotTopicsEnabled = async (ctx?: TelegramContext) => {
@@ -241,18 +239,13 @@ export function createTelegramBot(opts: TelegramBotOptions) {
       requireMentionOverride: opts.requireMention,
       overrideOrder: "after-config",
     });
-  const resolveTelegramGroupConfig = (
-    chatId: string | number,
-    messageThreadId?: number,
-  ) => {
+  const resolveTelegramGroupConfig = (chatId: string | number, messageThreadId?: number) => {
     const groups = telegramCfg.groups;
     if (!groups) return { groupConfig: undefined, topicConfig: undefined };
     const groupKey = String(chatId);
     const groupConfig = groups[groupKey] ?? groups["*"];
     const topicConfig =
-      messageThreadId != null
-        ? groupConfig?.topics?.[String(messageThreadId)]
-        : undefined;
+      messageThreadId != null ? groupConfig?.topics?.[String(messageThreadId)] : undefined;
     return { groupConfig, topicConfig };
   };
 
@@ -299,6 +292,8 @@ export function createTelegramBot(opts: TelegramBotOptions) {
   });
 
   registerTelegramHandlers({
+    cfg,
+    accountId: account.accountId,
     bot,
     opts,
     runtime,
@@ -315,9 +310,6 @@ export function createTelegramBot(opts: TelegramBotOptions) {
   return bot;
 }
 
-export function createTelegramWebhookCallback(
-  bot: Bot,
-  path = "/telegram-webhook",
-) {
+export function createTelegramWebhookCallback(bot: Bot, path = "/telegram-webhook") {
   return { path, handler: webhookCallback(bot, "http") };
 }

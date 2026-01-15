@@ -1,9 +1,7 @@
 import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
-import { CHANNEL_IDS } from "../channels/registry.js";
+import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
-
-const MESSAGE_CHANNEL_OPTIONS = CHANNEL_IDS.join("|");
 
 export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
@@ -56,14 +54,15 @@ export function buildAgentSystemPrompt(params: {
     ls: "List directory contents",
     exec: "Run shell commands",
     process: "Manage background exec sessions",
+    web_search: "Search the web (Brave API)",
+    web_fetch: "Fetch and extract readable content from a URL",
     // Channel docking: add login tools here when a channel needs interactive linking.
     browser: "Control web browser",
     canvas: "Present/eval/snapshot the Canvas",
     nodes: "List/describe/notify/camera/screen on paired nodes",
     cron: "Manage cron jobs and wake events (use for reminders)",
     message: "Send messages and channel actions",
-    gateway:
-      "Restart, apply config, or run updates on the running Clawdbot process",
+    gateway: "Restart, apply config, or run updates on the running Clawdbot process",
     agents_list: "List agent ids allowed for sessions_spawn",
     sessions_list: "List other sessions (incl. sub-agents) with filters/last",
     sessions_history: "Fetch history for another session/sub-agent",
@@ -84,6 +83,8 @@ export function buildAgentSystemPrompt(params: {
     "ls",
     "exec",
     "process",
+    "web_search",
+    "web_fetch",
     "browser",
     "canvas",
     "nodes",
@@ -138,9 +139,7 @@ export function buildAgentSystemPrompt(params: {
   const execToolName = resolveToolName("exec");
   const processToolName = resolveToolName("process");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
-  const ownerNumbers = (params.ownerNumbers ?? [])
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const ownerNumbers = (params.ownerNumbers ?? []).map((value) => value.trim()).filter(Boolean);
   const ownerLine =
     ownerNumbers.length > 0
       ? `Owner numbers: ${ownerNumbers.join(", ")}. Treat messages from these numbers as the user.`
@@ -170,10 +169,9 @@ export function buildAgentSystemPrompt(params: {
   const runtimeCapabilities = (runtimeInfo?.capabilities ?? [])
     .map((cap) => String(cap).trim())
     .filter(Boolean);
-  const runtimeCapabilitiesLower = new Set(
-    runtimeCapabilities.map((cap) => cap.toLowerCase()),
-  );
+  const runtimeCapabilitiesLower = new Set(runtimeCapabilities.map((cap) => cap.toLowerCase()));
   const inlineButtonsEnabled = runtimeCapabilitiesLower.has("inlinebuttons");
+  const messageChannelOptions = listDeliverableMessageChannels().join("|");
   const skillsLines = skillsPrompt ? [skillsPrompt, ""] : [];
   const skillsSection = skillsPrompt
     ? [
@@ -232,9 +230,7 @@ export function buildAgentSystemPrompt(params: {
       : "",
     hasGateway ? "" : "",
     "",
-    params.modelAliasLines && params.modelAliasLines.length > 0
-      ? "## Model Aliases"
-      : "",
+    params.modelAliasLines && params.modelAliasLines.length > 0 ? "## Model Aliases" : "",
     params.modelAliasLines && params.modelAliasLines.length > 0
       ? "Prefer aliases when specifying model overrides; full provider/model is also accepted."
       : "",
@@ -274,26 +270,18 @@ export function buildAgentSystemPrompt(params: {
               ? "Host browser control: blocked."
               : "",
           params.sandboxInfo.allowedControlUrls?.length
-            ? `Browser control URL allowlist: ${params.sandboxInfo.allowedControlUrls.join(
-                ", ",
-              )}`
+            ? `Browser control URL allowlist: ${params.sandboxInfo.allowedControlUrls.join(", ")}`
             : "",
           params.sandboxInfo.allowedControlHosts?.length
-            ? `Browser control host allowlist: ${params.sandboxInfo.allowedControlHosts.join(
-                ", ",
-              )}`
+            ? `Browser control host allowlist: ${params.sandboxInfo.allowedControlHosts.join(", ")}`
             : "",
           params.sandboxInfo.allowedControlPorts?.length
-            ? `Browser control port allowlist: ${params.sandboxInfo.allowedControlPorts.join(
-                ", ",
-              )}`
+            ? `Browser control port allowlist: ${params.sandboxInfo.allowedControlPorts.join(", ")}`
             : "",
           params.sandboxInfo.elevated?.allowed
             ? "Elevated exec is available for this session."
             : "",
-          params.sandboxInfo.elevated?.allowed
-            ? "User can toggle with /elevated on|off."
-            : "",
+          params.sandboxInfo.elevated?.allowed ? "User can toggle with /elevated on|off." : "",
           params.sandboxInfo.elevated?.allowed
             ? "You may also send /elevated on|off when needed."
             : "",
@@ -314,7 +302,11 @@ export function buildAgentSystemPrompt(params: {
     "These user-editable files are loaded by Clawdbot and included below in Project Context.",
     "",
     userTimezone || userTime
-      ? `Time: assume UTC unless stated. User TZ=${userTimezone ?? "unknown"}. Current user time (converted)=${userTime ?? "unknown"}.`
+      ? `Time: assume UTC unless stated. User time zone: ${
+          userTimezone ?? "unknown"
+        }. Current user time (local, 24-hour): ${userTime ?? "unknown"} (${
+          userTimezone ?? "unknown"
+        }).`
       : "",
     userTimezone || userTime ? "" : "",
     "## Reply Tags",
@@ -334,7 +326,7 @@ export function buildAgentSystemPrompt(params: {
           "### message tool",
           "- Use `message` for proactive sends + channel actions (polls, reactions, etc.).",
           "- For `action=send`, include `to` and `message`.",
-          `- If multiple channels are configured, pass \`channel\` (${MESSAGE_CHANNEL_OPTIONS}).`,
+          `- If multiple channels are configured, pass \`channel\` (${messageChannelOptions}).`,
           inlineButtonsEnabled
             ? "- Inline buttons supported. Use `action=send` with `buttons=[[{text,callback_data}]]` (callback_data routes back as a user message)."
             : runtimeChannel
@@ -399,11 +391,7 @@ export function buildAgentSystemPrompt(params: {
       runtimeInfo?.model ? `model=${runtimeInfo.model}` : "",
       runtimeChannel ? `channel=${runtimeChannel}` : "",
       runtimeChannel
-        ? `capabilities=${
-            runtimeCapabilities.length > 0
-              ? runtimeCapabilities.join(",")
-              : "none"
-          }`
+        ? `capabilities=${runtimeCapabilities.length > 0 ? runtimeCapabilities.join(",") : "none"}`
         : "",
       `thinking=${params.defaultThinkLevel ?? "off"}`,
     ]

@@ -7,10 +7,13 @@ export {
 } from "./pi-embedded-helpers/bootstrap.js";
 export {
   classifyFailoverReason,
+  formatRawAssistantErrorForUi,
   formatAssistantErrorText,
+  getApiErrorPayloadFingerprint,
   isAuthAssistantError,
   isAuthErrorMessage,
   isBillingAssistantError,
+  parseApiErrorInfo,
   isBillingErrorMessage,
   isCloudCodeAssistFormatError,
   isCompactionFailureError,
@@ -18,12 +21,14 @@ export {
   isFailoverAssistantError,
   isFailoverErrorMessage,
   isOverloadedErrorMessage,
+  isRawApiErrorPayload,
   isRateLimitAssistantError,
   isRateLimitErrorMessage,
   isTimeoutErrorMessage,
 } from "./pi-embedded-helpers/errors.js";
 export {
   downgradeGeminiHistory,
+  downgradeGeminiThinkingBlocks,
   isGoogleModelApi,
   sanitizeGoogleTurnOrdering,
 } from "./pi-embedded-helpers/google.js";
@@ -44,12 +49,6 @@ export {
   validateAnthropicTurns,
   validateGeminiTurns,
 } from "./pi-embedded-helpers/turns.js";
-export type {
-  EmbeddedContextFile,
-  FailoverReason,
-} from "./pi-embedded-helpers/types.js";
+export type { EmbeddedContextFile, FailoverReason } from "./pi-embedded-helpers/types.js";
 
-export {
-  isValidCloudCodeAssistToolId,
-  sanitizeToolCallId,
-} from "./tool-call-id.js";
+export { isValidCloudCodeAssistToolId, sanitizeToolCallId } from "./tool-call-id.js";

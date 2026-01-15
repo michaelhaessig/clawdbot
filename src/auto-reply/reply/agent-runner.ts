@@ -29,25 +29,12 @@ import {
 } from "./agent-runner-helpers.js";
 import { runMemoryFlushIfNeeded } from "./agent-runner-memory.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
-import {
-  appendUsageLine,
-  formatResponseUsageLine,
-} from "./agent-runner-utils.js";
-import {
-  createAudioAsVoiceBuffer,
-  createBlockReplyPipeline,
-} from "./block-reply-pipeline.js";
+import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-utils.js";
+import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
 import { resolveBlockStreamingCoalescing } from "./block-streaming.js";
 import { createFollowupRunner } from "./followup-runner.js";
-import {
-  enqueueFollowupRun,
-  type FollowupRun,
-  type QueueSettings,
-} from "./queue.js";
-import {
-  createReplyToModeFilterForChannel,
-  resolveReplyToMode,
-} from "./reply-threading.js";
+import { enqueueFollowupRun, type FollowupRun, type QueueSettings } from "./queue.js";
+import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { incrementCompactionCount } from "./session-updates.js";
 import type { TypingController } from "./typing.js";
 import { createTypingSignaler } from "./typing-mode.js";
@@ -129,8 +116,7 @@ export async function runReplyAgent(params: {
   });
 
   const pendingToolTasks = new Set<Promise<void>>();
-  const blockReplyTimeoutMs =
-    opts?.blockReplyTimeoutMs ?? BLOCK_REPLY_SEND_TIMEOUT_MS;
+  const blockReplyTimeoutMs = opts?.blockReplyTimeoutMs ?? BLOCK_REPLY_SEND_TIMEOUT_MS;
 
   const replyToChannel =
     sessionCtx.OriginatingChannel ??
@@ -142,10 +128,7 @@ export async function runReplyAgent(params: {
     replyToChannel,
     sessionCtx.AccountId,
   );
-  const applyReplyToMode = createReplyToModeFilterForChannel(
-    replyToMode,
-    replyToChannel,
-  );
+  const applyReplyToMode = createReplyToModeFilterForChannel(replyToMode, replyToChannel);
   const cfg = followupRun.run.config;
   const blockReplyCoalescing =
     blockStreamingEnabled && opts?.onBlockReply
@@ -167,10 +150,7 @@ export async function runReplyAgent(params: {
       : null;
 
   if (shouldSteer && isStreaming) {
-    const steered = queueEmbeddedPiMessage(
-      followupRun.run.sessionId,
-      followupRun.prompt,
-    );
+    const steered = queueEmbeddedPiMessage(followupRun.run.sessionId, followupRun.prompt);
     if (steered && !shouldFollowup) {
       if (activeSessionEntry && activeSessionStore && sessionKey) {
         activeSessionEntry.updatedAt = Date.now();
@@ -225,9 +205,7 @@ export async function runReplyAgent(params: {
   });
 
   let responseUsageLine: string | undefined;
-  const resetSessionAfterCompactionFailure = async (
-    reason: string,
-  ): Promise<boolean> => {
+  const resetSessionAfterCompactionFailure = async (reason: string): Promise<boolean> => {
     if (!sessionKey || !activeSessionStore || !storePath) return false;
     const nextSessionId = crypto.randomUUID();
     const nextEntry: SessionEntry = {
@@ -238,14 +216,10 @@ export async function runReplyAgent(params: {
       abortedLastRun: false,
     };
     const agentId = resolveAgentIdFromSessionKey(sessionKey);
-    const topicId =
-      typeof sessionCtx.MessageThreadId === "number"
-        ? sessionCtx.MessageThreadId
-        : undefined;
     const nextSessionFile = resolveSessionTranscriptPath(
       nextSessionId,
       agentId,
-      topicId,
+      sessionCtx.MessageThreadId,
     );
     nextEntry.sessionFile = nextSessionFile;
     activeSessionStore[sessionKey] = nextEntry;
@@ -289,11 +263,7 @@ export async function runReplyAgent(params: {
     });
 
     if (runOutcome.kind === "final") {
-      return finalizeWithFollowup(
-        runOutcome.payload,
-        queueKey,
-        runFollowupTurn,
-      );
+      return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn);
     }
 
     const { runResult, fallbackProvider, fallbackModel } = runOutcome;
@@ -354,12 +324,9 @@ export async function runReplyAgent(params: {
     await signalTypingIfNeeded(replyPayloads, typingSignals);
 
     const usage = runResult.meta.agentMeta?.usage;
-    const modelUsed =
-      runResult.meta.agentMeta?.model ?? fallbackModel ?? defaultModel;
+    const modelUsed = runResult.meta.agentMeta?.model ?? fallbackModel ?? defaultModel;
     const providerUsed =
-      runResult.meta.agentMeta?.provider ??
-      fallbackProvider ??
-      followupRun.run.provider;
+      runResult.meta.agentMeta?.provider ?? fallbackProvider ?? followupRun.run.provider;
     const cliSessionId = isCliProvider(providerUsed, cfg)
       ? runResult.meta.agentMeta?.sessionId?.trim()
       : undefined;
@@ -378,16 +345,15 @@ export async function runReplyAgent(params: {
             update: async (entry) => {
               const input = usage.input ?? 0;
               const output = usage.output ?? 0;
-              const promptTokens =
-                input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+              const promptTokens = input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
               const patch: Partial<SessionEntry> = {
                 inputTokens: input,
                 outputTokens: output,
-                totalTokens:
-                  promptTokens > 0 ? promptTokens : (usage.total ?? input),
+                totalTokens: promptTokens > 0 ? promptTokens : (usage.total ?? input),
                 modelProvider: providerUsed,
                 model: modelUsed,
                 contextTokens: contextTokensUsed ?? entry.contextTokens,
+                systemPromptReport: runResult.meta.systemPromptReport ?? entry.systemPromptReport,
                 updatedAt: Date.now(),
               };
               if (cliSessionId) {
@@ -415,6 +381,7 @@ export async function runReplyAgent(params: {
                 modelProvider: providerUsed ?? entry.modelProvider,
                 model: modelUsed ?? entry.model,
                 contextTokens: contextTokensUsed ?? entry.contextTokens,
+                systemPromptReport: runResult.meta.systemPromptReport ?? entry.systemPromptReport,
                 updatedAt: Date.now(),
               };
               if (cliSessionId) {
@@ -437,9 +404,7 @@ export async function runReplyAgent(params: {
 
     const responseUsageEnabled =
       (activeSessionEntry?.responseUsage ??
-        (sessionKey
-          ? activeSessionStore?.[sessionKey]?.responseUsage
-          : undefined)) === "on";
+        (sessionKey ? activeSessionStore?.[sessionKey]?.responseUsage : undefined)) === "on";
     if (responseUsageEnabled && hasNonzeroUsage(usage)) {
       const authMode = resolveModelAuthMode(providerUsed, cfg);
       const showCost = authMode === "api-key";
@@ -469,17 +434,11 @@ export async function runReplyAgent(params: {
       });
       if (resolvedVerboseLevel === "on") {
         const suffix = typeof count === "number" ? ` (count ${count})` : "";
-        finalPayloads = [
-          { text: `🧹 Auto-compaction complete${suffix}.` },
-          ...finalPayloads,
-        ];
+        finalPayloads = [{ text: `🧹 Auto-compaction complete${suffix}.` }, ...finalPayloads];
       }
     }
     if (resolvedVerboseLevel === "on" && activeIsNewSession) {
-      finalPayloads = [
-        { text: `🧭 New session: ${followupRun.run.sessionId}` },
-        ...finalPayloads,
-      ];
+      finalPayloads = [{ text: `🧭 New session: ${followupRun.run.sessionId}` }, ...finalPayloads];
     }
     if (responseUsageLine) {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);

@@ -4,11 +4,7 @@ import os from "node:os";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
-import {
-  createAgentSession,
-  SessionManager,
-  SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager } from "@mariozechner/pi-coding-agent";
 
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
@@ -41,19 +37,14 @@ import {
   loadWorkspaceSkillEntries,
   resolveSkillsPromptForRun,
 } from "../../skills.js";
-import {
-  filterBootstrapFilesForSession,
-  loadWorkspaceBootstrapFiles,
-} from "../../workspace.js";
+import { buildSystemPromptReport } from "../../system-prompt-report.js";
+import { filterBootstrapFilesForSession, loadWorkspaceBootstrapFiles } from "../../workspace.js";
 
 import { isAbortError } from "../abort.js";
 import { buildEmbeddedExtensionPaths } from "../extensions.js";
 import { applyExtraParamsToAgent } from "../extra-params.js";
 import { logToolSchemasForGoogle, sanitizeSessionHistory } from "../google.js";
-import {
-  getDmHistoryLimitFromSessionKey,
-  limitHistoryTurns,
-} from "../history.js";
+import { getDmHistoryLimitFromSessionKey, limitHistoryTurns } from "../history.js";
 import { log } from "../logger.js";
 import { buildModelAliasLines } from "../model.js";
 import {
@@ -62,15 +53,9 @@ import {
   setActiveEmbeddedRun,
 } from "../runs.js";
 import { buildEmbeddedSandboxInfo } from "../sandbox-info.js";
-import {
-  prewarmSessionFile,
-  trackSessionManagerAccess,
-} from "../session-manager-cache.js";
+import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
-import {
-  buildEmbeddedSystemPrompt,
-  createSystemPromptOverride,
-} from "../system-prompt.js";
+import { buildEmbeddedSystemPrompt, createSystemPromptOverride } from "../system-prompt.js";
 import { splitSdkTools } from "../tool-split.js";
 import {
   formatUserTime,
@@ -78,11 +63,9 @@ import {
   resolveExecToolDefaults,
   resolveUserTimezone,
 } from "../utils.js";
+import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 
-import type {
-  EmbeddedRunAttemptParams,
-  EmbeddedRunAttemptResult,
-} from "./types.js";
+import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
 export async function runEmbeddedAttempt(
   params: EmbeddedRunAttemptParams,
@@ -113,8 +96,7 @@ export async function runEmbeddedAttempt(
   let restoreSkillEnv: (() => void) | undefined;
   process.chdir(effectiveWorkspace);
   try {
-    const shouldLoadSkillEntries =
-      !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+    const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries
       ? loadWorkspaceSkillEntries(effectiveWorkspace)
       : [];
@@ -171,9 +153,7 @@ export async function runEmbeddedAttempt(
     logToolSchemasForGoogle({ tools, provider: params.provider });
 
     const machineName = await getMachineDisplayName();
-    const runtimeChannel = normalizeMessageChannel(
-      params.messageChannel ?? params.messageProvider,
-    );
+    const runtimeChannel = normalizeMessageChannel(params.messageChannel ?? params.messageProvider);
     const runtimeCapabilities = runtimeChannel
       ? (resolveChannelCapabilities({
           cfg: params.config,
@@ -193,9 +173,7 @@ export async function runEmbeddedAttempt(
 
     const sandboxInfo = buildEmbeddedSandboxInfo(sandbox, params.bashElevated);
     const reasoningTagHint = isReasoningTagProvider(params.provider);
-    const userTimezone = resolveUserTimezone(
-      params.config?.agents?.defaults?.userTimezone,
-    );
+    const userTimezone = resolveUserTimezone(params.config?.agents?.defaults?.userTimezone);
     const userTime = formatUserTime(new Date(), userTimezone);
     const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
       sessionKey: params.sessionKey,
@@ -211,9 +189,7 @@ export async function runEmbeddedAttempt(
       ownerNumbers: params.ownerNumbers,
       reasoningTagHint,
       heartbeatPrompt: isDefaultAgent
-        ? resolveHeartbeatPrompt(
-            params.config?.agents?.defaults?.heartbeat?.prompt,
-          )
+        ? resolveHeartbeatPrompt(params.config?.agents?.defaults?.heartbeat?.prompt)
         : undefined,
       skillsPrompt,
       runtimeInfo,
@@ -224,6 +200,28 @@ export async function runEmbeddedAttempt(
       userTime,
       contextFiles,
     });
+    const systemPromptReport = buildSystemPromptReport({
+      source: "run",
+      generatedAt: Date.now(),
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      provider: params.provider,
+      model: params.modelId,
+      workspaceDir: effectiveWorkspace,
+      bootstrapMaxChars: resolveBootstrapMaxChars(params.config),
+      sandbox: (() => {
+        const runtime = resolveSandboxRuntimeStatus({
+          cfg: params.config,
+          sessionKey: params.sessionKey ?? params.sessionId,
+        });
+        return { mode: runtime.mode, sandboxed: runtime.sandboxed };
+      })(),
+      systemPrompt: appendPrompt,
+      bootstrapFiles,
+      injectedFiles: contextFiles,
+      skillsPrompt,
+      tools,
+    });
     const systemPrompt = createSystemPromptOverride(appendPrompt);
 
     const sessionLock = await acquireSessionWriteLock({
@@ -231,9 +229,7 @@ export async function runEmbeddedAttempt(
     });
 
     let sessionManager: ReturnType<typeof guardSessionManager> | undefined;
-    let session:
-      | Awaited<ReturnType<typeof createAgentSession>>["session"]
-      | undefined;
+    let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
     try {
       const hadSessionFile = await fs
         .stat(params.sessionFile)
@@ -241,9 +237,7 @@ export async function runEmbeddedAttempt(
         .catch(() => false);
 
       await prewarmSessionFile(params.sessionFile);
-      sessionManager = guardSessionManager(
-        SessionManager.open(params.sessionFile),
-      );
+      sessionManager = guardSessionManager(SessionManager.open(params.sessionFile));
       trackSessionManagerAccess(params.sessionFile);
 
       await prepareSessionManagerForRun({
@@ -254,10 +248,7 @@ export async function runEmbeddedAttempt(
         cwd: effectiveWorkspace,
       });
 
-      const settingsManager = SettingsManager.create(
-        effectiveWorkspace,
-        agentDir,
-      );
+      const settingsManager = SettingsManager.create(effectiveWorkspace, agentDir);
       ensurePiCompactionReserveTokens({
         settingsManager,
         minReserveTokens: resolveCompactionReserveTokensFloor(params.config),
@@ -412,9 +403,7 @@ export async function runEmbeddedAttempt(
       let promptError: unknown = null;
       try {
         const promptStartedAt = Date.now();
-        log.debug(
-          `embedded run prompt start: runId=${params.runId} sessionId=${params.sessionId}`,
-        );
+        log.debug(`embedded run prompt start: runId=${params.runId} sessionId=${params.sessionId}`);
         try {
           await activeSession.prompt(params.prompt, { images: params.images });
         } catch (err) {
@@ -448,15 +437,12 @@ export async function runEmbeddedAttempt(
       const lastAssistant = messagesSnapshot
         .slice()
         .reverse()
-        .find((m) => (m as AgentMessage)?.role === "assistant") as
-        | AssistantMessage
-        | undefined;
+        .find((m) => (m as AgentMessage)?.role === "assistant") as AssistantMessage | undefined;
 
       const toolMetasNormalized = toolMetas
         .filter(
           (entry): entry is { toolName: string; meta?: string } =>
-            typeof entry.toolName === "string" &&
-            entry.toolName.trim().length > 0,
+            typeof entry.toolName === "string" && entry.toolName.trim().length > 0,
         )
         .map((entry) => ({ toolName: entry.toolName, meta: entry.meta }));
 
@@ -465,6 +451,7 @@ export async function runEmbeddedAttempt(
         timedOut,
         promptError,
         sessionIdUsed,
+        systemPromptReport,
         messagesSnapshot,
         assistantTexts,
         toolMetas: toolMetasNormalized,
@@ -473,8 +460,7 @@ export async function runEmbeddedAttempt(
         messagingToolSentTexts: getMessagingToolSentTexts(),
         messagingToolSentTargets: getMessagingToolSentTargets(),
         cloudCodeAssistFormatError: Boolean(
-          lastAssistant?.errorMessage &&
-            isCloudCodeAssistFormatError(lastAssistant.errorMessage),
+          lastAssistant?.errorMessage && isCloudCodeAssistFormatError(lastAssistant.errorMessage),
         ),
       };
     } finally {

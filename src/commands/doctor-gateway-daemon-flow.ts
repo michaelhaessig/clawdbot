@@ -21,10 +21,7 @@ import {
   GATEWAY_DAEMON_RUNTIME_OPTIONS,
   type GatewayDaemonRuntime,
 } from "./daemon-runtime.js";
-import {
-  buildGatewayRuntimeHints,
-  formatGatewayRuntimeSummary,
-} from "./doctor-format.js";
+import { buildGatewayRuntimeHints, formatGatewayRuntimeSummary } from "./doctor-format.js";
 import type { DoctorOptions, DoctorPrompter } from "./doctor-prompter.js";
 import { healthCommand } from "./health.js";
 import { formatHealthCheckFailure } from "./health-format.js";
@@ -40,17 +37,10 @@ export async function maybeRepairGatewayDaemon(params: {
   if (params.healthOk) return;
 
   const service = resolveGatewayService();
-  const loaded = await service.isLoaded({
-    env: process.env,
-    profile: process.env.CLAWDBOT_PROFILE,
-  });
-  let serviceRuntime:
-    | Awaited<ReturnType<typeof service.readRuntime>>
-    | undefined;
+  const loaded = await service.isLoaded({ profile: process.env.CLAWDBOT_PROFILE });
+  let serviceRuntime: Awaited<ReturnType<typeof service.readRuntime>> | undefined;
   if (loaded) {
-    serviceRuntime = await service
-      .readRuntime(process.env)
-      .catch(() => undefined);
+    serviceRuntime = await service.readRuntime(process.env).catch(() => undefined);
   }
 
   if (params.cfg.gateway?.mode !== "remote") {
@@ -72,15 +62,14 @@ export async function maybeRepairGatewayDaemon(params: {
         initialValue: true,
       });
       if (install) {
-        const daemonRuntime =
-          await params.prompter.select<GatewayDaemonRuntime>(
-            {
-              message: "Gateway daemon runtime",
-              options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
-              initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
-            },
-            DEFAULT_GATEWAY_DAEMON_RUNTIME,
-          );
+        const daemonRuntime = await params.prompter.select<GatewayDaemonRuntime>(
+          {
+            message: "Gateway daemon runtime",
+            options: GATEWAY_DAEMON_RUNTIME_OPTIONS,
+            initialValue: DEFAULT_GATEWAY_DAEMON_RUNTIME,
+          },
+          DEFAULT_GATEWAY_DAEMON_RUNTIME,
+        );
         const devMode =
           process.argv[1]?.includes(`${path.sep}src${path.sep}`) &&
           process.argv[1]?.endsWith(".ts");
@@ -89,27 +78,21 @@ export async function maybeRepairGatewayDaemon(params: {
           env: process.env,
           runtime: daemonRuntime,
         });
-        const { programArguments, workingDirectory } =
-          await resolveGatewayProgramArguments({
-            port,
-            dev: devMode,
-            runtime: daemonRuntime,
-            nodePath,
-          });
+        const { programArguments, workingDirectory } = await resolveGatewayProgramArguments({
+          port,
+          dev: devMode,
+          runtime: daemonRuntime,
+          nodePath,
+        });
         if (daemonRuntime === "node") {
           const systemNode = await resolveSystemNodeInfo({ env: process.env });
-          const warning = renderSystemNodeWarning(
-            systemNode,
-            programArguments[0],
-          );
+          const warning = renderSystemNodeWarning(systemNode, programArguments[0]);
           if (warning) note(warning, "Gateway runtime");
         }
         const environment = buildServiceEnvironment({
           env: process.env,
           port,
-          token:
-            params.cfg.gateway?.auth?.token ??
-            process.env.CLAWDBOT_GATEWAY_TOKEN,
+          token: params.cfg.gateway?.auth?.token ?? process.env.CLAWDBOT_GATEWAY_TOKEN,
           launchdLabel:
             process.platform === "darwin"
               ? resolveGatewayLaunchAgentLabel(process.env.CLAWDBOT_PROFILE)
@@ -146,7 +129,6 @@ export async function maybeRepairGatewayDaemon(params: {
     });
     if (start) {
       await service.restart({
-        env: process.env,
         profile: process.env.CLAWDBOT_PROFILE,
         stdout: process.stdout,
       });
@@ -169,7 +151,6 @@ export async function maybeRepairGatewayDaemon(params: {
     });
     if (restart) {
       await service.restart({
-        env: process.env,
         profile: process.env.CLAWDBOT_PROFILE,
         stdout: process.stdout,
       });

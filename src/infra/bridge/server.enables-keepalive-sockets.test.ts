@@ -57,13 +57,13 @@ async function waitForSocketConnect(socket: net.Socket) {
 
 describe("node bridge server", () => {
   let baseDir = "";
+  const pairingTimeoutMs = process.platform === "win32" ? 8000 : 3000;
 
   const pickNonLoopbackIPv4 = () => {
     const ifaces = os.networkInterfaces();
     for (const entries of Object.values(ifaces)) {
       for (const info of entries ?? []) {
-        if (info.family === "IPv4" && info.internal === false)
-          return info.address;
+        if (info.family === "IPv4" && info.internal === false) return info.address;
       }
     }
     return null;
@@ -175,7 +175,7 @@ describe("node bridge server", () => {
         const list = await listNodePairing(baseDir);
         return list.pending.find((p) => p.nodeId === "n2");
       },
-      { timeoutMs: 3000 },
+      { timeoutMs: pairingTimeoutMs },
     );
     expect(pending).toBeTruthy();
     if (!pending) throw new Error("expected a pending request");
@@ -221,7 +221,7 @@ describe("node bridge server", () => {
     await waitForSocketConnect(socket);
     sendLine(socket, { type: "pair-request", nodeId: "n3", platform: "ios" });
 
-    await pollUntil(async () => requested, { timeoutMs: 3000 });
+    await pollUntil(async () => requested, { timeoutMs: pairingTimeoutMs });
 
     expect(requested?.nodeId).toBe("n3");
     expect(typeof requested?.requestId).toBe("string");
@@ -231,8 +231,7 @@ describe("node bridge server", () => {
   });
 
   it("handles req/res RPC after authentication", async () => {
-    let lastRequest: { nodeId?: string; id?: string; method?: string } | null =
-      null;
+    let lastRequest: { nodeId?: string; id?: string; method?: string } | null = null;
 
     const server = await startNodeBridgeServer({
       host: "127.0.0.1",
@@ -259,7 +258,7 @@ describe("node bridge server", () => {
         const list = await listNodePairing(baseDir);
         return list.pending.find((p) => p.nodeId === "n3-rpc");
       },
-      { timeoutMs: 3000 },
+      { timeoutMs: pairingTimeoutMs },
     );
     expect(pending).toBeTruthy();
     if (!pending) throw new Error("expected a pending request");
@@ -355,7 +354,7 @@ describe("node bridge server", () => {
         const list = await listNodePairing(baseDir);
         return list.pending.find((p) => p.nodeId === "n4");
       },
-      { timeoutMs: 3000 },
+      { timeoutMs: pairingTimeoutMs },
     );
     expect(pending).toBeTruthy();
     if (!pending) throw new Error("expected a pending request");
@@ -386,10 +385,9 @@ describe("node bridge server", () => {
     const line3 = JSON.parse(await readLine2()) as { type: string };
     expect(line3.type).toBe("hello-ok");
 
-    await pollUntil(
-      async () => (lastAuthed?.nodeId === "n4" ? lastAuthed : null),
-      { timeoutMs: 3000 },
-    );
+    await pollUntil(async () => (lastAuthed?.nodeId === "n4" ? lastAuthed : null), {
+      timeoutMs: pairingTimeoutMs,
+    });
 
     expect(lastAuthed?.nodeId).toBe("n4");
     // Prefer paired metadata over hello payload (token verifies the stored node record).

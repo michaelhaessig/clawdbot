@@ -11,6 +11,20 @@ import {
 
 export const LEGACY_CONFIG_MIGRATIONS_PART_3: LegacyConfigMigration[] = [
   {
+    id: "auth.anthropic-claude-cli-mode-oauth",
+    describe: "Switch anthropic:claude-cli auth profile mode to oauth",
+    apply: (raw, changes) => {
+      const auth = getRecord(raw.auth);
+      const profiles = getRecord(auth?.profiles);
+      if (!profiles) return;
+      const claudeCli = getRecord(profiles["anthropic:claude-cli"]);
+      if (!claudeCli) return;
+      if (claudeCli.mode !== "token") return;
+      claudeCli.mode = "oauth";
+      changes.push('Updated auth.profiles["anthropic:claude-cli"].mode → "oauth".');
+    },
+  },
+  {
     id: "agent.defaults-v2",
     describe: "Move agent config to agents.defaults and tools",
     apply: (raw, changes) => {
@@ -106,9 +120,7 @@ export const LEGACY_CONFIG_MIGRATIONS_PART_3: LegacyConfigMigration[] = [
       const entry = ensureAgentEntry(list, defaultId);
       if (entry.identity === undefined) {
         entry.identity = identity;
-        changes.push(
-          `Moved identity → agents.list (id "${defaultId}").identity.`,
-        );
+        changes.push(`Moved identity → agents.list (id "${defaultId}").identity.`);
       } else {
         changes.push("Removed identity (agents.list identity already set).");
       }
@@ -121,10 +133,7 @@ export const LEGACY_CONFIG_MIGRATIONS_PART_3: LegacyConfigMigration[] = [
     id: "bind-tailnet->auto",
     describe: "Remap gateway/bridge bind 'tailnet' to 'auto'",
     apply: (raw, changes) => {
-      const migrateBind = (
-        obj: Record<string, unknown> | null | undefined,
-        key: string,
-      ) => {
+      const migrateBind = (obj: Record<string, unknown> | null | undefined, key: string) => {
         if (!obj) return;
         const bind = obj.bind;
         if (bind === "tailnet") {

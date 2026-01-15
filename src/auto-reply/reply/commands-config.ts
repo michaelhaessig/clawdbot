@@ -15,19 +15,16 @@ import {
   setConfigOverride,
   unsetConfigOverride,
 } from "../../config/runtime-overrides.js";
+import { resolveChannelConfigWrites } from "../../channels/plugins/config-writes.js";
+import { normalizeChannelId } from "../../channels/registry.js";
 import { logVerbose } from "../../globals.js";
 import type { CommandHandler } from "./commands-types.js";
 import { parseConfigCommand } from "./config-commands.js";
 import { parseDebugCommand } from "./debug-commands.js";
 
-export const handleConfigCommand: CommandHandler = async (
-  params,
-  allowTextCommands,
-) => {
+export const handleConfigCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) return null;
-  const configCommand = parseConfigCommand(
-    params.command.commandBodyNormalized,
-  );
+  const configCommand = parseConfigCommand(params.command.commandBodyNormalized);
   if (!configCommand) return null;
   if (!params.command.isAuthorizedSender) {
     logVerbose(
@@ -49,12 +46,30 @@ export const handleConfigCommand: CommandHandler = async (
       reply: { text: `⚠️ ${configCommand.message}` },
     };
   }
+
+  if (configCommand.action === "set" || configCommand.action === "unset") {
+    const channelId = params.command.channelId ?? normalizeChannelId(params.command.channel);
+    const allowWrites = resolveChannelConfigWrites({
+      cfg: params.cfg,
+      channelId,
+      accountId: params.ctx.AccountId,
+    });
+    if (!allowWrites) {
+      const channelLabel = channelId ?? "this channel";
+      const hint = channelId
+        ? `channels.${channelId}.configWrites=true`
+        : "channels.<channel>.configWrites=true";
+      return {
+        shouldContinue: false,
+        reply: {
+          text: `⚠️ Config writes are disabled for ${channelLabel}. Set ${hint} to enable.`,
+        },
+      };
+    }
+  }
+
   const snapshot = await readConfigFileSnapshot();
-  if (
-    !snapshot.valid ||
-    !snapshot.parsed ||
-    typeof snapshot.parsed !== "object"
-  ) {
+  if (!snapshot.valid || !snapshot.parsed || typeof snapshot.parsed !== "object") {
     return {
       shouldContinue: false,
       reply: {
@@ -62,9 +77,7 @@ export const handleConfigCommand: CommandHandler = async (
       },
     };
   }
-  const parsedBase = structuredClone(
-    snapshot.parsed as Record<string, unknown>,
-  );
+  const parsedBase = structuredClone(snapshot.parsed as Record<string, unknown>);
 
   if (configCommand.action === "show") {
     const pathRaw = configCommand.path?.trim();
@@ -159,10 +172,7 @@ export const handleConfigCommand: CommandHandler = async (
   return null;
 };
 
-export const handleDebugCommand: CommandHandler = async (
-  params,
-  allowTextCommands,
-) => {
+export const handleDebugCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) return null;
   const debugCommand = parseDebugCommand(params.command.commandBodyNormalized);
   if (!debugCommand) return null;

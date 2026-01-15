@@ -1,13 +1,15 @@
 import {
   resolveEffectiveMessagesConfig,
   resolveHumanDelayConfig,
+  resolveIdentityName,
 } from "../../agents/identity.js";
+import {
+  extractShortModelName,
+  type ResponsePrefixContext,
+} from "../../auto-reply/reply/response-prefix-template.js";
 import { formatAgentEnvelope } from "../../auto-reply/envelope.js";
 import { dispatchReplyFromConfig } from "../../auto-reply/reply/dispatch-from-config.js";
-import {
-  buildHistoryContextFromMap,
-  clearHistoryEntries,
-} from "../../auto-reply/reply/history.js";
+import { buildHistoryContextFromMap, clearHistoryEntries } from "../../auto-reply/reply/history.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { resolveStorePath, updateLastRoute } from "../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../globals.js";
@@ -31,10 +33,7 @@ import {
 } from "../identity.js";
 import { sendMessageSignal } from "../send.js";
 
-import type {
-  SignalEventHandlerDeps,
-  SignalReceivePayload,
-} from "./event-handler.types.js";
+import type { SignalEventHandlerDeps, SignalReceivePayload } from "./event-handler.types.js";
 
 export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
   return async (event: { event?: string; data?: string }) => {
@@ -60,8 +59,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       if (sender.e164 === normalizeE164(deps.account)) return;
     }
 
-    const dataMessage =
-      envelope.dataMessage ?? envelope.editMessage?.dataMessage;
+    const dataMessage = envelope.dataMessage ?? envelope.editMessage?.dataMessage;
     const reaction = deps.isSignalReactionMessage(envelope.reactionMessage)
       ? envelope.reactionMessage
       : deps.isSignalReactionMessage(dataMessage?.reaction)
@@ -70,8 +68,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const messageText = (dataMessage?.message ?? "").trim();
     const quoteText = dataMessage?.quote?.text?.trim() ?? "";
     const hasBodyContent =
-      Boolean(messageText || quoteText) ||
-      Boolean(!reaction && dataMessage?.attachments?.length);
+      Boolean(messageText || quoteText) || Boolean(!reaction && dataMessage?.attachments?.length);
 
     if (reaction && !hasBodyContent) {
       if (reaction.isRemove) return; // Ignore reaction removals
@@ -102,9 +99,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           id: isGroup ? (groupId ?? "unknown") : senderPeerId,
         },
       });
-      const groupLabel = isGroup
-        ? `${groupName ?? "Signal Group"} id:${groupId}`
-        : undefined;
+      const groupLabel = isGroup ? `${groupName ?? "Signal Group"} id:${groupId}` : undefined;
       const messageId = reaction.targetSentTimestamp
         ? String(reaction.targetSentTimestamp)
         : "unknown";
@@ -141,15 +136,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const groupId = dataMessage.groupInfo?.groupId ?? undefined;
     const groupName = dataMessage.groupInfo?.groupName ?? undefined;
     const isGroup = Boolean(groupId);
-    const storeAllowFrom = await readChannelAllowFromStore("signal").catch(
-      () => [],
-    );
+    const storeAllowFrom = await readChannelAllowFromStore("signal").catch(() => []);
     const effectiveDmAllow = [...deps.allowFrom, ...storeAllowFrom];
     const effectiveGroupAllow = [...deps.groupAllowFrom, ...storeAllowFrom];
     const dmAllowed =
-      deps.dmPolicy === "open"
-        ? true
-        : isSignalSenderAllowed(sender, effectiveDmAllow);
+      deps.dmPolicy === "open" ? true : isSignalSenderAllowed(sender, effectiveDmAllow);
 
     if (!isGroup) {
       if (deps.dmPolicy === "disabled") return;
@@ -179,15 +170,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
                 },
               );
             } catch (err) {
-              logVerbose(
-                `signal pairing reply failed for ${senderId}: ${String(err)}`,
-              );
+              logVerbose(`signal pairing reply failed for ${senderId}: ${String(err)}`);
             }
           }
         } else {
-          logVerbose(
-            `Blocked signal sender ${senderDisplay} (dmPolicy=${deps.dmPolicy})`,
-          );
+          logVerbose(`Blocked signal sender ${senderDisplay} (dmPolicy=${deps.dmPolicy})`);
         }
         return;
       }
@@ -198,15 +185,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     }
     if (isGroup && deps.groupPolicy === "allowlist") {
       if (effectiveGroupAllow.length === 0) {
-        logVerbose(
-          "Blocked signal group message (groupPolicy: allowlist, no groupAllowFrom)",
-        );
+        logVerbose("Blocked signal group message (groupPolicy: allowlist, no groupAllowFrom)");
         return;
       }
       if (!isSignalSenderAllowed(sender, effectiveGroupAllow)) {
-        logVerbose(
-          `Blocked signal group sender ${senderDisplay} (not in groupAllowFrom)`,
-        );
+        logVerbose(`Blocked signal group sender ${senderDisplay} (not in groupAllowFrom)`);
         return;
       }
     }
@@ -233,8 +216,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         });
         if (fetched) {
           mediaPath = fetched.path;
-          mediaType =
-            fetched.contentType ?? firstAttachment.contentType ?? undefined;
+          mediaType = fetched.contentType ?? firstAttachment.contentType ?? undefined;
         }
       } catch (err) {
         deps.runtime.error?.(danger(`attachment fetch failed: ${String(err)}`));
@@ -243,11 +225,9 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
 
     const kind = mediaKindFromMime(mediaType ?? undefined);
     if (kind) placeholder = `<media:${kind}>`;
-    else if (dataMessage.attachments?.length)
-      placeholder = "<media:attachment>";
+    else if (dataMessage.attachments?.length) placeholder = "<media:attachment>";
 
-    const bodyText =
-      messageText || placeholder || dataMessage.quote?.text?.trim() || "";
+    const bodyText = messageText || placeholder || dataMessage.quote?.text?.trim() || "";
     if (!bodyText) return;
 
     const fromLabel = isGroup
@@ -271,9 +251,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           body: bodyText,
           timestamp: envelope.timestamp ?? undefined,
           messageId:
-            typeof envelope.timestamp === "number"
-              ? String(envelope.timestamp)
-              : undefined,
+            typeof envelope.timestamp === "number" ? String(envelope.timestamp) : undefined,
         },
         currentMessage: combinedBody,
         formatEntry: (entry) =>
@@ -300,9 +278,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       Body: combinedBody,
       RawBody: bodyText,
       CommandBody: bodyText,
-      From: isGroup
-        ? `group:${groupId ?? "unknown"}`
-        : `signal:${senderRecipient}`,
+      From: isGroup ? `group:${groupId ?? "unknown"}` : `signal:${senderRecipient}`,
       To: signalTo,
       SessionKey: route.sessionKey,
       AccountId: route.accountId,
@@ -338,15 +314,19 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
 
     if (shouldLogVerbose()) {
       const preview = body.slice(0, 200).replace(/\n/g, "\\n");
-      logVerbose(
-        `signal inbound: from=${ctxPayload.From} len=${body.length} preview="${preview}"`,
-      );
+      logVerbose(`signal inbound: from=${ctxPayload.From} len=${body.length} preview="${preview}"`);
     }
 
     let didSendReply = false;
+
+    // Create mutable context for response prefix template interpolation
+    let prefixContext: ResponsePrefixContext = {
+      identityName: resolveIdentityName(deps.cfg, route.agentId),
+    };
+
     const dispatcher = createReplyDispatcher({
-      responsePrefix: resolveEffectiveMessagesConfig(deps.cfg, route.agentId)
-        .responsePrefix,
+      responsePrefix: resolveEffectiveMessagesConfig(deps.cfg, route.agentId).responsePrefix,
+      responsePrefixContextProvider: () => prefixContext,
       humanDelay: resolveHumanDelayConfig(deps.cfg, route.agentId),
       deliver: async (payload) => {
         await deps.deliverReplies({
@@ -362,9 +342,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         didSendReply = true;
       },
       onError: (err, info) => {
-        deps.runtime.error?.(
-          danger(`signal ${info.kind} reply failed: ${String(err)}`),
-        );
+        deps.runtime.error?.(danger(`signal ${info.kind} reply failed: ${String(err)}`));
       },
     });
 
@@ -374,9 +352,14 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       dispatcher,
       replyOptions: {
         disableBlockStreaming:
-          typeof deps.blockStreaming === "boolean"
-            ? !deps.blockStreaming
-            : undefined,
+          typeof deps.blockStreaming === "boolean" ? !deps.blockStreaming : undefined,
+        onModelSelected: (ctx) => {
+          // Mutate the object directly instead of reassigning to ensure the closure sees updates
+          prefixContext.provider = ctx.provider;
+          prefixContext.model = extractShortModelName(ctx.model);
+          prefixContext.modelFull = `${ctx.provider}/${ctx.model}`;
+          prefixContext.thinkingLevel = ctx.thinkLevel ?? "off";
+        },
       },
     });
     if (!queuedFinal) {
