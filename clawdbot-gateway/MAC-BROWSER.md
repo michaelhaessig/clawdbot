@@ -159,9 +159,26 @@ clawdbot browser stop
 
 To run the browser server persistently on Mac:
 
+### What Starts Automatically
+
+| Component | Auto-start | Notes |
+|-----------|------------|-------|
+| Browser Server | Yes | Starts at login via launchd |
+| Browser Instance | No | Start manually or from HA with `clawdbot browser start` |
+
+The browser server accepts commands but doesn't launch Chromium until you explicitly start it.
+
 ### Create Launch Agent
 
 Create `~/Library/LaunchAgents/com.clawdbot.browser-serve.plist`:
+
+**Note**: The `browser serve` command is only available in the development version. Use `npx tsx` to run from source.
+
+First, find your node path (especially if using nvm):
+```bash
+which node
+# Example: /Users/YOUR_USERNAME/.nvm/versions/node/v23.5.0/bin/node
+```
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -170,9 +187,13 @@ Create `~/Library/LaunchAgents/com.clawdbot.browser-serve.plist`:
 <dict>
     <key>Label</key>
     <string>com.clawdbot.browser-serve</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/code/clawdbot</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/Library/pnpm/clawdbot</string>
+        <string>/Users/YOUR_USERNAME/.nvm/versions/node/v23.5.0/bin/npx</string>
+        <string>tsx</string>
+        <string>src/entry.ts</string>
         <string>browser</string>
         <string>serve</string>
         <string>--bind</string>
@@ -190,11 +211,22 @@ Create `~/Library/LaunchAgents/com.clawdbot.browser-serve.plist`:
     <string>/tmp/clawdbot-browser-serve.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/clawdbot-browser-serve.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/YOUR_USERNAME/.nvm/versions/node/v23.5.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/YOUR_USERNAME</string>
+    </dict>
 </dict>
 </plist>
 ```
 
-Replace `YOUR_USERNAME` and `YOUR_TOKEN` with your values.
+Replace:
+- `YOUR_USERNAME` with your macOS username
+- `YOUR_TOKEN` with your chosen auth token
+- Node paths with your actual paths (from `which node`)
+- `WorkingDirectory` with your clawdbot repo path
 
 ### Load the Service
 
@@ -202,7 +234,7 @@ Replace `YOUR_USERNAME` and `YOUR_TOKEN` with your values.
 # Load and start
 launchctl load ~/Library/LaunchAgents/com.clawdbot.browser-serve.plist
 
-# Check status
+# Check status (exit code 0 = running)
 launchctl list | grep clawdbot
 
 # View logs
@@ -210,6 +242,18 @@ tail -f /tmp/clawdbot-browser-serve.log
 
 # Stop and unload
 launchctl unload ~/Library/LaunchAgents/com.clawdbot.browser-serve.plist
+```
+
+### Start Browser After Service Loads
+
+The service only starts the control server. To also start the browser:
+
+```bash
+# From Mac
+curl -X POST -H "Authorization: Bearer <your-token>" http://127.0.0.1:18791/start
+
+# Or from HA
+clawdbot browser start
 ```
 
 ## Headless vs Visible Mode
