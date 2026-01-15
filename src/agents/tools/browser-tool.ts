@@ -141,7 +141,10 @@ export function createBrowserTool(opts?: {
       const params = args as Record<string, unknown>;
       const action = readStringParam(params, "action", { required: true });
       const controlUrl = readStringParam(params, "controlUrl");
-      const profile = readStringParam(params, "profile");
+      const cfg = loadConfig();
+      const resolvedBrowser = resolveBrowserConfig(cfg.browser);
+      // Fall back to defaultProfile from config when not specified
+      const profile = readStringParam(params, "profile") || resolvedBrowser.defaultProfile;
       let target = readStringParam(params, "target") as "sandbox" | "host" | "custom" | undefined;
       if (profile === "chrome" && !target && !controlUrl?.trim()) {
         // Chrome extension relay takeover is a host Chrome feature; default to host even in sandboxed sessions.
