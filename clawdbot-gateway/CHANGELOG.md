@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.27
+
+- Add Playwright with bundled Chromium for browser automation (headless browser control)
+
 ## 2.0.26
 
 - Add `gog_keyring` config option to set `GOG_KEYRING_PASSWORD` env var for gogcli

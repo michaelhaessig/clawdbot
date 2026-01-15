@@ -84,6 +84,11 @@ RUN ARCH=$(dpkg --print-architecture) \
 # Install Gemini CLI (Google's AI agent for terminal)
 RUN npm install -g @google/gemini-cli
 
+# Install Playwright with bundled Chromium for browser automation
+# This installs both the browser and required system dependencies (libs, fonts)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN bunx playwright install --with-deps chromium
+
 # Copy startup script and build helper
 COPY clawdbot-gateway/run.sh /run.sh
 COPY clawdbot-gateway/build-tools.sh /opt/build-tools.sh
@@ -107,6 +112,8 @@ ENV NODE_ENV=production
 ENV CLAWDBOT_APP_DIR=/config/clawdbot-app
 ENV CLAWDBOT_STATE_DIR=/config/clawdbot
 ENV HOME=/config/clawdbot
+# Playwright browser location (set during install, needed at runtime)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
 # Working directory will be set by run.sh after installation
 WORKDIR /config
