@@ -192,6 +192,7 @@ export function registerBrowserAgentSnapshotRoutes(app: express.Express, ctx: Br
           interactive === true ||
           compact === true ||
           depth !== undefined ||
+          refsMode !== undefined ||
           Boolean(selector.trim()) ||
           Boolean(frameSelector.trim());
 
