@@ -6,21 +6,21 @@ This guide covers running a standalone browser server on macOS that can be contr
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  HA Server (192.168.1.200)                                              │
+│  HA Server                                                              │
 │                                                                         │
 │  clawdbot gateway                                                       │
 │       │                                                                 │
-│       │ browser.controlUrl: http://192.168.1.177:18791                  │
-│       │ browser.controlToken: miki                                      │
+│       │ browser.controlUrl: http://<mac-ip>:18791                       │
+│       │ browser.controlToken: <your-token>                              │
 │       │                                                                 │
 └───────┼─────────────────────────────────────────────────────────────────┘
         │
         │ HTTP requests (with Bearer token)
         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Mac (192.168.1.177)                                                    │
+│  Mac                                                                    │
 │                                                                         │
-│  clawdbot browser serve --bind 0.0.0.0 --port 18791 --token miki        │
+│  clawdbot browser serve --bind 0.0.0.0 --port 18791 --token <token>     │
 │       │                                                                 │
 │       ▼                                                                 │
 │  Playwright Chromium (visible or headless)                              │
@@ -38,7 +38,31 @@ On the Mac:
 
 ## Quick Start
 
-### 1. Start the Browser Server on Mac
+### 1. Configure Mac Browser Profile
+
+The browser tool defaults to the `chrome` profile. Override it to use Playwright instead of the Chrome extension relay.
+
+Edit `~/.clawdbot/clawdbot.json` on the Mac:
+
+```json
+{
+  "browser": {
+    "controlUrl": "http://0.0.0.0:18791",
+    "enabled": true,
+    "defaultProfile": "chrome",
+    "profiles": {
+      "chrome": {
+        "cdpPort": 18800,
+        "color": "#FF4500"
+      }
+    }
+  }
+}
+```
+
+This overrides the built-in `chrome` profile (which expects the extension relay) to use Playwright on port 18800.
+
+### 2. Start the Browser Server on Mac
 
 ```bash
 # Start browser server bound to network interface
@@ -50,18 +74,13 @@ Options:
 - `--port 18791` - Port to listen on (default: 18791)
 - `--token <token>` - Bearer token for authentication (required when binding to non-loopback)
 
-Example:
-```bash
-clawdbot browser serve --bind 0.0.0.0 --port 18791 --token miki
-```
-
 Output:
 ```
 🦞 Browser control listening on http://0.0.0.0:18791/
 Auth: Bearer token required.
 ```
 
-### 2. Configure HA Gateway
+### 3. Configure HA Gateway
 
 Edit `/config/clawdbot/clawdbot.json` on the HA server:
 
@@ -70,63 +89,35 @@ Edit `/config/clawdbot/clawdbot.json` on the HA server:
   "browser": {
     "enabled": true,
     "controlUrl": "http://<mac-ip>:18791",
-    "controlToken": "<your-token>"
+    "controlToken": "<your-token>",
+    "defaultProfile": "chrome"
   }
 }
 ```
 
-Example:
-```json
-{
-  "browser": {
-    "enabled": true,
-    "controlUrl": "http://192.168.1.177:18791",
-    "controlToken": "miki"
-  }
-}
-```
+Replace `<mac-ip>` with your Mac's LAN IP (e.g., `192.168.1.177`) and `<your-token>` with the same token used on the Mac.
 
 Alternatively, set the token via environment variable:
 ```bash
-export CLAWDBOT_BROWSER_CONTROL_TOKEN="miki"
+export CLAWDBOT_BROWSER_CONTROL_TOKEN="<your-token>"
 ```
 
-### 3. Restart HA Addon
+### 4. Restart HA Addon
 
 Restart the Clawdbot Gateway addon to pick up the new config.
 
-## Starting the Browser
+### 5. Start the Browser
 
-The browser server controls browser instances but doesn't start one automatically. Start a browser instance:
-
-### From HA (via CLI)
+Start a browser instance on the Mac:
 
 ```bash
-# Start browser with default profile
+# From HA
 clawdbot browser start
 
-# Start with specific profile
-clawdbot browser start --browser-profile clawd
+# Or start locally on Mac first
+curl -X POST -H "Authorization: Bearer <your-token>" \
+  "http://127.0.0.1:18791/start"
 ```
-
-### Via API (direct)
-
-```bash
-# Start browser (POST request with auth)
-curl -X POST -H "Authorization: Bearer miki" \
-  "http://192.168.1.177:18791/start?profile=clawd"
-```
-
-## Browser Profiles
-
-Profiles allow separate browser instances with isolated data:
-
-| Profile | Description |
-|---------|-------------|
-| `clawd` | Default Playwright profile (recommended) |
-| `chrome` | Uses Chrome extension relay (requires extension) |
-
-Use `clawd` profile for automation - it's a dedicated Playwright Chromium instance.
 
 ## Common Commands (from HA)
 
@@ -137,7 +128,7 @@ Once configured, run browser commands from HA:
 clawdbot browser status
 
 # Start browser
-clawdbot browser start --browser-profile clawd
+clawdbot browser start
 
 # Open a URL
 clawdbot browser open https://example.com
@@ -241,7 +232,7 @@ To run headless, set in Mac's `~/.clawdbot/clawdbot.json`:
 
 1. Verify browser server is running on Mac:
    ```bash
-   curl -H "Authorization: Bearer miki" http://127.0.0.1:18791/
+   curl -H "Authorization: Bearer <your-token>" http://127.0.0.1:18791/
    ```
 
 2. Check Mac firewall allows incoming connections on port 18791
@@ -249,12 +240,20 @@ To run headless, set in Mac's `~/.clawdbot/clawdbot.json`:
 3. Verify network connectivity:
    ```bash
    # From HA
-   curl -H "Authorization: Bearer miki" http://<mac-ip>:18791/
+   curl -H "Authorization: Bearer <your-token>" http://<mac-ip>:18791/
    ```
 
 ### 401 Unauthorized
 
 The token doesn't match. Ensure `controlToken` in HA config matches `--token` on Mac.
+
+### Browser Tool Uses Wrong Profile
+
+If the browser tool tries to use the Chrome extension relay instead of Playwright, ensure:
+
+1. Mac's `~/.clawdbot/clawdbot.json` has the `profiles.chrome` override (see Quick Start step 1)
+2. Restart the browser server after config changes
+3. HA config has `defaultProfile: "chrome"` set
 
 ### Browser Won't Start
 
