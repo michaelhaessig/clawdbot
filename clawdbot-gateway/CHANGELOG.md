@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.28
+
+- Comment out Playwright/Chromium install (saves ~400MB) - use remote Mac browser instead
+- Add MAC-BROWSER.md documenting remote browser setup via `clawdbot browser serve`
+
 ## 2.0.27
 
 - Add Playwright with bundled Chromium for browser automation (headless browser control)
