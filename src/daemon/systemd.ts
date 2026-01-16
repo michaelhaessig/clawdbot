@@ -10,6 +10,7 @@ import {
 } from "./constants.js";
 import { parseKeyValueOutput } from "./runtime-parse.js";
 import type { GatewayServiceRuntime } from "./service-runtime.js";
+import { resolveHomeDir } from "./paths.js";
 import {
   enableSystemdUserLinger,
   readSystemdUserLingerStatus,
@@ -22,24 +23,19 @@ import {
 } from "./systemd-unit.js";
 
 const execFileAsync = promisify(execFile);
+const toPosixPath = (value: string) => value.replace(/\\/g, "/");
 
 const formatLine = (label: string, value: string) => {
   const rich = isRich();
   return `${colorize(rich, theme.muted, `${label}:`)} ${colorize(rich, theme.command, value)}`;
 };
 
-function resolveHomeDir(env: Record<string, string | undefined>): string {
-  const home = env.HOME?.trim() || env.USERPROFILE?.trim();
-  if (!home) throw new Error("Missing HOME");
-  return home;
-}
-
 function resolveSystemdUnitPathForName(
   env: Record<string, string | undefined>,
   name: string,
 ): string {
-  const home = resolveHomeDir(env);
-  return path.join(home, ".config", "systemd", "user", `${name}.service`);
+  const home = toPosixPath(resolveHomeDir(env));
+  return path.posix.join(home, ".config", "systemd", "user", `${name}.service`);
 }
 
 function resolveSystemdServiceName(env: Record<string, string | undefined>): string {

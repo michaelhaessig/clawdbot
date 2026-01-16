@@ -54,7 +54,7 @@ They run immediately, are stripped before the model sees the message, and the re
 Text + native (when enabled):
 - `/help`
 - `/commands`
-- `/status` (show current status; includes a short provider usage/quota line when available)
+- `/status` (show current status; includes provider usage/quota when available, plus OAuth/token status block when OAuth profiles exist)
 - `/context [list|detail|json]` (explain “context”; `detail` shows per-file + per-tool + per-skill + system prompt size)
 - `/usage` (alias: `/status`)
 - `/whoami` (show your sender id; alias: `/id`)
@@ -96,6 +96,7 @@ Notes:
   - Example: `hey /status` triggers a status reply, and the remaining text continues through the normal flow.
   - Currently: `/help`, `/commands`, `/status` (`/usage`), `/whoami` (`/id`).
 - Unauthorized command-only messages are silently ignored, and inline `/...` tokens are treated as plain text.
+- **Skill commands:** `user-invocable` skills are exposed as slash commands. Names are sanitized to `a-z0-9_` (max 32 chars); collisions get numeric suffixes (e.g. `_2`).
 - **Native command arguments:** Discord uses autocomplete for dynamic options (and button menus when you omit required args). Telegram and Slack show a button menu when a command supports choices and you omit the arg.
 
 ## Usage vs cost (what shows where)

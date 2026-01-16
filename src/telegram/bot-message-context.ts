@@ -17,7 +17,7 @@ import {
   buildSenderName,
   buildTelegramGroupFrom,
   buildTelegramGroupPeerId,
-  buildTelegramThreadParams,
+  buildTypingThreadParams,
   describeReplyTarget,
   extractTelegramLocation,
   hasBotMention,
@@ -92,9 +92,21 @@ export const buildTelegramMessageContext = async ({
 
   const sendTyping = async () => {
     try {
-      await bot.api.sendChatAction(chatId, "typing", buildTelegramThreadParams(resolvedThreadId));
+      await bot.api.sendChatAction(chatId, "typing", buildTypingThreadParams(resolvedThreadId));
     } catch (err) {
       logVerbose(`telegram typing cue failed for chat ${chatId}: ${String(err)}`);
+    }
+  };
+
+  const sendRecordVoice = async () => {
+    try {
+      await bot.api.sendChatAction(
+        chatId,
+        "record_voice",
+        buildTypingThreadParams(resolvedThreadId),
+      );
+    } catch (err) {
+      logVerbose(`telegram record_voice cue failed for chat ${chatId}: ${String(err)}`);
     }
   };
 
@@ -408,6 +420,7 @@ export const buildTelegramMessageContext = async ({
     route,
     skillFilter,
     sendTyping,
+    sendRecordVoice,
     ackReactionPromise,
     reactionApi,
     removeAckAfterReply,

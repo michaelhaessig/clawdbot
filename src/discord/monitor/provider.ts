@@ -3,6 +3,8 @@ import { GatewayIntents, GatewayPlugin } from "@buape/carbon/gateway";
 import { Routes } from "discord-api-types/v10";
 import { resolveTextChunkLimit } from "../../auto-reply/chunk.js";
 import { listNativeCommandSpecsForConfig } from "../../auto-reply/commands-registry.js";
+import { listSkillCommandsForWorkspace } from "../../auto-reply/skill-commands.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import type { HistoryEntry } from "../../auto-reply/reply/history.js";
 import {
   isNativeCommandsExplicitlyDisabled,
@@ -116,7 +118,15 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     throw new Error("Failed to resolve Discord application id");
   }
 
-  const commandSpecs = nativeEnabled ? listNativeCommandSpecsForConfig(cfg) : [];
+  const skillCommands = nativeEnabled
+    ? listSkillCommandsForWorkspace({
+        workspaceDir: resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg)),
+        cfg,
+      })
+    : [];
+  const commandSpecs = nativeEnabled
+    ? listNativeCommandSpecsForConfig(cfg, { skillCommands })
+    : [];
   const commands = commandSpecs.map((spec) =>
     createDiscordNativeCommand({
       command: spec,
@@ -136,11 +146,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
       publicKey: "a",
       token,
       autoDeploy: nativeEnabled,
-      eventQueue: {
-        // Auto-threading (create thread + generate reply + post) can exceed the default
-        // 30s listener timeout in some environments.
-        listenerTimeout: 120_000,
-      },
     },
     {
       commands,

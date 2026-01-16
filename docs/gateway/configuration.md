@@ -822,6 +822,31 @@ Controls how inbound messages behave when an agent run is already active.
 }
 ```
 
+### `messages.inbound`
+
+Debounce rapid inbound messages from the **same sender** so multiple back-to-back
+messages become a single agent turn. Debouncing is scoped per channel + conversation
+and uses the most recent message for reply threading/IDs.
+
+```json5
+{
+  messages: {
+    inbound: {
+      debounceMs: 2000, // 0 disables
+      byChannel: {
+        whatsapp: 5000,
+        slack: 1500,
+        discord: 1500
+      }
+    }
+  }
+}
+```
+
+Notes:
+- Debounce batches **text-only** messages; media/attachments flush immediately.
+- Control commands (e.g. `/queue`, `/new`) bypass debouncing so they stay standalone.
+
 ### `commands` (chat command handling)
 
 Controls how chat commands are enabled across connectors.
@@ -846,6 +871,7 @@ Notes:
 - `commands.text: false` disables parsing chat messages for commands.
 - `commands.native: "auto"` (default) turns on native commands for Discord/Telegram and leaves Slack off; unsupported channels stay text-only.
 - Set `commands.native: true|false` to force all, or override per channel with `channels.discord.commands.native`, `channels.telegram.commands.native`, `channels.slack.commands.native` (bool or `"auto"`). `false` clears previously registered commands on Discord/Telegram at startup; Slack commands are managed in the Slack app.
+- `channels.telegram.customCommands` adds extra Telegram bot menu entries. Names are normalized; conflicts with native commands are ignored.
 - `commands.bash: true` enables `! <cmd>` to run host shell commands (`/bash <cmd>` also works as an alias). Requires `tools.elevated.enabled` and allowlisting the sender in `tools.elevated.allowFrom.<channel>`.
 - `commands.bashForegroundMs` controls how long bash waits before backgrounding. While a bash job is running, new `! <cmd>` requests are rejected (one at a time).
 - `commands.config: true` enables `/config` (reads/writes `clawdbot.json`).
@@ -904,6 +930,10 @@ Set `channels.telegram.configWrites: false` to block Telegram-initiated config w
           }
         }
       },
+      customCommands: [
+        { command: "backup", description: "Git backup" },
+        { command: "generate", description: "Create an image" }
+      ],
       historyLimit: 50,                     // include last N group messages as context (0 disables)
       replyToMode: "first",                 // off | first | all
       streamMode: "partial",               // off | partial | block (draft streaming; separate from block streaming)
@@ -1211,6 +1241,17 @@ message envelopes). If unset, Clawdbot uses the host timezone at runtime.
 }
 ```
 
+### `agents.defaults.timeFormat`
+
+Controls the **time format** shown in the system prompt’s Current Date & Time section.
+Default: `auto` (OS preference).
+
+```json5
+{
+  agents: { defaults: { timeFormat: "auto" } } // auto | 12 | 24
+}
+```
+
 ### `messages`
 
 Controls inbound/outbound prefixes and optional ack reactions.
@@ -1230,7 +1271,9 @@ See [Messages](/concepts/messages) for queueing, sessions, and streaming context
 `responsePrefix` is applied to **all outbound replies** (tool summaries, block
 streaming, final replies) across channels unless already present.
 
-If `messages.responsePrefix` is unset, no prefix is applied by default.
+If `messages.responsePrefix` is unset, no prefix is applied by default. WhatsApp self-chat
+replies are the exception: they default to `[{identity.name}]` when set, otherwise
+`[clawdbot]`, so same-phone conversations stay legible.
 Set it to `"auto"` to derive `[{identity.name}]` for the routed agent (when set).
 
 #### Template variables
@@ -1639,8 +1682,13 @@ Z.AI models are available as `zai/<model>` (e.g. `zai/glm-4.7`) and require
 - `includeReasoning`: when `true`, heartbeats will also deliver the separate `Reasoning:` message when available (same shape as `/reasoning on`). Default: `false`.
 - `target`: optional delivery channel (`last`, `whatsapp`, `telegram`, `discord`, `slack`, `signal`, `imessage`, `none`). Default: `last`.
 - `to`: optional recipient override (channel-specific id, e.g. E.164 for WhatsApp, chat id for Telegram).
-- `prompt`: optional override for the heartbeat body (default: `Read HEARTBEAT.md if exists. Consider outstanding tasks. Checkup sometimes on your human during (user local) day time.`). Overrides are sent verbatim; include a `Read HEARTBEAT.md if exists` line if you still want the file read.
+- `prompt`: optional override for the heartbeat body (default: `Read HEARTBEAT.md if it exists (workspace context). Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.`). Overrides are sent verbatim; include a `Read HEARTBEAT.md` line if you still want the file read.
 - `ackMaxChars`: max chars allowed after `HEARTBEAT_OK` before delivery (default: 300).
+
+Per-agent heartbeats:
+- Set `agents.list[].heartbeat` to enable or override heartbeat settings for a specific agent.
+- If any agent entry defines `heartbeat`, **only those agents** run heartbeats; defaults
+  become the shared baseline for those agents.
 
 Heartbeats run full agent turns. Shorter intervals burn more tokens; be mindful
 of `every`, keep `HEARTBEAT.md` tiny, and/or choose a cheaper `model`.
@@ -2220,6 +2268,7 @@ Controls session scoping, idle expiry, reset triggers, and where the session sto
 {
   session: {
     scope: "per-sender",
+    dmScope: "main",
     idleMinutes: 60,
     resetTriggers: ["/new", "/reset"],
     // Default is already per-agent under ~/.clawdbot/agents/<agentId>/sessions/sessions.json
@@ -2244,6 +2293,10 @@ Controls session scoping, idle expiry, reset triggers, and where the session sto
 Fields:
 - `mainKey`: direct-chat bucket key (default: `"main"`). Useful when you want to “rename” the primary DM thread without changing `agentId`.
   - Sandbox note: `agents.defaults.sandbox.mode: "non-main"` uses this key to detect the main session. Any session key that does not match `mainKey` (groups/channels) is sandboxed.
+- `dmScope`: how DM sessions are grouped (default: `"main"`).
+  - `main`: all DMs share the main session for continuity.
+  - `per-peer`: isolate DMs by sender id across channels.
+  - `per-channel-peer`: isolate DMs per channel + sender (recommended for multi-user inboxes).
 - `agentToAgent.maxPingPongTurns`: max reply-back turns between requester/target (0–5, default 5).
 - `sendPolicy.default`: `allow` or `deny` fallback when no rule matches.
 - `sendPolicy.rules[]`: match by `channel`, `chatType` (`direct|group|room`), or `keyPrefix` (e.g. `cron:`). First deny wins; otherwise allow.
@@ -2335,10 +2388,10 @@ Example:
 }
 ```
 
-### `browser` (clawd-managed Chrome)
+### `browser` (clawd-managed browser)
 
-Clawdbot can start a **dedicated, isolated** Chrome/Chromium instance for clawd and expose a small loopback control server.
-Profiles can point at a **remote** Chrome via `profiles.<name>.cdpUrl`. Remote
+Clawdbot can start a **dedicated, isolated** Chrome/Brave/Edge/Chromium instance for clawd and expose a small loopback control server.
+Profiles can point at a **remote** Chromium-based browser via `profiles.<name>.cdpUrl`. Remote
 profiles are attach-only (start/stop/reset are disabled).
 
 `browser.cdpUrl` remains for legacy single-profile configs and as the base
@@ -2350,6 +2403,7 @@ Defaults:
 - CDP URL: `http://127.0.0.1:18792` (control URL + 1, legacy single-profile)
 - profile color: `#FF4500` (lobster-orange)
 - Note: the control server is started by the running gateway (Clawdbot.app menubar, or `clawdbot gateway`).
+- Auto-detect order: default browser if Chromium-based; otherwise Chrome → Brave → Edge → Chromium → Chrome Canary.
 
 ```json5
 {
@@ -2367,7 +2421,7 @@ Defaults:
     // Advanced:
     // headless: false,
     // noSandbox: false,
-    // executablePath: "/usr/bin/chromium",
+    // executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     // attachOnly: false, // set true when tunneling a remote CDP to localhost
   }
 }
@@ -2685,12 +2739,29 @@ Bind modes:
 - `loopback`: `127.0.0.1` (local only)
 - `auto`: prefer tailnet IP if present, else `lan`
 
+TLS:
+- `bridge.tls.enabled`: enable TLS for bridge connections (TLS-only when enabled).
+- `bridge.tls.autoGenerate`: generate a self-signed cert when no cert/key are present (default: true).
+- `bridge.tls.certPath` / `bridge.tls.keyPath`: PEM paths for the bridge certificate + private key.
+- `bridge.tls.caPath`: optional PEM CA bundle (custom roots or future mTLS).
+
+When TLS is enabled, the Gateway advertises `bridgeTls=1` and `bridgeTlsSha256` in discovery TXT
+records so nodes can pin the certificate. Manual connections use trust-on-first-use if no
+fingerprint is stored yet.
+Auto-generated certs require `openssl` on PATH; if generation fails, the bridge will not start.
+
 ```json5
 {
   bridge: {
     enabled: true,
     port: 18790,
-    bind: "tailnet"
+    bind: "tailnet",
+    tls: {
+      enabled: true,
+      // Uses ~/.clawdbot/bridge/tls/bridge-{cert,key}.pem when omitted.
+      // certPath: "~/.clawdbot/bridge/tls/bridge-cert.pem",
+      // keyPath: "~/.clawdbot/bridge/tls/bridge-key.pem"
+    }
   }
 }
 ```

@@ -23,6 +23,7 @@ export { sanitizeGoogleTurnOrdering };
 type GeminiToolCallBlock = {
   type?: unknown;
   thought_signature?: unknown;
+  thoughtSignature?: unknown;
   id?: unknown;
   toolCallId?: unknown;
   name?: unknown;
@@ -62,9 +63,9 @@ export function downgradeGeminiThinkingBlocks(messages: AgentMessage[]): AgentMe
       if (!block || typeof block !== "object") return [block as AssistantContentBlock];
       const record = block as GeminiThinkingBlock;
       if (record.type !== "thinking") return [block];
-      const signature =
+      const thinkingSig =
         typeof record.thinkingSignature === "string" ? record.thinkingSignature.trim() : "";
-      if (signature.length > 0) return [block];
+      if (thinkingSig.length > 0) return [block];
       const thinking = typeof record.thinking === "string" ? record.thinking : "";
       const trimmed = thinking.trim();
       hasDowngraded = true;
@@ -118,7 +119,8 @@ export function downgradeGeminiHistory(messages: AgentMessage[]): AgentMessage[]
         const blockRecord = block as GeminiToolCallBlock;
         const type = blockRecord.type;
         if (type === "toolCall" || type === "functionCall" || type === "toolUse") {
-          const hasSignature = Boolean(blockRecord.thought_signature);
+          const signature = blockRecord.thought_signature ?? blockRecord.thoughtSignature;
+          const hasSignature = Boolean(signature);
           if (!hasSignature) {
             const id =
               typeof blockRecord.id === "string"

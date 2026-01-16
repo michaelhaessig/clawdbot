@@ -120,6 +120,8 @@ const FIELD_LABELS: Record<string, string> = {
   "gateway.http.endpoints.chatCompletions.enabled": "OpenAI Chat Completions Endpoint",
   "gateway.reload.mode": "Config Reload Mode",
   "gateway.reload.debounceMs": "Config Reload Debounce (ms)",
+  "skills.load.watch": "Watch Skills",
+  "skills.load.watchDebounceMs": "Skills Watch Debounce (ms)",
   "agents.defaults.workspace": "Workspace",
   "agents.defaults.bootstrapMaxChars": "Bootstrap Max Chars",
   "agents.defaults.memorySearch": "Memory Search",
@@ -165,12 +167,17 @@ const FIELD_LABELS: Record<string, string> = {
   "commands.useAccessGroups": "Use Access Groups",
   "ui.seamColor": "Accent Color",
   "browser.controlUrl": "Browser Control URL",
+  "browser.remoteCdpTimeoutMs": "Remote CDP Timeout (ms)",
+  "browser.remoteCdpHandshakeTimeoutMs": "Remote CDP Handshake Timeout (ms)",
+  "session.dmScope": "DM Session Scope",
   "session.agentToAgent.maxPingPongTurns": "Agent-to-Agent Ping-Pong Turns",
   "messages.ackReaction": "Ack Reaction Emoji",
   "messages.ackReactionScope": "Ack Reaction Scope",
+  "messages.inbound.debounceMs": "Inbound Message Debounce (ms)",
   "talk.apiKey": "Talk API Key",
   "channels.whatsapp": "WhatsApp",
   "channels.telegram": "Telegram",
+  "channels.telegram.customCommands": "Telegram Custom Commands",
   "channels.discord": "Discord",
   "channels.slack": "Slack",
   "channels.signal": "Signal",
@@ -189,6 +196,7 @@ const FIELD_LABELS: Record<string, string> = {
   "channels.telegram.timeoutSeconds": "Telegram API Timeout (seconds)",
   "channels.whatsapp.dmPolicy": "WhatsApp DM Policy",
   "channels.whatsapp.selfChatMode": "WhatsApp Self-Phone Mode",
+  "channels.whatsapp.debounceMs": "WhatsApp Message Debounce (ms)",
   "channels.signal.dmPolicy": "Signal DM Policy",
   "channels.imessage.dmPolicy": "iMessage DM Policy",
   "channels.discord.dm.policy": "Discord DM Policy",
@@ -202,6 +210,8 @@ const FIELD_LABELS: Record<string, string> = {
   "channels.discord.token": "Discord Bot Token",
   "channels.slack.botToken": "Slack Bot Token",
   "channels.slack.appToken": "Slack App Token",
+  "channels.slack.userToken": "Slack User Token",
+  "channels.slack.userTokenReadOnly": "Slack User Token Read Only",
   "channels.slack.thread.historyScope": "Slack Thread History Scope",
   "channels.slack.thread.inheritParent": "Slack Thread Parent Inheritance",
   "channels.signal.account": "Signal Account",
@@ -213,6 +223,13 @@ const FIELD_LABELS: Record<string, string> = {
   "plugins.entries": "Plugin Entries",
   "plugins.entries.*.enabled": "Plugin Enabled",
   "plugins.entries.*.config": "Plugin Config",
+  "plugins.installs": "Plugin Install Records",
+  "plugins.installs.*.source": "Plugin Install Source",
+  "plugins.installs.*.spec": "Plugin Install Spec",
+  "plugins.installs.*.sourcePath": "Plugin Install Source Path",
+  "plugins.installs.*.installPath": "Plugin Install Path",
+  "plugins.installs.*.version": "Plugin Install Version",
+  "plugins.installs.*.installedAt": "Plugin Install Time",
 };
 
 const FIELD_HELP: Record<string, string> = {
@@ -284,6 +301,15 @@ const FIELD_HELP: Record<string, string> = {
   "plugins.entries": "Per-plugin settings keyed by plugin id (enable/disable + config payloads).",
   "plugins.entries.*.enabled": "Overrides plugin enable/disable for this entry (restart required).",
   "plugins.entries.*.config": "Plugin-defined config payload (schema is provided by the plugin).",
+  "plugins.installs":
+    "CLI-managed install metadata (used by `clawdbot plugins update` to locate install sources).",
+  "plugins.installs.*.source": 'Install source ("npm", "archive", or "path").',
+  "plugins.installs.*.spec": "Original npm spec used for install (if source is npm).",
+  "plugins.installs.*.sourcePath": "Original archive/path used for install (if any).",
+  "plugins.installs.*.installPath":
+    "Resolved install directory (usually ~/.clawdbot/extensions/<id>).",
+  "plugins.installs.*.version": "Version recorded at install time (if available).",
+  "plugins.installs.*.installedAt": "ISO timestamp of last install/update.",
   "agents.defaults.model.primary": "Primary model (provider/model).",
   "agents.defaults.model.fallbacks":
     "Ordered fallback models (provider/model). Used when the primary model fails.",
@@ -305,6 +331,8 @@ const FIELD_HELP: Record<string, string> = {
   "commands.debug": "Allow /debug chat command for runtime-only overrides (default: false).",
   "commands.restart": "Allow /restart and gateway restart tool actions (default: false).",
   "commands.useAccessGroups": "Enforce access-group allowlists/policies for commands.",
+  "session.dmScope":
+    'DM session scoping: "main" keeps continuity; "per-peer" or "per-channel-peer" isolates DM history (recommended for shared inboxes).',
   "channels.telegram.configWrites":
     "Allow Telegram to write config in response to channel events/commands (default: true).",
   "channels.slack.configWrites":
@@ -324,9 +352,13 @@ const FIELD_HELP: Record<string, string> = {
   "channels.slack.commands.native": 'Override native commands for Slack (bool or "auto").',
   "session.agentToAgent.maxPingPongTurns":
     "Max reply-back turns between requester and target (0–5).",
+  "channels.telegram.customCommands":
+    "Additional Telegram bot menu commands (merged with native; conflicts ignored).",
   "messages.ackReaction": "Emoji reaction used to acknowledge inbound messages (empty disables).",
   "messages.ackReactionScope":
     'When to send ack reactions ("group-mentions", "group-all", "direct", "all").',
+  "messages.inbound.debounceMs":
+    "Debounce window (ms) for batching rapid inbound messages from the same sender (0 to disable).",
   "channels.telegram.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires channels.telegram.allowFrom=["*"].',
   "channels.telegram.streamMode":
@@ -348,6 +380,8 @@ const FIELD_HELP: Record<string, string> = {
   "channels.whatsapp.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires channels.whatsapp.allowFrom=["*"].',
   "channels.whatsapp.selfChatMode": "Same-phone setup (bot uses your personal WhatsApp number).",
+  "channels.whatsapp.debounceMs":
+    "Debounce window (ms) for batching rapid consecutive messages from the same sender (0 to disable).",
   "channels.signal.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires channels.signal.allowFrom=["*"].',
   "channels.imessage.dmPolicy":

@@ -35,9 +35,11 @@ See [Voice Call](/plugins/voice-call) for a concrete example plugin.
 
 ## Available plugins (official)
 
+- Microsoft Teams is plugin-only as of 2026.1.15; install `@clawdbot/msteams` if you use Teams.
 - [Voice Call](/plugins/voice-call) — `@clawdbot/voice-call`
 - [Matrix](/channels/matrix) — `@clawdbot/matrix`
 - [Zalo](/channels/zalo) — `@clawdbot/zalo`
+- [Microsoft Teams](/channels/msteams) — `@clawdbot/msteams`
 
 Clawdbot plugins are **TypeScript modules** loaded at runtime via jiti. They can
 register:
@@ -158,10 +160,14 @@ clawdbot plugins install <path>              # add a local file/dir to plugins.l
 clawdbot plugins install ./extensions/voice-call # relative path ok
 clawdbot plugins install ./plugin.tgz        # install from a local tarball
 clawdbot plugins install @clawdbot/voice-call # install from npm
+clawdbot plugins update <id>
+clawdbot plugins update --all
 clawdbot plugins enable <id>
 clawdbot plugins disable <id>
 clawdbot plugins doctor
 ```
+
+`plugins update` only works for npm installs tracked under `plugins.installs`.
 
 Plugins may also register their own top‑level commands (example: `clawdbot voicecall`).
 
@@ -171,6 +177,56 @@ Plugins export either:
 
 - A function: `(api) => { ... }`
 - An object: `{ id, name, configSchema, register(api) { ... } }`
+
+## Provider plugins (model auth)
+
+Plugins can register **model provider auth** flows so users can run OAuth or
+API-key setup inside Clawdbot (no external scripts needed).
+
+Register a provider via `api.registerProvider(...)`. Each provider exposes one
+or more auth methods (OAuth, API key, device code, etc.). These methods power:
+
+- `clawdbot models auth login --provider <id> [--method <id>]`
+
+Example:
+
+```ts
+api.registerProvider({
+  id: "acme",
+  label: "AcmeAI",
+  auth: [
+    {
+      id: "oauth",
+      label: "OAuth",
+      kind: "oauth",
+      run: async (ctx) => {
+        // Run OAuth flow and return auth profiles.
+        return {
+          profiles: [
+            {
+              profileId: "acme:default",
+              credential: {
+                type: "oauth",
+                provider: "acme",
+                access: "...",
+                refresh: "...",
+                expires: Date.now() + 3600 * 1000,
+              },
+            },
+          ],
+          defaultModel: "acme/opus-1",
+        };
+      },
+    },
+  ],
+});
+```
+
+Notes:
+- `run` receives a `ProviderAuthContext` with `prompter`, `runtime`,
+  `openUrl`, and `oauth.createVpsAwareHandlers` helpers.
+- Return `configPatch` when you need to add default models or provider config.
+- Return `defaultModel` so `--set-default` can update agent defaults.
 
 ### Register a messaging channel
 

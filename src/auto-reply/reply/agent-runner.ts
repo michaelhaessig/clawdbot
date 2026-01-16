@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { setCliSessionId } from "../../agents/cli-session.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -8,9 +9,10 @@ import { queueEmbeddedPiMessage } from "../../agents/pi-embedded.js";
 import { hasNonzeroUsage } from "../../agents/usage.js";
 import {
   resolveAgentIdFromSessionKey,
+  resolveSessionFilePath,
   resolveSessionTranscriptPath,
   type SessionEntry,
-  saveSessionStore,
+  updateSessionStore,
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
@@ -156,7 +158,9 @@ export async function runReplyAgent(params: {
         activeSessionEntry.updatedAt = Date.now();
         activeSessionStore[sessionKey] = activeSessionEntry;
         if (storePath) {
-          await saveSessionStore(storePath, activeSessionStore);
+          await updateSessionStore(storePath, (store) => {
+            store[sessionKey] = activeSessionEntry as SessionEntry;
+          });
         }
       }
       typing.cleanup();
@@ -170,7 +174,9 @@ export async function runReplyAgent(params: {
       activeSessionEntry.updatedAt = Date.now();
       activeSessionStore[sessionKey] = activeSessionEntry;
       if (storePath) {
-        await saveSessionStore(storePath, activeSessionStore);
+        await updateSessionStore(storePath, (store) => {
+          store[sessionKey] = activeSessionEntry as SessionEntry;
+        });
       }
     }
     typing.cleanup();
@@ -205,11 +211,23 @@ export async function runReplyAgent(params: {
   });
 
   let responseUsageLine: string | undefined;
-  const resetSessionAfterCompactionFailure = async (reason: string): Promise<boolean> => {
+  type SessionResetOptions = {
+    failureLabel: string;
+    buildLogMessage: (nextSessionId: string) => string;
+    cleanupTranscripts?: boolean;
+  };
+  const resetSession = async ({
+    failureLabel,
+    buildLogMessage,
+    cleanupTranscripts,
+  }: SessionResetOptions): Promise<boolean> => {
     if (!sessionKey || !activeSessionStore || !storePath) return false;
+    const prevEntry = activeSessionStore[sessionKey] ?? activeSessionEntry;
+    if (!prevEntry) return false;
+    const prevSessionId = cleanupTranscripts ? prevEntry.sessionId : undefined;
     const nextSessionId = crypto.randomUUID();
     const nextEntry: SessionEntry = {
-      ...(activeSessionStore[sessionKey] ?? activeSessionEntry),
+      ...prevEntry,
       sessionId: nextSessionId,
       updatedAt: Date.now(),
       systemSent: false,
@@ -224,21 +242,47 @@ export async function runReplyAgent(params: {
     nextEntry.sessionFile = nextSessionFile;
     activeSessionStore[sessionKey] = nextEntry;
     try {
-      await saveSessionStore(storePath, activeSessionStore);
+      await updateSessionStore(storePath, (store) => {
+        store[sessionKey] = nextEntry;
+      });
     } catch (err) {
       defaultRuntime.error(
-        `Failed to persist session reset after compaction failure (${sessionKey}): ${String(err)}`,
+        `Failed to persist session reset after ${failureLabel} (${sessionKey}): ${String(err)}`,
       );
     }
     followupRun.run.sessionId = nextSessionId;
     followupRun.run.sessionFile = nextSessionFile;
     activeSessionEntry = nextEntry;
     activeIsNewSession = true;
-    defaultRuntime.error(
-      `Auto-compaction failed (${reason}). Restarting session ${sessionKey} -> ${nextSessionId} and retrying.`,
-    );
+    defaultRuntime.error(buildLogMessage(nextSessionId));
+    if (cleanupTranscripts && prevSessionId) {
+      const transcriptCandidates = new Set<string>();
+      const resolved = resolveSessionFilePath(prevSessionId, prevEntry, { agentId });
+      if (resolved) transcriptCandidates.add(resolved);
+      transcriptCandidates.add(resolveSessionTranscriptPath(prevSessionId, agentId));
+      for (const candidate of transcriptCandidates) {
+        try {
+          fs.unlinkSync(candidate);
+        } catch {
+          // Best-effort cleanup.
+        }
+      }
+    }
     return true;
   };
+  const resetSessionAfterCompactionFailure = async (reason: string): Promise<boolean> =>
+    resetSession({
+      failureLabel: "compaction failure",
+      buildLogMessage: (nextSessionId) =>
+        `Auto-compaction failed (${reason}). Restarting session ${sessionKey} -> ${nextSessionId} and retrying.`,
+    });
+  const resetSessionAfterRoleOrderingConflict = async (reason: string): Promise<boolean> =>
+    resetSession({
+      failureLabel: "role ordering conflict",
+      buildLogMessage: (nextSessionId) =>
+        `Role ordering conflict (${reason}). Restarting session ${sessionKey} -> ${nextSessionId}.`,
+      cleanupTranscripts: true,
+    });
   try {
     const runOutcome = await runAgentTurnWithFallback({
       commandBody,
@@ -254,6 +298,7 @@ export async function runReplyAgent(params: {
       shouldEmitToolResult,
       pendingToolTasks,
       resetSessionAfterCompactionFailure,
+      resetSessionAfterRoleOrderingConflict,
       isHeartbeat,
       sessionKey,
       getActiveSessionEntry: () => activeSessionEntry,
@@ -266,7 +311,7 @@ export async function runReplyAgent(params: {
       return finalizeWithFollowup(runOutcome.payload, queueKey, runFollowupTurn);
     }
 
-    const { runResult, fallbackProvider, fallbackModel } = runOutcome;
+    const { runResult, fallbackProvider, fallbackModel, directlySentBlockKeys } = runOutcome;
     let { didLogHeartbeatStrip, autoCompactionCompleted } = runOutcome;
 
     if (
@@ -280,7 +325,9 @@ export async function runReplyAgent(params: {
       activeSessionEntry.updatedAt = Date.now();
       activeSessionStore[sessionKey] = activeSessionEntry;
       if (storePath) {
-        await saveSessionStore(storePath, activeSessionStore);
+        await updateSessionStore(storePath, (store) => {
+          store[sessionKey] = activeSessionEntry as SessionEntry;
+        });
       }
     }
 
@@ -306,6 +353,7 @@ export async function runReplyAgent(params: {
       didLogHeartbeatStrip,
       blockStreamingEnabled,
       blockReplyPipeline,
+      directlySentBlockKeys,
       replyToMode,
       replyToChannel,
       currentMessageId: sessionCtx.MessageSid,

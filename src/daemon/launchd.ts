@@ -16,8 +16,10 @@ import {
 } from "./launchd-plist.js";
 import { parseKeyValueOutput } from "./runtime-parse.js";
 import type { GatewayServiceRuntime } from "./service-runtime.js";
+import { resolveGatewayStateDir, resolveHomeDir } from "./paths.js";
 
 const execFileAsync = promisify(execFile);
+const toPosixPath = (value: string) => value.replace(/\\/g, "/");
 
 const formatLine = (label: string, value: string) => {
   const rich = isRich();
@@ -29,18 +31,13 @@ function resolveLaunchAgentLabel(args?: { env?: Record<string, string | undefine
   if (envLabel) return envLabel;
   return resolveGatewayLaunchAgentLabel(args?.env?.CLAWDBOT_PROFILE);
 }
-function resolveHomeDir(env: Record<string, string | undefined>): string {
-  const home = env.HOME?.trim() || env.USERPROFILE?.trim();
-  if (!home) throw new Error("Missing HOME");
-  return home;
-}
 
 function resolveLaunchAgentPlistPathForLabel(
   env: Record<string, string | undefined>,
   label: string,
 ): string {
-  const home = resolveHomeDir(env);
-  return path.join(home, "Library", "LaunchAgents", `${label}.plist`);
+  const home = toPosixPath(resolveHomeDir(env));
+  return path.posix.join(home, "Library", "LaunchAgents", `${label}.plist`);
 }
 
 export function resolveLaunchAgentPlistPath(env: Record<string, string | undefined>): string {
@@ -53,28 +50,13 @@ export function resolveGatewayLogPaths(env: Record<string, string | undefined>):
   stdoutPath: string;
   stderrPath: string;
 } {
-  const home = resolveHomeDir(env);
-  const stateOverride = env.CLAWDBOT_STATE_DIR?.trim();
-  const profile = env.CLAWDBOT_PROFILE?.trim();
-  const suffix = profile && profile.toLowerCase() !== "default" ? `-${profile}` : "";
-  const defaultStateDir = path.join(home, `.clawdbot${suffix}`);
-  const stateDir = stateOverride ? resolveUserPathWithHome(stateOverride, home) : defaultStateDir;
+  const stateDir = resolveGatewayStateDir(env);
   const logDir = path.join(stateDir, "logs");
   return {
     logDir,
     stdoutPath: path.join(logDir, "gateway.log"),
     stderrPath: path.join(logDir, "gateway.err.log"),
   };
-}
-
-function resolveUserPathWithHome(input: string, home: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return trimmed;
-  if (trimmed.startsWith("~")) {
-    const expanded = trimmed.replace(/^~(?=$|[\\/])/, home);
-    return path.resolve(expanded);
-  }
-  return path.resolve(trimmed);
 }
 
 export async function readLaunchAgentProgramArguments(
