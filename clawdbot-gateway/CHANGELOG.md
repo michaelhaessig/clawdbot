@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.30
+
+- Add Wake-on-LAN tools (`wakeonlan`, `etherwake`) for waking remote machines like Mac for browser automation
+
+## 2.0.29
+
+- Add MAC.md documenting remote Mac node setup via SSH tunnels
+
 ## 2.0.28
 
 - Comment out Playwright/Chromium install (saves ~400MB) - use remote Mac browser instead

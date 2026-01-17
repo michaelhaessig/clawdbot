@@ -28,6 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Network diagnostics
     iputils-ping \
     nmap \
+    # Wake-on-LAN (wake remote machines like Mac for browser automation)
+    wakeonlan \
+    etherwake \
     # Skill dependencies
     jq \
     ffmpeg \
