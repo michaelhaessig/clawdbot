@@ -8,13 +8,17 @@ import {
   type ResponsePrefixContext,
 } from "../../auto-reply/reply/response-prefix-template.js";
 import { hasControlCommand } from "../../auto-reply/command-detection.js";
-import { formatAgentEnvelope } from "../../auto-reply/envelope.js";
+import { formatInboundEnvelope, formatInboundFromLabel } from "../../auto-reply/envelope.js";
 import {
   createInboundDebouncer,
   resolveInboundDebounceMs,
 } from "../../auto-reply/inbound-debounce.js";
 import { dispatchReplyFromConfig } from "../../auto-reply/reply/dispatch-from-config.js";
-import { buildHistoryContextFromMap, clearHistoryEntries } from "../../auto-reply/reply/history.js";
+import {
+  buildPendingHistoryContextFromMap,
+  clearHistoryEntries,
+} from "../../auto-reply/reply/history.js";
+import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { resolveStorePath, updateLastRoute } from "../../config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../globals.js";
@@ -27,6 +31,7 @@ import {
 } from "../../pairing/pairing-store.js";
 import { resolveAgentRoute } from "../../routing/resolve-route.js";
 import { normalizeE164 } from "../../utils.js";
+import { resolveCommandAuthorizedFromAuthorizers } from "../../channels/command-gating.js";
 import {
   formatSignalPairingIdLine,
   formatSignalSenderDisplay,
@@ -60,37 +65,40 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
   };
 
   async function handleSignalInboundMessage(entry: SignalInboundEntry) {
-    const fromLabel = entry.isGroup
-      ? `${entry.groupName ?? "Signal Group"} id:${entry.groupId}`
-      : `${entry.senderName} id:${entry.senderDisplay}`;
-    const body = formatAgentEnvelope({
+    const fromLabel = formatInboundFromLabel({
+      isGroup: entry.isGroup,
+      groupLabel: entry.groupName ?? undefined,
+      groupId: entry.groupId ?? "unknown",
+      groupFallback: "Group",
+      directLabel: entry.senderName,
+      directId: entry.senderDisplay,
+    });
+    const body = formatInboundEnvelope({
       channel: "Signal",
       from: fromLabel,
       timestamp: entry.timestamp ?? undefined,
       body: entry.bodyText,
+      chatType: entry.isGroup ? "group" : "direct",
+      sender: { name: entry.senderName, id: entry.senderDisplay },
     });
     let combinedBody = body;
     const historyKey = entry.isGroup ? String(entry.groupId ?? "unknown") : undefined;
     if (entry.isGroup && historyKey && deps.historyLimit > 0) {
-      combinedBody = buildHistoryContextFromMap({
+      combinedBody = buildPendingHistoryContextFromMap({
         historyMap: deps.groupHistories,
         historyKey,
         limit: deps.historyLimit,
-        entry: {
-          sender: entry.senderName,
-          body: entry.bodyText,
-          timestamp: entry.timestamp ?? undefined,
-          messageId: entry.messageId,
-        },
         currentMessage: combinedBody,
         formatEntry: (historyEntry) =>
-          formatAgentEnvelope({
+          formatInboundEnvelope({
             channel: "Signal",
             from: fromLabel,
             timestamp: historyEntry.timestamp,
-            body: `${historyEntry.sender}: ${historyEntry.body}${
+            body: `${historyEntry.body}${
               historyEntry.messageId ? ` [id:${historyEntry.messageId}]` : ""
             }`,
+            chatType: "group",
+            senderLabel: historyEntry.sender,
           }),
       });
     }
@@ -105,7 +113,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       },
     });
     const signalTo = entry.isGroup ? `group:${entry.groupId}` : `signal:${entry.senderRecipient}`;
-    const ctxPayload = {
+    const ctxPayload = finalizeInboundContext({
       Body: combinedBody,
       RawBody: entry.bodyText,
       CommandBody: entry.bodyText,
@@ -116,6 +124,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       SessionKey: route.sessionKey,
       AccountId: route.accountId,
       ChatType: entry.isGroup ? "group" : "direct",
+      ConversationLabel: fromLabel,
       GroupSubject: entry.isGroup ? (entry.groupName ?? undefined) : undefined,
       SenderName: entry.senderName,
       SenderId: entry.senderDisplay,
@@ -129,7 +138,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       CommandAuthorized: entry.commandAuthorized,
       OriginatingChannel: "signal" as const,
       OriginatingTo: signalTo,
-    };
+    });
 
     if (!entry.isGroup) {
       const sessionCfg = deps.cfg.session;
@@ -139,9 +148,11 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       await updateLastRoute({
         storePath,
         sessionKey: route.mainSessionKey,
-        channel: "signal",
-        to: entry.senderRecipient,
-        accountId: route.accountId,
+        deliveryContext: {
+          channel: "signal",
+          to: entry.senderRecipient,
+          accountId: route.accountId,
+        },
       });
     }
 
@@ -149,8 +160,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       const preview = body.slice(0, 200).replace(/\\n/g, "\\\\n");
       logVerbose(`signal inbound: from=${ctxPayload.From} len=${body.length} preview="${preview}"`);
     }
-
-    let didSendReply = false;
 
     // Create mutable context for response prefix template interpolation
     let prefixContext: ResponsePrefixContext = {
@@ -172,7 +181,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
           maxBytes: deps.mediaMaxBytes,
           textLimit: deps.textLimit,
         });
-        didSendReply = true;
       },
       onError: (err, info) => {
         deps.runtime.error?.(danger(`signal ${info.kind} reply failed: ${String(err)}`));
@@ -196,12 +204,12 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       },
     });
     if (!queuedFinal) {
-      if (entry.isGroup && historyKey && deps.historyLimit > 0 && didSendReply) {
+      if (entry.isGroup && historyKey && deps.historyLimit > 0) {
         clearHistoryEntries({ historyMap: deps.groupHistories, historyKey });
       }
       return;
     }
-    if (entry.isGroup && historyKey && deps.historyLimit > 0 && didSendReply) {
+    if (entry.isGroup && historyKey && deps.historyLimit > 0) {
       clearHistoryEntries({ historyMap: deps.groupHistories, historyKey });
     }
   }
@@ -400,11 +408,22 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       }
     }
 
+    const useAccessGroups = deps.cfg.commands?.useAccessGroups !== false;
+    const ownerAllowedForCommands = isSignalSenderAllowed(sender, effectiveDmAllow);
+    const groupAllowedForCommands = isSignalSenderAllowed(sender, effectiveGroupAllow);
     const commandAuthorized = isGroup
-      ? effectiveGroupAllow.length > 0
-        ? isSignalSenderAllowed(sender, effectiveGroupAllow)
-        : true
+      ? resolveCommandAuthorizedFromAuthorizers({
+          useAccessGroups,
+          authorizers: [
+            { configured: effectiveDmAllow.length > 0, allowed: ownerAllowedForCommands },
+            { configured: effectiveGroupAllow.length > 0, allowed: groupAllowedForCommands },
+          ],
+        })
       : dmAllowed;
+    if (isGroup && hasControlCommand(messageText, deps.cfg) && !commandAuthorized) {
+      logVerbose(`signal: drop control command from unauthorized sender ${senderDisplay}`);
+      return;
+    }
 
     let mediaPath: string | undefined;
     let mediaType: string | undefined;

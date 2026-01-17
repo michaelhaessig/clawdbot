@@ -22,6 +22,9 @@ If the file is missing, Clawdbot uses safe-ish defaults (embedded Pi agent + per
 The Gateway exposes a JSON Schema representation of the config via `config.schema` for UI editors.
 The Control UI renders a form from this schema, with a **Raw JSON** editor as an escape hatch.
 
+Channel plugins and extensions can register schema + UI hints for their config, so channel settings
+stay schema-driven across apps without hard-coded forms.
+
 Hints (labels, grouping, sensitive fields) ship alongside the schema so clients can render
 better forms without hard-coding config knowledge.
 
@@ -282,6 +285,48 @@ This effectively sources your shell profile.
 Env var equivalent:
 - `CLAWDBOT_LOAD_SHELL_ENV=1`
 - `CLAWDBOT_SHELL_ENV_TIMEOUT_MS=15000`
+
+### Env var substitution in config
+
+You can reference environment variables directly in any config string value using
+`${VAR_NAME}` syntax. Variables are substituted at config load time, before validation.
+
+```json5
+{
+  models: {
+    providers: {
+      "vercel-gateway": {
+        apiKey: "${VERCEL_GATEWAY_API_KEY}"
+      }
+    }
+  },
+  gateway: {
+    auth: {
+      token: "${CLAWDBOT_GATEWAY_TOKEN}"
+    }
+  }
+}
+```
+
+**Rules:**
+- Only uppercase env var names are matched: `[A-Z_][A-Z0-9_]*`
+- Missing or empty env vars throw an error at config load
+- Escape with `$${VAR}` to output a literal `${VAR}`
+- Works with `$include` (included files also get substitution)
+
+**Inline substitution:**
+
+```json5
+{
+  models: {
+    providers: {
+      custom: {
+        baseUrl: "${CUSTOM_API_BASE}/v1"  // → "https://api.example.com/v1"
+      }
+    }
+  }
+}
+```
 
 ### Auth storage (OAuth + API keys)
 
@@ -903,7 +948,7 @@ Set `web.enabled: false` to keep it off by default.
 
 ### `channels.telegram` (bot transport)
 
-Clawdbot starts Telegram only when a `channels.telegram` config section exists. The bot token is resolved from `TELEGRAM_BOT_TOKEN` or `channels.telegram.botToken`.
+Clawdbot starts Telegram only when a `channels.telegram` config section exists. The bot token is resolved from `channels.telegram.botToken` (or `channels.telegram.tokenFile`), with `TELEGRAM_BOT_TOKEN` as a fallback for the default account.
 Set `channels.telegram.enabled: false` to disable automatic startup.
 Multi-account support lives under `channels.telegram.accounts` (see the multi-account section above). Env tokens only apply to the default account.
 Set `channels.telegram.configWrites: false` to block Telegram-initiated config writes (including supergroup ID migrations and `/config set|unset`).
@@ -943,6 +988,7 @@ Set `channels.telegram.configWrites: false` to block Telegram-initiated config w
         breakPreference: "paragraph"       // paragraph | newline | sentence
       },
       actions: { reactions: true, sendMessage: true }, // tool action gates (false disables)
+      reactionNotifications: "own",   // off | own | all
       mediaMaxMb: 5,
       retry: {                             // outbound retry policy
         attempts: 3,
@@ -1035,7 +1081,7 @@ Multi-account support lives under `channels.discord.accounts` (see the multi-acc
 }
 ```
 
-Clawdbot starts Discord only when a `channels.discord` config section exists. The token is resolved from `DISCORD_BOT_TOKEN` or `channels.discord.token` (unless `channels.discord.enabled` is `false`). Use `user:<id>` (DM) or `channel:<id>` (guild channel) when specifying delivery targets for cron/CLI commands; bare numeric IDs are ambiguous and rejected.
+Clawdbot starts Discord only when a `channels.discord` config section exists. The token is resolved from `channels.discord.token`, with `DISCORD_BOT_TOKEN` as a fallback for the default account (unless `channels.discord.enabled` is `false`). Use `user:<id>` (DM) or `channel:<id>` (guild channel) when specifying delivery targets for cron/CLI commands; bare numeric IDs are ambiguous and rejected.
 Guild slugs are lowercase with spaces replaced by `-`; channel keys use the slugged channel name (no leading `#`). Prefer guild ids as keys to avoid rename ambiguity.
 Bot-authored messages are ignored by default. Enable with `channels.discord.allowBots` (own messages are still filtered to prevent self-reply loops).
 Reaction notification modes:
@@ -1163,6 +1209,7 @@ Clawdbot spawns `imsg rpc` (JSON-RPC over stdio). No daemon or port required.
       enabled: true,
       cliPath: "imsg",
       dbPath: "~/Library/Messages/chat.db",
+      remoteHost: "user@gateway-host", // SCP for remote attachments when using SSH wrapper
       dmPolicy: "pairing", // pairing | allowlist | open | disabled
       allowFrom: ["+15555550123", "user@example.com", "chat_id:123"],
       historyLimit: 50,    // include last N group messages as context (0 disables)
@@ -1182,11 +1229,12 @@ Notes:
 - The first send will prompt for Messages automation permission.
 - Prefer `chat_id:<id>` targets. Use `imsg chats --limit 20` to list chats.
 - `channels.imessage.cliPath` can point to a wrapper script (e.g. `ssh` to another Mac that runs `imsg rpc`); use SSH keys to avoid password prompts.
+- For remote SSH wrappers, set `channels.imessage.remoteHost` to fetch attachments via SCP when `includeAttachments` is enabled.
 
 Example wrapper:
 ```bash
 #!/usr/bin/env bash
-exec ssh -T mac-mini "imsg rpc"
+exec ssh -T gateway-host imsg "$@"
 ```
 
 ### `agents.defaults.workspace`
@@ -1697,10 +1745,10 @@ of `every`, keep `HEARTBEAT.md` tiny, and/or choose a cheaper `model`.
 - `backgroundMs`: time before auto-background (ms, default 10000)
 - `timeoutSec`: auto-kill after this runtime (seconds, default 1800)
 - `cleanupMs`: how long to keep finished sessions in memory (ms, default 1800000)
+- `notifyOnExit`: enqueue a system event + request heartbeat when backgrounded exec exits (default true)
 - `applyPatch.enabled`: enable experimental `apply_patch` (OpenAI/OpenAI Codex only; default false)
 - `applyPatch.allowModels`: optional allowlist of model ids (e.g. `gpt-5.2` or `openai/gpt-5.2`)
-Note: `applyPatch` is only under `tools.exec` (no `tools.bash` alias).
-Legacy: `tools.bash` is still accepted as an alias.
+Note: `applyPatch` is only under `tools.exec`.
 
 `tools.web` configures web search + fetch tools:
 - `tools.web.search.enabled` (default: true when key is present)
@@ -1708,11 +1756,73 @@ Legacy: `tools.bash` is still accepted as an alias.
 - `tools.web.search.maxResults` (1–10, default 5)
 - `tools.web.search.timeoutSeconds` (default 30)
 - `tools.web.search.cacheTtlMinutes` (default 15)
-- `tools.web.fetch.enabled` (default false; sandboxed sessions auto-enable unless set to false)
+- `tools.web.fetch.enabled` (default true)
 - `tools.web.fetch.maxChars` (default 50000)
 - `tools.web.fetch.timeoutSeconds` (default 30)
 - `tools.web.fetch.cacheTtlMinutes` (default 15)
 - `tools.web.fetch.userAgent` (optional override)
+- `tools.web.fetch.readability` (default true; disable to use basic HTML cleanup only)
+- `tools.web.fetch.firecrawl.enabled` (default true when an API key is set)
+- `tools.web.fetch.firecrawl.apiKey` (optional; defaults to `FIRECRAWL_API_KEY`)
+- `tools.web.fetch.firecrawl.baseUrl` (default https://api.firecrawl.dev)
+- `tools.web.fetch.firecrawl.onlyMainContent` (default true)
+- `tools.web.fetch.firecrawl.maxAgeMs` (optional)
+- `tools.web.fetch.firecrawl.timeoutSeconds` (optional)
+
+`tools.media` configures inbound media understanding (image/audio/video):
+- `tools.media.models`: shared model list (capability-tagged; used after per-cap lists).
+- `tools.media.concurrency`: max concurrent capability runs (default 2).
+- `tools.media.image` / `tools.media.audio` / `tools.media.video`:
+  - `enabled`: opt-out switch (default true when models are configured).
+  - `prompt`: optional prompt override (image/video append a `maxChars` hint automatically).
+  - `maxChars`: max output characters (default 500 for image/video; unset for audio).
+  - `maxBytes`: max media size to send (defaults: image 10MB, audio 20MB, video 50MB).
+  - `timeoutSeconds`: request timeout (defaults: image 60s, audio 60s, video 120s).
+  - `language`: optional audio hint.
+  - `attachments`: attachment policy (`mode`, `maxAttachments`, `prefer`).
+  - `scope`: optional gating (first match wins) with `match.channel`, `match.chatType`, or `match.keyPrefix`.
+  - `models`: ordered list of model entries; failures or oversize media fall back to the next entry.
+- Each `models[]` entry:
+  - Provider entry (`type: "provider"` or omitted):
+    - `provider`: API provider id (`openai`, `anthropic`, `google`/`gemini`, `groq`, etc).
+    - `model`: model id override (required for image; defaults to `whisper-1`/`whisper-large-v3-turbo` for audio providers, and `gemini-3-flash-preview` for video).
+    - `profile` / `preferredProfile`: auth profile selection.
+  - CLI entry (`type: "cli"`):
+    - `command`: executable to run.
+    - `args`: templated args (supports `{{MediaPath}}`, `{{Prompt}}`, `{{MaxChars}}`, etc).
+  - `capabilities`: optional list (`image`, `audio`, `video`) to gate a shared entry. Defaults when omitted: `openai`/`anthropic`/`minimax` → image, `google` → image+audio+video, `groq` → audio.
+  - `prompt`, `maxChars`, `maxBytes`, `timeoutSeconds`, `language` can be overridden per entry.
+
+If no models are configured (or `enabled: false`), understanding is skipped; the model still receives the original attachments.
+
+Provider auth follows the standard model auth order (auth profiles, env vars like `OPENAI_API_KEY`/`GROQ_API_KEY`/`GEMINI_API_KEY`, or `models.providers.*.apiKey`).
+
+Example:
+```json5
+{
+  tools: {
+    media: {
+      audio: {
+        enabled: true,
+        maxBytes: 20971520,
+        scope: {
+          default: "deny",
+          rules: [{ action: "allow", match: { chatType: "direct" } }]
+        },
+        models: [
+          { provider: "openai", model: "whisper-1" },
+          { type: "cli", command: "whisper", args: ["--model", "base", "{{MediaPath}}"] }
+        ]
+      },
+      video: {
+        enabled: true,
+        maxBytes: 52428800,
+        models: [{ provider: "google", model: "gemini-3-flash-preview" }]
+      }
+    }
+  }
+}
+```
 
 `agents.defaults.subagents` configures sub-agent defaults:
 - `model`: default model for spawned sub-agents (string or `{ primary, fallbacks }`). If omitted, sub-agents inherit the caller’s model unless overridden per agent or per call.
@@ -2269,6 +2379,9 @@ Controls session scoping, idle expiry, reset triggers, and where the session sto
   session: {
     scope: "per-sender",
     dmScope: "main",
+    identityLinks: {
+      alice: ["telegram:123456789", "discord:987654321012345678"]
+    },
     idleMinutes: 60,
     resetTriggers: ["/new", "/reset"],
     // Default is already per-agent under ~/.clawdbot/agents/<agentId>/sessions/sessions.json
@@ -2297,6 +2410,8 @@ Fields:
   - `main`: all DMs share the main session for continuity.
   - `per-peer`: isolate DMs by sender id across channels.
   - `per-channel-peer`: isolate DMs per channel + sender (recommended for multi-user inboxes).
+- `identityLinks`: map canonical ids to provider-prefixed peers so the same person shares a DM session across channels when using `per-peer` or `per-channel-peer`.
+  - Example: `alice: ["telegram:123456789", "discord:987654321012345678"]`.
 - `agentToAgent.maxPingPongTurns`: max reply-back turns between requester/target (0–5, default 5).
 - `sendPolicy.default`: `allow` or `deny` fallback when no rule matches.
 - `sendPolicy.rules[]`: match by `channel`, `chatType` (`direct|group|room`), or `keyPrefix` (e.g. `cron:`). First deny wins; otherwise allow.
@@ -2642,7 +2757,7 @@ Mapping notes:
 - If there is no prior delivery route, set `channel` + `to` explicitly (required for Telegram/Discord/Slack/Signal/iMessage/MS Teams).
 - `model` overrides the LLM for this hook run (`provider/model` or alias; must be allowed if `agents.defaults.models` is set).
 
-Gmail helper config (used by `clawdbot hooks gmail setup` / `run`):
+Gmail helper config (used by `clawdbot webhooks gmail setup` / `run`):
 
 ```json5
 {
@@ -2788,7 +2903,7 @@ clawdbot dns setup --apply
 
 ## Template variables
 
-Template placeholders are expanded in `tools.audio.transcription.args` (and any future templated argument fields).
+Template placeholders are expanded in `tools.media.*.models[].args` and `tools.media.models[].args` (and any future templated argument fields).
 
 | Variable | Description |
 |----------|-------------|
@@ -2804,6 +2919,8 @@ Template placeholders are expanded in `tools.audio.transcription.args` (and any 
 | `{{MediaPath}}` | Local media path (if downloaded) |
 | `{{MediaType}}` | Media type (image/audio/document/…) |
 | `{{Transcript}}` | Audio transcript (when enabled) |
+| `{{Prompt}}` | Resolved media prompt for CLI entries |
+| `{{MaxChars}}` | Resolved max output chars for CLI entries |
 | `{{ChatType}}` | `"direct"` or `"group"` |
 | `{{GroupSubject}}` | Group subject (best effort) |
 | `{{GroupMembers}}` | Group members preview (best effort) |

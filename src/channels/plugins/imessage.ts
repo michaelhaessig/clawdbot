@@ -9,6 +9,8 @@ import { probeIMessage } from "../../imessage/probe.js";
 import { sendMessageIMessage } from "../../imessage/send.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
 import { getChatChannelMeta } from "../registry.js";
+import { IMessageConfigSchema } from "../../config/zod-schema.providers-core.js";
+import { buildChannelConfigSchema } from "./config-schema.js";
 import {
   deleteAccountFromConfigSection,
   setAccountEnabledInConfigSection,
@@ -44,6 +46,7 @@ export const imessagePlugin: ChannelPlugin<ResolvedIMessageAccount> = {
     media: true,
   },
   reload: { configPrefixes: ["channels.imessage"] },
+  configSchema: buildChannelConfigSchema(IMessageConfigSchema),
   config: {
     listAccountIds: (cfg) => listIMessageAccountIds(cfg),
     resolveAccount: (cfg, accountId) => resolveIMessageAccount({ cfg, accountId }),
@@ -102,6 +105,18 @@ export const imessagePlugin: ChannelPlugin<ResolvedIMessageAccount> = {
   },
   groups: {
     resolveRequireMention: resolveIMessageGroupRequireMention,
+  },
+  messaging: {
+    targetResolver: {
+      looksLikeId: (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return false;
+        if (/^(imessage:|chat_id:)/i.test(trimmed)) return true;
+        if (trimmed.includes("@")) return true;
+        return /^\+?\d{3,}$/.test(trimmed);
+      },
+      hint: "<handle|chat_id:ID>",
+    },
   },
   setup: {
     resolveAccountId: ({ accountId }) => normalizeAccountId(accountId),
@@ -169,16 +184,6 @@ export const imessagePlugin: ChannelPlugin<ResolvedIMessageAccount> = {
     deliveryMode: "direct",
     chunker: chunkText,
     textChunkLimit: 4000,
-    resolveTarget: ({ to }) => {
-      const trimmed = to?.trim();
-      if (!trimmed) {
-        return {
-          ok: false,
-          error: new Error("Delivering to iMessage requires --to <handle|chat_id:ID>"),
-        };
-      }
-      return { ok: true, to: trimmed };
-    },
     sendText: async ({ cfg, to, text, accountId, deps }) => {
       const send = deps?.sendIMessage ?? sendMessageIMessage;
       const maxBytes = resolveChannelMediaMaxBytes({

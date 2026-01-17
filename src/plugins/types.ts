@@ -42,6 +42,7 @@ export type ClawdbotPluginConfigSchema = {
   parse?: (value: unknown) => unknown;
   validate?: (value: unknown) => PluginConfigValidation;
   uiHints?: Record<string, PluginConfigUiHint>;
+  jsonSchema?: Record<string, unknown>;
 };
 
 export type ClawdbotPluginToolContext = {
@@ -174,7 +175,7 @@ export type ClawdbotPluginApi = {
   resolvePath: (input: string) => string;
 };
 
-export type PluginOrigin = "global" | "workspace" | "config";
+export type PluginOrigin = "bundled" | "global" | "workspace" | "config";
 
 export type PluginDiagnostic = {
   level: "warn" | "error";

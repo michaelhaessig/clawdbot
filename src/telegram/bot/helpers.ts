@@ -59,7 +59,7 @@ export function buildTelegramGroupPeerId(chatId: number | string, messageThreadI
 }
 
 export function buildTelegramGroupFrom(chatId: number | string, messageThreadId?: number) {
-  return messageThreadId != null ? `group:${chatId}:topic:${messageThreadId}` : `group:${chatId}`;
+  return `telegram:group:${buildTelegramGroupPeerId(chatId, messageThreadId)}`;
 }
 
 export function buildSenderName(msg: TelegramMessage) {
@@ -96,17 +96,6 @@ export function buildGroupLabel(
   const topicSuffix = messageThreadId != null ? ` topic:${messageThreadId}` : "";
   if (title) return `${title} id:${chatId}${topicSuffix}`;
   return `group:${chatId}${topicSuffix}`;
-}
-
-export function buildGroupFromLabel(
-  msg: TelegramMessage,
-  chatId: number | string,
-  senderId?: number | string,
-  messageThreadId?: number,
-) {
-  const groupLabel = buildGroupLabel(msg, chatId, messageThreadId);
-  const senderLabel = buildSenderLabel(msg, senderId);
-  return `${groupLabel} from ${senderLabel}`;
 }
 
 export function hasBotMention(msg: TelegramMessage, botUsername: string) {

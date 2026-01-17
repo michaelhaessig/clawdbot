@@ -9,18 +9,6 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
   chunker: chunkMarkdownText,
   textChunkLimit: 4000,
   pollMaxOptions: 12,
-  resolveTarget: ({ to }) => {
-    const trimmed = to?.trim();
-    if (!trimmed) {
-      return {
-        ok: false,
-        error: new Error(
-          "Delivering to MS Teams requires --to <conversationId|user:ID|conversation:ID>",
-        ),
-      };
-    }
-    return { ok: true, to: trimmed };
-  },
   sendText: async ({ cfg, to, text, deps }) => {
     const send = deps?.sendMSTeams ?? ((to, text) => sendMessageMSTeams({ cfg, to, text }));
     const result = await send(to, text);

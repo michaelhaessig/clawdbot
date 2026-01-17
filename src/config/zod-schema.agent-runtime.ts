@@ -5,7 +5,7 @@ import {
   GroupChatSchema,
   HumanDelaySchema,
   IdentitySchema,
-  ToolsAudioTranscriptionSchema,
+  ToolsMediaSchema,
 } from "./zod-schema.core.js";
 
 export const HeartbeatSchema = z
@@ -283,9 +283,28 @@ export const ToolsSchema = z
     deny: z.array(z.string()).optional(),
     byProvider: z.record(z.string(), ToolPolicyWithProfileSchema).optional(),
     web: ToolsWebSchema,
-    audio: z
+    media: ToolsMediaSchema,
+    message: z
       .object({
-        transcription: ToolsAudioTranscriptionSchema,
+        allowCrossContextSend: z.boolean().optional(),
+        crossContext: z
+          .object({
+            allowWithinProvider: z.boolean().optional(),
+            allowAcrossProviders: z.boolean().optional(),
+            marker: z
+              .object({
+                enabled: z.boolean().optional(),
+                prefix: z.string().optional(),
+                suffix: z.string().optional(),
+              })
+              .optional(),
+          })
+          .optional(),
+        broadcast: z
+          .object({
+            enabled: z.boolean().optional(),
+          })
+          .optional(),
       })
       .optional(),
     agentToAgent: z
@@ -305,19 +324,13 @@ export const ToolsSchema = z
         backgroundMs: z.number().int().positive().optional(),
         timeoutSec: z.number().int().positive().optional(),
         cleanupMs: z.number().int().positive().optional(),
+        notifyOnExit: z.boolean().optional(),
         applyPatch: z
           .object({
             enabled: z.boolean().optional(),
             allowModels: z.array(z.string()).optional(),
           })
           .optional(),
-      })
-      .optional(),
-    bash: z
-      .object({
-        backgroundMs: z.number().int().positive().optional(),
-        timeoutSec: z.number().int().positive().optional(),
-        cleanupMs: z.number().int().positive().optional(),
       })
       .optional(),
     subagents: z

@@ -80,8 +80,10 @@ export function createClawdbotTools(options?: {
     }),
     createMessageTool({
       agentAccountId: options?.agentAccountId,
+      agentSessionKey: options?.agentSessionKey,
       config: options?.config,
       currentChannelId: options?.currentChannelId,
+      currentChannelProvider: options?.agentChannel,
       currentThreadTs: options?.currentThreadTs,
       replyToMode: options?.replyToMode,
       hasRepliedRef: options?.hasRepliedRef,
@@ -107,6 +109,7 @@ export function createClawdbotTools(options?: {
     createSessionsSpawnTool({
       agentSessionKey: options?.agentSessionKey,
       agentChannel: options?.agentChannel,
+      agentAccountId: options?.agentAccountId,
       sandboxed: options?.sandboxed,
     }),
     createSessionStatusTool({

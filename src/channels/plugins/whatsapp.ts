@@ -21,10 +21,12 @@ import {
 import { sendMessageWhatsApp, sendPollWhatsApp } from "../../web/outbound.js";
 import { isWhatsAppGroupJid, normalizeWhatsAppTarget } from "../../whatsapp/normalize.js";
 import { getChatChannelMeta } from "../registry.js";
+import { WhatsAppConfigSchema } from "../../config/zod-schema.providers-whatsapp.js";
+import { buildChannelConfigSchema } from "./config-schema.js";
 import { createWhatsAppLoginTool } from "./agent-tools/whatsapp-login.js";
 import { resolveWhatsAppGroupRequireMention } from "./group-mentions.js";
 import { formatPairingApproveHint } from "./helpers.js";
-import { normalizeWhatsAppMessagingTarget } from "./normalize-target.js";
+import { looksLikeWhatsAppTargetId, normalizeWhatsAppMessagingTarget } from "./normalize-target.js";
 import { whatsappOnboardingAdapter } from "./onboarding/whatsapp.js";
 import {
   applyAccountNameToChannelSection,
@@ -33,6 +35,11 @@ import {
 import { collectWhatsAppStatusIssues } from "./status-issues/whatsapp.js";
 import type { ChannelMessageActionName, ChannelPlugin } from "./types.js";
 import { resolveWhatsAppHeartbeatRecipients } from "./whatsapp-heartbeat.js";
+import { missingTargetError } from "../../infra/outbound/target-errors.js";
+import {
+  listWhatsAppDirectoryGroupsFromConfig,
+  listWhatsAppDirectoryPeersFromConfig,
+} from "./directory-config.js";
 
 const meta = getChatChannelMeta("whatsapp");
 
@@ -60,6 +67,7 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
   },
   reload: { configPrefixes: ["web"], noopPrefixes: ["channels.whatsapp"] },
   gatewayMethods: ["web.login.start", "web.login.wait"],
+  configSchema: buildChannelConfigSchema(WhatsAppConfigSchema),
   config: {
     listAccountIds: (cfg) => listWhatsAppAccountIds(cfg),
     resolveAccount: (cfg, accountId) => resolveWhatsAppAccount({ cfg, accountId }),
@@ -109,6 +117,7 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
       name: account.name,
       enabled: account.enabled,
       configured: Boolean(account.authDir),
+      linked: Boolean(account.authDir),
       dmPolicy: account.dmPolicy,
       allowFrom: account.allowFrom,
     }),
@@ -214,6 +223,26 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
   },
   messaging: {
     normalizeTarget: normalizeWhatsAppMessagingTarget,
+    targetResolver: {
+      looksLikeId: looksLikeWhatsAppTargetId,
+      hint: "<E.164|group JID>",
+    },
+  },
+  directory: {
+    self: async ({ cfg, accountId }) => {
+      const account = resolveWhatsAppAccount({ cfg, accountId });
+      const { e164, jid } = readWebSelfId(account.authDir);
+      const id = e164 ?? jid;
+      if (!id) return null;
+      return {
+        kind: "user",
+        id,
+        name: account.name,
+        raw: { e164, jid },
+      };
+    },
+    listPeers: async (params) => listWhatsAppDirectoryPeersFromConfig(params),
+    listGroups: async (params) => listWhatsAppDirectoryGroupsFromConfig(params),
   },
   actions: {
     listActions: ({ cfg }) => {
@@ -272,8 +301,9 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
           }
           return {
             ok: false,
-            error: new Error(
-              "Delivering to WhatsApp requires --to <E.164|group JID> or channels.whatsapp.allowFrom[0]",
+            error: missingTargetError(
+              "WhatsApp",
+              "<E.164|group JID> or channels.whatsapp.allowFrom[0]",
             ),
           };
         }
@@ -297,8 +327,9 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
       }
       return {
         ok: false,
-        error: new Error(
-          "Delivering to WhatsApp requires --to <E.164|group JID> or channels.whatsapp.allowFrom[0]",
+        error: missingTargetError(
+          "WhatsApp",
+          "<E.164|group JID> or channels.whatsapp.allowFrom[0]",
         ),
       };
     },

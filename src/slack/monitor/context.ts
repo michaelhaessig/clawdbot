@@ -11,7 +11,7 @@ import type { SlackMessageEvent } from "../types.js";
 
 import { normalizeAllowList, normalizeAllowListLower, normalizeSlackSlug } from "./allow-list.js";
 import { resolveSlackChannelConfig } from "./channel-config.js";
-import { isSlackRoomAllowedByPolicy } from "./policy.js";
+import { isSlackChannelAllowedByPolicy } from "./policy.js";
 
 export function inferSlackChannelType(
   channelId?: string | null,
@@ -186,7 +186,7 @@ export function createSlackMonitorContext(params: {
       : isGroup
         ? `slack:group:${channelId}`
         : `slack:channel:${channelId}`;
-    const chatType = isDirectMessage ? "direct" : isGroup ? "group" : "room";
+    const chatType = isDirectMessage ? "direct" : isGroup ? "group" : "channel";
     return resolveSessionKey(
       params.sessionScope,
       { From: from, ChatType: chatType, Provider: "slack" },
@@ -314,7 +314,7 @@ export function createSlackMonitorContext(params: {
       const channelAllowlistConfigured =
         Boolean(params.channelsConfig) && Object.keys(params.channelsConfig ?? {}).length > 0;
       if (
-        !isSlackRoomAllowedByPolicy({
+        !isSlackChannelAllowedByPolicy({
           groupPolicy: params.groupPolicy,
           channelAllowlistConfigured,
           channelAllowed,

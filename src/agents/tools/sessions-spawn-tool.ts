@@ -9,6 +9,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
+import { normalizeDeliveryContext } from "../../utils/delivery-context.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import { resolveAgentConfig } from "../agent-scope.js";
 import { AGENT_LANE_SUBAGENT } from "../lanes.js";
@@ -48,6 +49,7 @@ function normalizeModelSelection(value: unknown): string | undefined {
 export function createSessionsSpawnTool(opts?: {
   agentSessionKey?: string;
   agentChannel?: GatewayMessageChannel;
+  agentAccountId?: string;
   sandboxed?: boolean;
 }): AnyAgentTool {
   return {
@@ -66,6 +68,10 @@ export function createSessionsSpawnTool(opts?: {
         params.cleanup === "keep" || params.cleanup === "delete"
           ? (params.cleanup as "keep" | "delete")
           : "keep";
+      const requesterOrigin = normalizeDeliveryContext({
+        channel: opts?.agentChannel,
+        accountId: opts?.agentAccountId,
+      });
       const runTimeoutSeconds = (() => {
         const explicit =
           typeof params.runTimeoutSeconds === "number" && Number.isFinite(params.runTimeoutSeconds)
@@ -162,7 +168,7 @@ export function createSessionsSpawnTool(opts?: {
       }
       const childSystemPrompt = buildSubagentSystemPrompt({
         requesterSessionKey,
-        requesterChannel: opts?.agentChannel,
+        requesterOrigin,
         childSessionKey,
         label: label || undefined,
         task,
@@ -176,7 +182,7 @@ export function createSessionsSpawnTool(opts?: {
           params: {
             message: task,
             sessionKey: childSessionKey,
-            channel: opts?.agentChannel,
+            channel: requesterOrigin?.channel,
             idempotencyKey: childIdem,
             deliver: false,
             lane: AGENT_LANE_SUBAGENT,
@@ -205,7 +211,7 @@ export function createSessionsSpawnTool(opts?: {
         runId: childRunId,
         childSessionKey,
         requesterSessionKey: requesterInternalKey,
-        requesterChannel: opts?.agentChannel,
+        requesterOrigin,
         requesterDisplayKey,
         task,
         cleanup,

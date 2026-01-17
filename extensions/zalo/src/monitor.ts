@@ -2,6 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { ResolvedZaloAccount } from "./accounts.js";
 import {
+  isControlCommandMessage,
+  shouldComputeCommandAuthorized,
+} from "../../../src/auto-reply/command-detection.js";
+import { finalizeInboundContext } from "../../../src/auto-reply/reply/inbound-context.js";
+import { resolveCommandAuthorizedFromAuthorizers } from "../../../src/channels/command-gating.js";
+import {
   ZaloApiError,
   deleteWebhook,
   getUpdates,
@@ -436,6 +442,21 @@ async function processMessageWithPipeline(params: {
 
   const dmPolicy = account.config.dmPolicy ?? "pairing";
   const configAllowFrom = (account.config.allowFrom ?? []).map((v) => String(v));
+  const rawBody = text?.trim() || (mediaPath ? "<media:image>" : "");
+  const shouldComputeAuth = shouldComputeCommandAuthorized(rawBody, config);
+  const storeAllowFrom =
+    !isGroup && (dmPolicy !== "open" || shouldComputeAuth)
+      ? await deps.readChannelAllowFromStore("zalo").catch(() => [])
+      : [];
+  const effectiveAllowFrom = [...configAllowFrom, ...storeAllowFrom];
+  const useAccessGroups = config.commands?.useAccessGroups !== false;
+  const senderAllowedForCommands = isSenderAllowed(senderId, effectiveAllowFrom);
+  const commandAuthorized = shouldComputeAuth
+    ? resolveCommandAuthorizedFromAuthorizers({
+        useAccessGroups,
+        authorizers: [{ configured: effectiveAllowFrom.length > 0, allowed: senderAllowedForCommands }],
+      })
+    : undefined;
 
   if (!isGroup) {
     if (dmPolicy === "disabled") {
@@ -444,9 +465,7 @@ async function processMessageWithPipeline(params: {
     }
 
     if (dmPolicy !== "open") {
-      const storeAllowFrom = await deps.readChannelAllowFromStore("zalo").catch(() => []);
-      const effectiveAllowFrom = [...configAllowFrom, ...storeAllowFrom];
-      const allowed = isSenderAllowed(senderId, effectiveAllowFrom);
+      const allowed = senderAllowedForCommands;
 
       if (!allowed) {
         if (dmPolicy === "pairing") {
@@ -495,28 +514,34 @@ async function processMessageWithPipeline(params: {
     },
   });
 
-  const rawBody = text?.trim() || (mediaPath ? "<media:image>" : "");
-  const fromLabel = isGroup
-    ? `group:${chatId} from ${senderName || senderId}`
-    : senderName || `user:${senderId}`;
-  const body = deps.formatAgentEnvelope({
-    channel: "Zalo",
-    from: fromLabel,
+  if (isGroup && isControlCommandMessage(rawBody, config) && commandAuthorized !== true) {
+    logVerbose(deps, `zalo: drop control command from unauthorized sender ${senderId}`);
+    return;
+  }
+
+	  const fromLabel = isGroup
+	    ? `group:${chatId}`
+	    : senderName || `user:${senderId}`;
+	  const body = deps.formatAgentEnvelope({
+	    channel: "Zalo",
+	    from: fromLabel,
     timestamp: date ? date * 1000 : undefined,
     body: rawBody,
   });
 
-  const ctxPayload = {
+  const ctxPayload = finalizeInboundContext({
     Body: body,
     RawBody: rawBody,
     CommandBody: rawBody,
-    From: isGroup ? `group:${chatId}` : `zalo:${senderId}`,
+    From: isGroup ? `zalo:group:${chatId}` : `zalo:${senderId}`,
     To: `zalo:${chatId}`,
     SessionKey: route.sessionKey,
     AccountId: route.accountId,
     ChatType: isGroup ? "group" : "direct",
+    ConversationLabel: fromLabel,
     SenderName: senderName || undefined,
     SenderId: senderId,
+    CommandAuthorized: commandAuthorized,
     Provider: "zalo",
     Surface: "zalo",
     MessageSid: message_id,
@@ -525,7 +550,7 @@ async function processMessageWithPipeline(params: {
     MediaUrl: mediaPath,
     OriginatingChannel: "zalo",
     OriginatingTo: `zalo:${chatId}`,
-  };
+  });
 
   await deps.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,

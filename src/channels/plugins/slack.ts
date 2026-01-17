@@ -12,13 +12,15 @@ import {
 import { probeSlack } from "../../slack/probe.js";
 import { sendMessageSlack } from "../../slack/send.js";
 import { getChatChannelMeta } from "../registry.js";
+import { SlackConfigSchema } from "../../config/zod-schema.providers-core.js";
+import { buildChannelConfigSchema } from "./config-schema.js";
 import {
   deleteAccountFromConfigSection,
   setAccountEnabledInConfigSection,
 } from "./config-helpers.js";
 import { resolveSlackGroupRequireMention } from "./group-mentions.js";
 import { formatPairingApproveHint } from "./helpers.js";
-import { normalizeSlackMessagingTarget } from "./normalize-target.js";
+import { looksLikeSlackTargetId, normalizeSlackMessagingTarget } from "./normalize-target.js";
 import { slackOnboardingAdapter } from "./onboarding/slack.js";
 import { PAIRING_APPROVED_MESSAGE } from "./pairing-message.js";
 import {
@@ -26,6 +28,10 @@ import {
   migrateBaseNameToDefaultAccount,
 } from "./setup-helpers.js";
 import type { ChannelMessageActionName, ChannelPlugin } from "./types.js";
+import {
+  listSlackDirectoryGroupsFromConfig,
+  listSlackDirectoryPeersFromConfig,
+} from "./directory-config.js";
 
 const meta = getChatChannelMeta("slack");
 
@@ -80,6 +86,7 @@ export const slackPlugin: ChannelPlugin<ResolvedSlackAccount> = {
     blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
   },
   reload: { configPrefixes: ["channels.slack"] },
+  configSchema: buildChannelConfigSchema(SlackConfigSchema),
   config: {
     listAccountIds: (cfg) => listSlackAccountIds(cfg),
     resolveAccount: (cfg, accountId) => resolveSlackAccount({ cfg, accountId }),
@@ -132,18 +139,24 @@ export const slackPlugin: ChannelPlugin<ResolvedSlackAccount> = {
       };
     },
     collectWarnings: ({ account }) => {
+      const warnings: string[] = [];
       const groupPolicy = account.config.groupPolicy ?? "allowlist";
-      if (groupPolicy !== "open") return [];
       const channelAllowlistConfigured =
         Boolean(account.config.channels) && Object.keys(account.config.channels ?? {}).length > 0;
-      if (channelAllowlistConfigured) {
-        return [
-          `- Slack channels: groupPolicy="open" allows any channel not explicitly denied to trigger (mention-gated). Set channels.slack.groupPolicy="allowlist" and configure channels.slack.channels.`,
-        ];
+
+      if (groupPolicy === "open") {
+        if (channelAllowlistConfigured) {
+          warnings.push(
+            `- Slack channels: groupPolicy="open" allows any channel not explicitly denied to trigger (mention-gated). Set channels.slack.groupPolicy="allowlist" and configure channels.slack.channels.`,
+          );
+        } else {
+          warnings.push(
+            `- Slack channels: groupPolicy="open" with no channel allowlist; any channel can trigger (mention-gated). Set channels.slack.groupPolicy="allowlist" and configure channels.slack.channels.`,
+          );
+        }
       }
-      return [
-        `- Slack channels: groupPolicy="open" with no channel allowlist; any channel can trigger (mention-gated). Set channels.slack.groupPolicy="allowlist" and configure channels.slack.channels.`,
-      ];
+
+      return warnings;
     },
   },
   groups: {
@@ -168,6 +181,15 @@ export const slackPlugin: ChannelPlugin<ResolvedSlackAccount> = {
   },
   messaging: {
     normalizeTarget: normalizeSlackMessagingTarget,
+    targetResolver: {
+      looksLikeId: looksLikeSlackTargetId,
+      hint: "<channelId|user:ID|channel:ID>",
+    },
+  },
+  directory: {
+    self: async () => null,
+    listPeers: async (params) => listSlackDirectoryPeersFromConfig(params),
+    listGroups: async (params) => listSlackDirectoryGroupsFromConfig(params),
   },
   actions: {
     listActions: ({ cfg }) => {
@@ -435,16 +457,6 @@ export const slackPlugin: ChannelPlugin<ResolvedSlackAccount> = {
     deliveryMode: "direct",
     chunker: null,
     textChunkLimit: 4000,
-    resolveTarget: ({ to }) => {
-      const trimmed = to?.trim();
-      if (!trimmed) {
-        return {
-          ok: false,
-          error: new Error("Delivering to Slack requires --to <channelId|user:ID|channel:ID>"),
-        };
-      }
-      return { ok: true, to: trimmed };
-    },
     sendText: async ({ to, text, accountId, deps, replyToId, cfg }) => {
       const send = deps?.sendSlack ?? sendMessageSlack;
       const account = resolveSlackAccount({ cfg, accountId });

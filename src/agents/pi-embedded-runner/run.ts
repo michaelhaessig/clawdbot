@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { resolveUserPath } from "../../utils.js";
+import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
 import { resolveClawdbotAgentDir } from "../agent-paths.js";
 import {
   markAuthProfileFailure,
@@ -58,6 +59,14 @@ export async function runEmbeddedPiAgent(
   const globalLane = resolveGlobalLane(params.lane);
   const enqueueGlobal =
     params.enqueue ?? ((task, opts) => enqueueCommandInLane(globalLane, task, opts));
+  const channelHint = params.messageChannel ?? params.messageProvider;
+  const resolvedToolResultFormat =
+    params.toolResultFormat ??
+    (channelHint
+      ? isMarkdownCapableMessageChannel(channelHint)
+        ? "markdown"
+        : "plain"
+      : "markdown");
 
   return enqueueCommandInLane(sessionLane, () =>
     enqueueGlobal(async () => {
@@ -208,11 +217,13 @@ export async function runEmbeddedPiAgent(
             thinkLevel,
             verboseLevel: params.verboseLevel,
             reasoningLevel: params.reasoningLevel,
+            toolResultFormat: resolvedToolResultFormat,
             bashElevated: params.bashElevated,
             timeoutMs: params.timeoutMs,
             runId: params.runId,
             abortSignal: params.abortSignal,
             shouldEmitToolResult: params.shouldEmitToolResult,
+            shouldEmitToolOutput: params.shouldEmitToolOutput,
             onPartialReply: params.onPartialReply,
             onAssistantMessageStart: params.onAssistantMessageStart,
             onBlockReply: params.onBlockReply,
@@ -407,6 +418,7 @@ export async function runEmbeddedPiAgent(
             sessionKey: params.sessionKey ?? params.sessionId,
             verboseLevel: params.verboseLevel,
             reasoningLevel: params.reasoningLevel,
+            toolResultFormat: resolvedToolResultFormat,
             inlineToolResultsAllowed: !params.onPartialReply && !params.onToolResult,
           });
 

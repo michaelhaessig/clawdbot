@@ -308,8 +308,7 @@ export function createSessionStatusTool(opts?: {
 
       const isGroup =
         resolved.entry.chatType === "group" ||
-        resolved.entry.chatType === "room" ||
-        resolved.key.startsWith("group:") ||
+        resolved.entry.chatType === "channel" ||
         resolved.key.includes(":group:") ||
         resolved.key.includes(":channel:");
       const groupActivation = isGroup

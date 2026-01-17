@@ -83,7 +83,12 @@ Clawdbot ships with the pi‑ai catalog. These providers require **no**
 
 - Providers: `google-vertex`, `google-antigravity`, `google-gemini-cli`
 - Auth: Vertex uses gcloud ADC; Antigravity/Gemini CLI use their respective auth flows
-- CLI: `clawdbot onboard --auth-choice antigravity` (others via interactive wizard)
+- Antigravity OAuth is shipped as a bundled plugin (`google-antigravity-auth`, disabled by default).
+  - Enable: `clawdbot plugins enable google-antigravity-auth`
+  - Login: `clawdbot models auth login --provider google-antigravity --set-default`
+- Gemini CLI OAuth is shipped as a bundled plugin (`google-gemini-cli-auth`, disabled by default).
+  - Enable: `clawdbot plugins enable google-gemini-cli-auth`
+  - Login: `clawdbot models auth login --provider google-gemini-cli --set-default`
 
 ### Z.AI (GLM)
 
@@ -92,6 +97,13 @@ Clawdbot ships with the pi‑ai catalog. These providers require **no**
 - Example model: `zai/glm-4.7`
 - CLI: `clawdbot onboard --auth-choice zai-api-key`
   - Aliases: `z.ai/*` and `z-ai/*` normalize to `zai/*`
+
+### Vercel AI Gateway
+
+- Provider: `vercel-ai-gateway`
+- Auth: `AI_GATEWAY_API_KEY`
+- Example model: `vercel-ai-gateway/anthropic/claude-opus-4.5`
+- CLI: `clawdbot onboard --auth-choice ai-gateway-api-key`
 
 ### Other built-in providers
 

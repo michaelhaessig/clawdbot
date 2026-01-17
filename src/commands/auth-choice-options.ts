@@ -14,6 +14,7 @@ export type AuthChoiceGroupId =
   | "anthropic"
   | "google"
   | "openrouter"
+  | "ai-gateway"
   | "moonshot"
   | "zai"
   | "opencode-zen"
@@ -60,14 +61,20 @@ const AUTH_CHOICE_GROUP_DEFS: {
   {
     value: "google",
     label: "Google",
-    hint: "Antigravity + Gemini API key",
-    choices: ["antigravity", "gemini-api-key"],
+    hint: "Gemini API key",
+    choices: ["gemini-api-key"],
   },
   {
     value: "openrouter",
     label: "OpenRouter",
     hint: "API key",
     choices: ["openrouter-api-key"],
+  },
+  {
+    value: "ai-gateway",
+    label: "Vercel AI Gateway",
+    hint: "API key",
+    choices: ["ai-gateway-api-key"],
   },
   {
     value: "moonshot",
@@ -168,12 +175,12 @@ export function buildAuthChoiceOptions(params: {
   options.push({ value: "chutes", label: "Chutes (OAuth)" });
   options.push({ value: "openai-api-key", label: "OpenAI API key" });
   options.push({ value: "openrouter-api-key", label: "OpenRouter API key" });
+  options.push({
+    value: "ai-gateway-api-key",
+    label: "Vercel AI Gateway API key",
+  });
   options.push({ value: "moonshot-api-key", label: "Moonshot AI API key" });
   options.push({ value: "synthetic-api-key", label: "Synthetic API key" });
-  options.push({
-    value: "antigravity",
-    label: "Google Antigravity (Claude Opus 4.5, Gemini 3, etc.)",
-  });
   options.push({
     value: "github-copilot",
     label: "GitHub Copilot (GitHub device login)",

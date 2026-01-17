@@ -1,4 +1,5 @@
 import { getChannelDock } from "../../channels/dock.js";
+import type { SkillCommandSpec } from "../../agents/skills.js";
 import type { ClawdbotConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
@@ -28,6 +29,7 @@ export async function handleInlineActions(params: {
   cfg: ClawdbotConfig;
   agentId: string;
   sessionEntry?: SessionEntry;
+  previousSessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey: string;
   storePath?: string;
@@ -39,6 +41,7 @@ export async function handleInlineActions(params: {
   allowTextCommands: boolean;
   inlineStatusRequested: boolean;
   command: Parameters<typeof handleCommands>[0]["command"];
+  skillCommands?: SkillCommandSpec[];
   directives: InlineDirectives;
   cleanedBody: string;
   elevatedEnabled: boolean;
@@ -65,6 +68,7 @@ export async function handleInlineActions(params: {
     cfg,
     agentId,
     sessionEntry,
+    previousSessionEntry,
     sessionStore,
     sessionKey,
     storePath,
@@ -99,13 +103,16 @@ export async function handleInlineActions(params: {
   let cleanedBody = initialCleanedBody;
 
   const shouldLoadSkillCommands = command.commandBodyNormalized.startsWith("/");
-  const skillCommands = shouldLoadSkillCommands
-    ? listSkillCommandsForWorkspace({
-        workspaceDir,
-        cfg,
-        skillFilter,
-      })
-    : [];
+  const skillCommands =
+    shouldLoadSkillCommands && params.skillCommands
+      ? params.skillCommands
+      : shouldLoadSkillCommands
+        ? listSkillCommandsForWorkspace({
+            workspaceDir,
+            cfg,
+            skillFilter,
+          })
+        : [];
 
   const skillInvocation =
     allowTextCommands && skillCommands.length > 0
@@ -128,7 +135,9 @@ export async function handleInlineActions(params: {
     ].filter((entry): entry is string => Boolean(entry));
     const rewrittenBody = promptParts.join("\n\n");
     ctx.Body = rewrittenBody;
+    ctx.BodyForAgent = rewrittenBody;
     sessionCtx.Body = rewrittenBody;
+    sessionCtx.BodyForAgent = rewrittenBody;
     sessionCtx.BodyStripped = rewrittenBody;
     cleanedBody = rewrittenBody;
   }
@@ -146,6 +155,7 @@ export async function handleInlineActions(params: {
   if (inlineCommand) {
     cleanedBody = inlineCommand.cleaned;
     sessionCtx.Body = cleanedBody;
+    sessionCtx.BodyForAgent = cleanedBody;
     sessionCtx.BodyStripped = cleanedBody;
   }
 
@@ -175,6 +185,7 @@ export async function handleInlineActions(params: {
       resolveDefaultThinkingLevel,
       isGroup,
       defaultGroupActivation: defaultActivation,
+      mediaDecisions: ctx.MediaUnderstandingDecisions,
     });
     await sendInlineReply(inlineStatusReply);
     directives = { ...directives, hasStatusDirective: false };
@@ -187,34 +198,35 @@ export async function handleInlineActions(params: {
       commandBodyNormalized: inlineCommand.command,
     };
     const inlineResult = await handleCommands({
-    ctx,
-    cfg,
-    command: inlineCommandContext,
-    agentId,
-    directives,
-    elevated: {
-      enabled: elevatedEnabled,
-      allowed: elevatedAllowed,
-      failures: elevatedFailures,
-    },
-    sessionEntry,
-    sessionStore,
-    sessionKey,
-    storePath,
-    sessionScope,
-    workspaceDir,
-    defaultGroupActivation: defaultActivation,
-    resolvedThinkLevel,
-    resolvedVerboseLevel: resolvedVerboseLevel ?? "off",
-    resolvedReasoningLevel,
-    resolvedElevatedLevel,
-    resolveDefaultThinkingLevel,
-    provider,
-    model,
-    contextTokens,
-    isGroup,
-    skillCommands,
-  });
+      ctx,
+      cfg,
+      command: inlineCommandContext,
+      agentId,
+      directives,
+      elevated: {
+        enabled: elevatedEnabled,
+        allowed: elevatedAllowed,
+        failures: elevatedFailures,
+      },
+      sessionEntry,
+      previousSessionEntry,
+      sessionStore,
+      sessionKey,
+      storePath,
+      sessionScope,
+      workspaceDir,
+      defaultGroupActivation: defaultActivation,
+      resolvedThinkLevel,
+      resolvedVerboseLevel: resolvedVerboseLevel ?? "off",
+      resolvedReasoningLevel,
+      resolvedElevatedLevel,
+      resolveDefaultThinkingLevel,
+      provider,
+      model,
+      contextTokens,
+      isGroup,
+      skillCommands,
+    });
     if (inlineResult.reply) {
       if (!inlineCommand.cleaned) {
         typing.cleanup();
@@ -260,6 +272,7 @@ export async function handleInlineActions(params: {
       failures: elevatedFailures,
     },
     sessionEntry,
+    previousSessionEntry,
     sessionStore,
     sessionKey,
     storePath,

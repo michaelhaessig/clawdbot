@@ -37,9 +37,13 @@ See [Voice Call](/plugins/voice-call) for a concrete example plugin.
 
 - Microsoft Teams is plugin-only as of 2026.1.15; install `@clawdbot/msteams` if you use Teams.
 - [Voice Call](/plugins/voice-call) — `@clawdbot/voice-call`
+- [Zalo Personal](/plugins/zalouser) — `@clawdbot/zalouser`
 - [Matrix](/channels/matrix) — `@clawdbot/matrix`
 - [Zalo](/channels/zalo) — `@clawdbot/zalo`
 - [Microsoft Teams](/channels/msteams) — `@clawdbot/msteams`
+- Google Antigravity OAuth (provider auth) — bundled as `google-antigravity-auth` (disabled by default)
+- Gemini CLI OAuth (provider auth) — bundled as `google-gemini-cli-auth` (disabled by default)
+- Copilot Proxy (provider auth) — bundled as `copilot-proxy` (disabled by default)
 
 Clawdbot plugins are **TypeScript modules** loaded at runtime via jiti. They can
 register:
@@ -57,16 +61,26 @@ Plugins run **in‑process** with the Gateway, so treat them as trusted code.
 
 Clawdbot scans, in order:
 
-1) Global extensions
-- `~/.clawdbot/extensions/*.ts`
-- `~/.clawdbot/extensions/*/index.ts`
+1) Config paths
+- `plugins.load.paths` (file or directory)
 
 2) Workspace extensions
 - `<workspace>/.clawdbot/extensions/*.ts`
 - `<workspace>/.clawdbot/extensions/*/index.ts`
 
-3) Config paths
-- `plugins.load.paths` (file or directory)
+3) Global extensions
+- `~/.clawdbot/extensions/*.ts`
+- `~/.clawdbot/extensions/*/index.ts`
+
+4) Bundled extensions (shipped with Clawdbot, **disabled by default**)
+- `<clawdbot>/extensions/*`
+
+Bundled plugins must be enabled explicitly via `plugins.entries.<id>.enabled`
+or `clawdbot plugins enable <id>`. Installed plugins are enabled by default,
+but can be disabled the same way.
+
+If multiple plugins resolve to the same id, the first match in the order above
+wins and lower-precedence copies are ignored.
 
 ### Package packs
 
@@ -156,9 +170,11 @@ export default {
 ```bash
 clawdbot plugins list
 clawdbot plugins info <id>
-clawdbot plugins install <path>              # add a local file/dir to plugins.load.paths
+clawdbot plugins install <path>                 # copy a local file/dir into ~/.clawdbot/extensions/<id>
 clawdbot plugins install ./extensions/voice-call # relative path ok
-clawdbot plugins install ./plugin.tgz        # install from a local tarball
+clawdbot plugins install ./plugin.tgz           # install from a local tarball
+clawdbot plugins install ./plugin.zip           # install from a local zip
+clawdbot plugins install -l ./extensions/voice-call # link (no copy) for dev
 clawdbot plugins install @clawdbot/voice-call # install from npm
 clawdbot plugins update <id>
 clawdbot plugins update --all

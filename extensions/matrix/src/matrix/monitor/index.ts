@@ -8,12 +8,14 @@ import { hasControlCommand } from "../../../../../src/auto-reply/command-detecti
 import { shouldHandleTextCommands } from "../../../../../src/auto-reply/commands-registry.js";
 import { formatAgentEnvelope } from "../../../../../src/auto-reply/envelope.js";
 import { dispatchReplyFromConfig } from "../../../../../src/auto-reply/reply/dispatch-from-config.js";
+import { finalizeInboundContext } from "../../../../../src/auto-reply/reply/inbound-context.js";
 import {
   buildMentionRegexes,
   matchesMentionPatterns,
 } from "../../../../../src/auto-reply/reply/mentions.js";
 import { createReplyDispatcherWithTyping } from "../../../../../src/auto-reply/reply/reply-dispatcher.js";
 import type { ReplyPayload } from "../../../../../src/auto-reply/types.js";
+import { resolveCommandAuthorizedFromAuthorizers } from "../../../../../src/channels/command-gating.js";
 import { loadConfig } from "../../../../../src/config/config.js";
 import { resolveStorePath, updateLastRoute } from "../../../../../src/config/sessions.js";
 import { danger, logVerbose, shouldLogVerbose } from "../../../../../src/globals.js";
@@ -293,17 +295,26 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         text: bodyText,
         mentionRegexes,
       });
-      const commandAuthorized =
-        (!allowlistOnly && effectiveAllowFrom.length === 0) ||
-        resolveMatrixAllowListMatches({
-          allowList: effectiveAllowFrom,
-          userId: senderId,
-          userName: senderName,
-        });
       const allowTextCommands = shouldHandleTextCommands({
         cfg,
         surface: "matrix",
       });
+      const useAccessGroups = cfg.commands?.useAccessGroups !== false;
+      const senderAllowedForCommands = resolveMatrixAllowListMatches({
+        allowList: effectiveAllowFrom,
+        userId: senderId,
+        userName: senderName,
+      });
+      const commandAuthorized = resolveCommandAuthorizedFromAuthorizers({
+        useAccessGroups,
+        authorizers: [
+          { configured: effectiveAllowFrom.length > 0, allowed: senderAllowedForCommands },
+        ],
+      });
+      if (isRoom && allowTextCommands && hasControlCommand(bodyText, cfg) && !commandAuthorized) {
+        logVerbose(`matrix: drop control command from unauthorized sender ${senderId}`);
+        return;
+      }
       const shouldRequireMention = isRoom
         ? roomConfigInfo.config?.autoReply === true
           ? false
@@ -328,20 +339,21 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
 
       const messageId = event.getId() ?? "";
       const threadRootId = resolveMatrixThreadRootId({ event, content });
-      const threadTarget = resolveMatrixThreadTarget({
-        threadReplies,
-        messageId,
-        threadRootId,
-        isThreadRoot: event.isThreadRoot,
-      });
+	      const threadTarget = resolveMatrixThreadTarget({
+	        threadReplies,
+	        messageId,
+	        threadRootId,
+	        isThreadRoot: event.isThreadRoot,
+	      });
 
-      const textWithId = `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
-      const body = formatAgentEnvelope({
-        channel: "Matrix",
-        from: senderName,
-        timestamp: event.getTs() ?? undefined,
-        body: textWithId,
-      });
+	      const envelopeFrom = isDirectMessage ? senderName : (roomName ?? roomId);
+	      const textWithId = `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
+	      const body = formatAgentEnvelope({
+	        channel: "Matrix",
+	        from: envelopeFrom,
+	        timestamp: event.getTs() ?? undefined,
+	        body: textWithId,
+	      });
 
       const route = resolveAgentRoute({
         cfg,
@@ -353,18 +365,21 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       });
 
       const groupSystemPrompt = roomConfigInfo.config?.systemPrompt?.trim() || undefined;
-      const ctxPayload = {
-        Body: body,
-        From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
-        To: `room:${roomId}`,
-        SessionKey: route.sessionKey,
-        AccountId: route.accountId,
-        ChatType: isDirectMessage ? "direct" : "room",
+	      const ctxPayload = finalizeInboundContext({
+	        Body: body,
+	        RawBody: bodyText,
+	        CommandBody: bodyText,
+	        From: isDirectMessage ? `matrix:${senderId}` : `matrix:channel:${roomId}`,
+	        To: `room:${roomId}`,
+	        SessionKey: route.sessionKey,
+	        AccountId: route.accountId,
+        ChatType: isDirectMessage ? "direct" : "channel",
+        ConversationLabel: envelopeFrom,
         SenderName: senderName,
         SenderId: senderId,
         SenderUsername: senderId.split(":")[0]?.replace(/^@/, ""),
         GroupSubject: isRoom ? (roomName ?? roomId) : undefined,
-        GroupRoom: isRoom ? (room.getCanonicalAlias?.() ?? roomId) : undefined,
+        GroupChannel: isRoom ? (room.getCanonicalAlias?.() ?? roomId) : undefined,
         GroupSystemPrompt: isRoom ? groupSystemPrompt : undefined,
         Provider: "matrix" as const,
         Surface: "matrix" as const,
@@ -376,11 +391,11 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         MediaPath: media?.path,
         MediaType: media?.contentType,
         MediaUrl: media?.path,
-        CommandAuthorized: commandAuthorized,
-        CommandSource: "text" as const,
-        OriginatingChannel: "matrix" as const,
-        OriginatingTo: `room:${roomId}`,
-      };
+	        CommandAuthorized: commandAuthorized,
+	        CommandSource: "text" as const,
+	        OriginatingChannel: "matrix" as const,
+	        OriginatingTo: `room:${roomId}`,
+	      });
 
       if (isDirectMessage) {
         const storePath = resolveStorePath(cfg.session?.store, {
