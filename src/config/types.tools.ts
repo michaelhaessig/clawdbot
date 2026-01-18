@@ -120,6 +120,35 @@ export type ToolPolicyConfig = {
   profile?: ToolProfileId;
 };
 
+export type ExecToolConfig = {
+  /** Exec host routing (default: sandbox). */
+  host?: "sandbox" | "gateway" | "node";
+  /** Exec security mode (default: deny). */
+  security?: "deny" | "allowlist" | "full";
+  /** Exec ask mode (default: on-miss). */
+  ask?: "off" | "on-miss" | "always";
+  /** Default node binding for exec.host=node (node id/name). */
+  node?: string;
+  /** Default time (ms) before an exec command auto-backgrounds. */
+  backgroundMs?: number;
+  /** Default timeout (seconds) before auto-killing exec commands. */
+  timeoutSec?: number;
+  /** How long to keep finished sessions in memory (ms). */
+  cleanupMs?: number;
+  /** Emit a system event and heartbeat when a backgrounded exec exits. */
+  notifyOnExit?: boolean;
+  /** apply_patch subtool configuration (experimental). */
+  applyPatch?: {
+    /** Enable apply_patch for OpenAI models (default: false). */
+    enabled?: boolean;
+    /**
+     * Optional allowlist of model ids that can use apply_patch.
+     * Accepts either raw ids (e.g. "gpt-5.2") or full ids (e.g. "openai/gpt-5.2").
+     */
+    allowModels?: string[];
+  };
+};
+
 export type AgentToolsConfig = {
   /** Base tool profile applied before allow/deny lists. */
   profile?: ToolProfileId;
@@ -134,6 +163,8 @@ export type AgentToolsConfig = {
     /** Approved senders for /elevated (per-provider allowlists). */
     allowFrom?: AgentElevatedAllowFromConfig;
   };
+  /** Exec tool defaults for this agent. */
+  exec?: ExecToolConfig;
   sandbox?: {
     tools?: {
       allow?: string[];
@@ -145,15 +176,34 @@ export type AgentToolsConfig = {
 export type MemorySearchConfig = {
   /** Enable vector memory search (default: true). */
   enabled?: boolean;
+  /** Sources to index and search (default: ["memory"]). */
+  sources?: Array<"memory" | "sessions">;
+  /** Experimental memory search settings. */
+  experimental?: {
+    /** Enable session transcript indexing (experimental, default: false). */
+    sessionMemory?: boolean;
+  };
   /** Embedding provider mode. */
-  provider?: "openai" | "local";
+  provider?: "openai" | "gemini" | "local";
   remote?: {
     baseUrl?: string;
     apiKey?: string;
     headers?: Record<string, string>;
+    batch?: {
+      /** Enable batch API for embedding indexing (OpenAI/Gemini; default: true). */
+      enabled?: boolean;
+      /** Wait for batch completion (default: true). */
+      wait?: boolean;
+      /** Max concurrent batch jobs (default: 2). */
+      concurrency?: number;
+      /** Poll interval in ms (default: 5000). */
+      pollIntervalMs?: number;
+      /** Timeout in minutes (default: 60). */
+      timeoutMinutes?: number;
+    };
   };
-  /** Fallback behavior when local embeddings fail. */
-  fallback?: "openai" | "none";
+  /** Fallback behavior when embeddings fail. */
+  fallback?: "openai" | "gemini" | "local" | "none";
   /** Embedding model id (remote) or alias (local). */
   model?: string;
   /** Local embedding settings (node-llama-cpp). */
@@ -167,6 +217,18 @@ export type MemorySearchConfig = {
   store?: {
     driver?: "sqlite";
     path?: string;
+    vector?: {
+      /** Enable sqlite-vec extension for vector search (default: true). */
+      enabled?: boolean;
+      /** Optional override path to sqlite-vec extension (.dylib/.so/.dll). */
+      extensionPath?: string;
+    };
+    cache?: {
+      /** Enable embedding cache (default: true). */
+      enabled?: boolean;
+      /** Optional max cache entries per provider/model. */
+      maxEntries?: number;
+    };
   };
   /** Chunking configuration. */
   chunking?: {
@@ -185,6 +247,23 @@ export type MemorySearchConfig = {
   query?: {
     maxResults?: number;
     minScore?: number;
+    hybrid?: {
+      /** Enable hybrid BM25 + vector search (default: true). */
+      enabled?: boolean;
+      /** Weight for vector similarity when merging results (0-1). */
+      vectorWeight?: number;
+      /** Weight for BM25 text relevance when merging results (0-1). */
+      textWeight?: number;
+      /** Multiplier for candidate pool size (default: 4). */
+      candidateMultiplier?: number;
+    };
+  };
+  /** Index cache behavior. */
+  cache?: {
+    /** Cache chunk embeddings in SQLite (default: true). */
+    enabled?: boolean;
+    /** Optional cap on cached embeddings (best-effort). */
+    maxEntries?: number;
   };
 };
 
@@ -199,8 +278,8 @@ export type ToolsConfig = {
     search?: {
       /** Enable web search tool (default: true when API key is present). */
       enabled?: boolean;
-      /** Search provider (currently "brave"). */
-      provider?: "brave";
+      /** Search provider ("brave" or "perplexity"). */
+      provider?: "brave" | "perplexity";
       /** Brave Search API key (optional; defaults to BRAVE_API_KEY env var). */
       apiKey?: string;
       /** Default search results count (1-10). */
@@ -209,6 +288,15 @@ export type ToolsConfig = {
       timeoutSeconds?: number;
       /** Cache TTL in minutes for search results. */
       cacheTtlMinutes?: number;
+      /** Perplexity-specific configuration (used when provider="perplexity"). */
+      perplexity?: {
+        /** API key for Perplexity or OpenRouter (defaults to PERPLEXITY_API_KEY or OPENROUTER_API_KEY env var). */
+        apiKey?: string;
+        /** Base URL for API requests (defaults to OpenRouter: https://openrouter.ai/api/v1). */
+        baseUrl?: string;
+        /** Model to use (defaults to "perplexity/sonar-pro"). */
+        model?: string;
+      };
     };
     fetch?: {
       /** Enable web fetch tool (default: true). */
@@ -281,26 +369,7 @@ export type ToolsConfig = {
     allowFrom?: AgentElevatedAllowFromConfig;
   };
   /** Exec tool defaults. */
-  exec?: {
-    /** Default time (ms) before an exec command auto-backgrounds. */
-    backgroundMs?: number;
-    /** Default timeout (seconds) before auto-killing exec commands. */
-    timeoutSec?: number;
-    /** How long to keep finished sessions in memory (ms). */
-    cleanupMs?: number;
-    /** Emit a system event and heartbeat when a backgrounded exec exits. */
-    notifyOnExit?: boolean;
-    /** apply_patch subtool configuration (experimental). */
-    applyPatch?: {
-      /** Enable apply_patch for OpenAI models (default: false). */
-      enabled?: boolean;
-      /**
-       * Optional allowlist of model ids that can use apply_patch.
-       * Accepts either raw ids (e.g. "gpt-5.2") or full ids (e.g. "openai/gpt-5.2").
-       */
-      allowModels?: string[];
-    };
-  };
+  exec?: ExecToolConfig;
   /** Sub-agent tool policy defaults (deny wins). */
   subagents?: {
     /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */

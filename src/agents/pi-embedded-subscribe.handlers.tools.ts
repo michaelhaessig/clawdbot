@@ -5,12 +5,14 @@ import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
 import { isMessagingTool, isMessagingToolSendAction } from "./pi-embedded-messaging.js";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import {
+  extractToolErrorMessage,
   extractToolResultText,
   extractMessagingToolSend,
   isToolResultError,
   sanitizeToolResult,
 } from "./pi-embedded-subscribe.tools.js";
 import { inferToolMetaFromArgs } from "./pi-embedded-utils.js";
+import { normalizeToolName } from "./tool-policy.js";
 
 function extendExecMeta(toolName: string, args: unknown, meta?: string): string | undefined {
   const normalized = toolName.trim().toLowerCase();
@@ -35,7 +37,8 @@ export async function handleToolExecutionStart(
     void ctx.params.onBlockReplyFlush();
   }
 
-  const toolName = String(evt.toolName);
+  const rawToolName = String(evt.toolName);
+  const toolName = normalizeToolName(rawToolName);
   const toolCallId = String(evt.toolCallId);
   const args = evt.args;
 
@@ -109,7 +112,7 @@ export function handleToolExecutionUpdate(
     partialResult?: unknown;
   },
 ) {
-  const toolName = String(evt.toolName);
+  const toolName = normalizeToolName(String(evt.toolName));
   const toolCallId = String(evt.toolCallId);
   const partial = evt.partialResult;
   const sanitized = sanitizeToolResult(partial);
@@ -142,7 +145,7 @@ export function handleToolExecutionEnd(
     result?: unknown;
   },
 ) {
-  const toolName = String(evt.toolName);
+  const toolName = normalizeToolName(String(evt.toolName));
   const toolCallId = String(evt.toolCallId);
   const isError = Boolean(evt.isError);
   const result = evt.result;
@@ -152,6 +155,14 @@ export function handleToolExecutionEnd(
   ctx.state.toolMetas.push({ toolName, meta });
   ctx.state.toolMetaById.delete(toolCallId);
   ctx.state.toolSummaryById.delete(toolCallId);
+  if (isToolError) {
+    const errorMessage = extractToolErrorMessage(sanitizedResult);
+    ctx.state.lastToolError = {
+      toolName,
+      meta,
+      error: errorMessage,
+    };
+  }
 
   // Commit messaging tool text on success, discard on error.
   const pendingText = ctx.state.pendingMessagingTexts.get(toolCallId);

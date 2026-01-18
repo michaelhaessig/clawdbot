@@ -2,31 +2,13 @@ import type { MatrixEvent, Room } from "matrix-js-sdk";
 import { EventType, RelationType, RoomEvent } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events.js";
 
-import { resolveEffectiveMessagesConfig, resolveHumanDelayConfig } from "../../../../../src/agents/identity.js";
-import { chunkMarkdownText, resolveTextChunkLimit } from "../../../../../src/auto-reply/chunk.js";
-import { hasControlCommand } from "../../../../../src/auto-reply/command-detection.js";
-import { shouldHandleTextCommands } from "../../../../../src/auto-reply/commands-registry.js";
-import { formatAgentEnvelope } from "../../../../../src/auto-reply/envelope.js";
-import { dispatchReplyFromConfig } from "../../../../../src/auto-reply/reply/dispatch-from-config.js";
-import { finalizeInboundContext } from "../../../../../src/auto-reply/reply/inbound-context.js";
 import {
-  buildMentionRegexes,
-  matchesMentionPatterns,
-} from "../../../../../src/auto-reply/reply/mentions.js";
-import { createReplyDispatcherWithTyping } from "../../../../../src/auto-reply/reply/reply-dispatcher.js";
-import type { ReplyPayload } from "../../../../../src/auto-reply/types.js";
-import { resolveCommandAuthorizedFromAuthorizers } from "../../../../../src/channels/command-gating.js";
-import { loadConfig } from "../../../../../src/config/config.js";
-import { resolveStorePath, updateLastRoute } from "../../../../../src/config/sessions.js";
-import { danger, logVerbose, shouldLogVerbose } from "../../../../../src/globals.js";
-import { enqueueSystemEvent } from "../../../../../src/infra/system-events.js";
-import { getChildLogger } from "../../../../../src/logging.js";
-import {
-  readChannelAllowFromStore,
-  upsertChannelPairingRequest,
-} from "../../../../../src/pairing/pairing-store.js";
-import { resolveAgentRoute } from "../../../../../src/routing/resolve-route.js";
-import type { RuntimeEnv } from "../../../../../src/runtime.js";
+  formatAllowlistMatchMeta,
+  mergeAllowlist,
+  summarizeMapping,
+  type ReplyPayload,
+  type RuntimeEnv,
+} from "clawdbot/plugin-sdk";
 import type { CoreConfig, ReplyToMode } from "../../types.js";
 import { setActiveMatrixClient } from "../active-client.js";
 import {
@@ -41,7 +23,11 @@ import {
   parsePollStartContent,
 } from "../poll-types.js";
 import { reactMatrixMessage, sendMessageMatrix, sendTypingMatrix } from "../send.js";
-import { resolveMatrixAllowListMatches, normalizeAllowListLower } from "./allowlist.js";
+import {
+  resolveMatrixAllowListMatch,
+  resolveMatrixAllowListMatches,
+  normalizeAllowListLower,
+} from "./allowlist.js";
 import { registerMatrixAutoJoin } from "./auto-join.js";
 import { createDirectRoomTracker } from "./direct.js";
 import { downloadMatrixMedia } from "./media.js";
@@ -49,6 +35,8 @@ import { resolveMentions } from "./mentions.js";
 import { deliverMatrixReplies } from "./replies.js";
 import { resolveMatrixRoomConfig } from "./rooms.js";
 import { resolveMatrixThreadRootId, resolveMatrixThreadTarget } from "./threads.js";
+import { resolveMatrixTargets } from "../../resolve-targets.js";
+import { getMatrixRuntime } from "../../runtime.js";
 
 export type MonitorMatrixOpts = {
   runtime?: RuntimeEnv;
@@ -64,7 +52,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   if (isBunRuntime()) {
     throw new Error("Matrix provider requires Node (bun runtime not supported)");
   }
-  const cfg = loadConfig() as CoreConfig;
+  const core = getMatrixRuntime();
+  let cfg = core.config.loadConfig() as CoreConfig;
   if (cfg.channels?.matrix?.enabled === false) return;
 
   const runtime: RuntimeEnv = opts.runtime ?? {
@@ -72,6 +61,110 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     error: console.error,
     exit: (code: number): never => {
       throw new Error(`exit ${code}`);
+    },
+  };
+
+  const normalizeUserEntry = (raw: string) =>
+    raw.replace(/^matrix:/i, "").replace(/^user:/i, "").trim();
+  const normalizeRoomEntry = (raw: string) =>
+    raw.replace(/^matrix:/i, "").replace(/^(room|channel):/i, "").trim();
+  const isMatrixUserId = (value: string) => value.startsWith("@") && value.includes(":");
+
+  let allowFrom = cfg.channels?.matrix?.dm?.allowFrom ?? [];
+  let roomsConfig = cfg.channels?.matrix?.rooms;
+
+  if (allowFrom.length > 0) {
+    const entries = allowFrom
+      .map((entry) => normalizeUserEntry(String(entry)))
+      .filter((entry) => entry && entry !== "*");
+    if (entries.length > 0) {
+      const mapping: string[] = [];
+      const unresolved: string[] = [];
+      const additions: string[] = [];
+      const pending: string[] = [];
+      for (const entry of entries) {
+        if (isMatrixUserId(entry)) {
+          additions.push(entry);
+          continue;
+        }
+        pending.push(entry);
+      }
+      if (pending.length > 0) {
+        const resolved = await resolveMatrixTargets({
+          cfg,
+          inputs: pending,
+          kind: "user",
+          runtime,
+        });
+        for (const entry of resolved) {
+          if (entry.resolved && entry.id) {
+            additions.push(entry.id);
+            mapping.push(`${entry.input}→${entry.id}`);
+          } else {
+            unresolved.push(entry.input);
+          }
+        }
+      }
+      allowFrom = mergeAllowlist({ existing: allowFrom, additions });
+      summarizeMapping("matrix users", mapping, unresolved, runtime);
+    }
+  }
+
+  if (roomsConfig && Object.keys(roomsConfig).length > 0) {
+    const entries = Object.keys(roomsConfig).filter((key) => key !== "*");
+    const mapping: string[] = [];
+    const unresolved: string[] = [];
+    const nextRooms = { ...roomsConfig };
+    const pending: Array<{ input: string; query: string }> = [];
+    for (const entry of entries) {
+      const trimmed = entry.trim();
+      if (!trimmed) continue;
+      const cleaned = normalizeRoomEntry(trimmed);
+      if (cleaned.startsWith("!") && cleaned.includes(":")) {
+        if (!nextRooms[cleaned]) {
+          nextRooms[cleaned] = roomsConfig[entry];
+        }
+        mapping.push(`${entry}→${cleaned}`);
+        continue;
+      }
+      pending.push({ input: entry, query: trimmed });
+    }
+    if (pending.length > 0) {
+      const resolved = await resolveMatrixTargets({
+        cfg,
+        inputs: pending.map((entry) => entry.query),
+        kind: "group",
+        runtime,
+      });
+      resolved.forEach((entry, index) => {
+        const source = pending[index];
+        if (!source) return;
+        if (entry.resolved && entry.id) {
+          if (!nextRooms[entry.id]) {
+            nextRooms[entry.id] = roomsConfig[source.input];
+          }
+          mapping.push(`${source.input}→${entry.id}`);
+        } else {
+          unresolved.push(source.input);
+        }
+      });
+    }
+    roomsConfig = nextRooms;
+    summarizeMapping("matrix rooms", mapping, unresolved, runtime);
+  }
+
+  cfg = {
+    ...cfg,
+    channels: {
+      ...cfg.channels,
+      matrix: {
+        ...cfg.channels?.matrix,
+        dm: {
+          ...cfg.channels?.matrix?.dm,
+          allowFrom,
+        },
+        rooms: roomsConfig,
+      },
     },
   };
 
@@ -91,10 +184,16 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   });
   setActiveMatrixClient(client);
 
-  const mentionRegexes = buildMentionRegexes(cfg);
-  const logger = getChildLogger({ module: "matrix-auto-reply" });
+  const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg);
+  const logger = core.logging.getChildLogger({ module: "matrix-auto-reply" });
+  const logVerboseMessage = (message: string) => {
+    if (core.logging.shouldLogVerbose()) {
+      logger.debug(message);
+    }
+  };
   const allowlistOnly = cfg.channels?.matrix?.allowlistOnly === true;
-  const groupPolicyRaw = cfg.channels?.matrix?.groupPolicy ?? "allowlist";
+  const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
+  const groupPolicyRaw = cfg.channels?.matrix?.groupPolicy ?? defaultGroupPolicy ?? "allowlist";
   const groupPolicy = allowlistOnly && groupPolicyRaw === "open" ? "allowlist" : groupPolicyRaw;
   const replyToMode = opts.replyToMode ?? cfg.channels?.matrix?.replyToMode ?? "off";
   const threadReplies = cfg.channels?.matrix?.threadReplies ?? "inbound";
@@ -102,8 +201,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const dmEnabled = dmConfig?.enabled ?? true;
   const dmPolicyRaw = dmConfig?.policy ?? "pairing";
   const dmPolicy = allowlistOnly && dmPolicyRaw !== "disabled" ? "allowlist" : dmPolicyRaw;
-  const allowFrom = dmConfig?.allowFrom ?? [];
-  const textLimit = resolveTextChunkLimit(cfg, "matrix");
+  const textLimit = core.channel.text.resolveTextChunkLimit(cfg, "matrix");
   const mediaMaxMb = opts.mediaMaxMb ?? cfg.channels?.matrix?.mediaMaxMb ?? DEFAULT_MEDIA_MAX_MB;
   const mediaMaxBytes = Math.max(1, mediaMaxMb) * 1024 * 1024;
   const startupMs = Date.now();
@@ -184,44 +282,49 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         aliases: roomAliases,
         name: roomName,
       });
+      const roomMatchMeta = `matchKey=${roomConfigInfo.matchKey ?? "none"} matchSource=${
+        roomConfigInfo.matchSource ?? "none"
+      }`;
 
       if (roomConfigInfo.config && !roomConfigInfo.allowed) {
-        logVerbose(`matrix: room disabled room=${roomId}`);
+        logVerboseMessage(`matrix: room disabled room=${roomId} (${roomMatchMeta})`);
         return;
       }
       if (groupPolicy === "allowlist") {
         if (!roomConfigInfo.allowlistConfigured) {
-          logVerbose("matrix: drop room message (no allowlist)");
+          logVerboseMessage(`matrix: drop room message (no allowlist, ${roomMatchMeta})`);
           return;
         }
         if (!roomConfigInfo.config) {
-          logVerbose("matrix: drop room message (not in allowlist)");
+          logVerboseMessage(`matrix: drop room message (not in allowlist, ${roomMatchMeta})`);
           return;
         }
       }
 
       const senderName = room.getMember(senderId)?.name ?? senderId;
-      const storeAllowFrom = await readChannelAllowFromStore("matrix").catch(() => []);
+      const storeAllowFrom = await core.channel.pairing.readAllowFromStore("matrix").catch(() => []);
       const effectiveAllowFrom = normalizeAllowListLower([...allowFrom, ...storeAllowFrom]);
 
       if (isDirectMessage) {
         if (!dmEnabled || dmPolicy === "disabled") return;
         if (dmPolicy !== "open") {
-          const permitted =
-            effectiveAllowFrom.length > 0 &&
-            resolveMatrixAllowListMatches({
-              allowList: effectiveAllowFrom,
-              userId: senderId,
-              userName: senderName,
-            });
-          if (!permitted) {
+          const allowMatch = resolveMatrixAllowListMatch({
+            allowList: effectiveAllowFrom,
+            userId: senderId,
+            userName: senderName,
+          });
+          const allowMatchMeta = formatAllowlistMatchMeta(allowMatch);
+          if (!allowMatch.allowed) {
             if (dmPolicy === "pairing") {
-              const { code, created } = await upsertChannelPairingRequest({
+              const { code, created } = await core.channel.pairing.upsertPairingRequest({
                 channel: "matrix",
                 id: senderId,
                 meta: { name: senderName },
               });
               if (created) {
+                logVerboseMessage(
+                  `matrix pairing request sender=${senderId} name=${senderName ?? "unknown"} (${allowMatchMeta})`,
+                );
                 try {
                   await sendMessageMatrix(
                     `room:${roomId}`,
@@ -236,9 +339,14 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
                     { client },
                   );
                 } catch (err) {
-                  logVerbose(`matrix pairing reply failed for ${senderId}: ${String(err)}`);
+                  logVerboseMessage(`matrix pairing reply failed for ${senderId}: ${String(err)}`);
                 }
               }
+            }
+            if (dmPolicy !== "pairing") {
+              logVerboseMessage(
+                `matrix: blocked dm sender ${senderId} (dmPolicy=${dmPolicy}, ${allowMatchMeta})`,
+              );
             }
             return;
           }
@@ -246,15 +354,22 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       }
 
       if (isRoom && roomConfigInfo.config?.users?.length) {
-        const userAllowed = resolveMatrixAllowListMatches({
+        const userMatch = resolveMatrixAllowListMatch({
           allowList: normalizeAllowListLower(roomConfigInfo.config.users),
           userId: senderId,
           userName: senderName,
         });
-        if (!userAllowed) {
-          logVerbose(`matrix: blocked sender ${senderId} (room users allowlist)`);
+        if (!userMatch.allowed) {
+          logVerboseMessage(
+            `matrix: blocked sender ${senderId} (room users allowlist, ${roomMatchMeta}, ${formatAllowlistMatchMeta(
+              userMatch,
+            )})`,
+          );
           return;
         }
+      }
+      if (isRoom) {
+        logVerboseMessage(`matrix: allow room ${roomId} (${roomMatchMeta})`);
       }
 
       const rawBody = content.body.trim();
@@ -282,7 +397,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
             maxBytes: mediaMaxBytes,
           });
         } catch (err) {
-          logVerbose(`matrix: media download failed: ${String(err)}`);
+          logVerboseMessage(`matrix: media download failed: ${String(err)}`);
         }
       }
 
@@ -295,7 +410,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         text: bodyText,
         mentionRegexes,
       });
-      const allowTextCommands = shouldHandleTextCommands({
+      const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
         cfg,
         surface: "matrix",
       });
@@ -305,14 +420,19 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         userId: senderId,
         userName: senderName,
       });
-      const commandAuthorized = resolveCommandAuthorizedFromAuthorizers({
+      const commandAuthorized = core.channel.commands.resolveCommandAuthorizedFromAuthorizers({
         useAccessGroups,
         authorizers: [
           { configured: effectiveAllowFrom.length > 0, allowed: senderAllowedForCommands },
         ],
       });
-      if (isRoom && allowTextCommands && hasControlCommand(bodyText, cfg) && !commandAuthorized) {
-        logVerbose(`matrix: drop control command from unauthorized sender ${senderId}`);
+      if (
+        isRoom &&
+        allowTextCommands &&
+        core.channel.text.hasControlCommand(bodyText, cfg) &&
+        !commandAuthorized
+      ) {
+        logVerboseMessage(`matrix: drop control command from unauthorized sender ${senderId}`);
         return;
       }
       const shouldRequireMention = isRoom
@@ -331,7 +451,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
         !wasMentioned &&
         !hasExplicitMention &&
         commandAuthorized &&
-        hasControlCommand(bodyText);
+        core.channel.text.hasControlCommand(bodyText);
       if (isRoom && shouldRequireMention && !wasMentioned && !shouldBypassMention) {
         logger.info({ roomId, reason: "no-mention" }, "skipping room message");
         return;
@@ -348,14 +468,14 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
 
 	      const envelopeFrom = isDirectMessage ? senderName : (roomName ?? roomId);
 	      const textWithId = `${bodyText}\n[matrix event id: ${messageId} room: ${roomId}]`;
-	      const body = formatAgentEnvelope({
+	      const body = core.channel.reply.formatAgentEnvelope({
 	        channel: "Matrix",
 	        from: envelopeFrom,
 	        timestamp: event.getTs() ?? undefined,
 	        body: textWithId,
 	      });
 
-      const route = resolveAgentRoute({
+      const route = core.channel.routing.resolveAgentRoute({
         cfg,
         channel: "matrix",
         peer: {
@@ -365,7 +485,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       });
 
       const groupSystemPrompt = roomConfigInfo.config?.systemPrompt?.trim() || undefined;
-	      const ctxPayload = finalizeInboundContext({
+      const ctxPayload = core.channel.reply.finalizeInboundContext({
 	        Body: body,
 	        RawBody: bodyText,
 	        CommandBody: bodyText,
@@ -397,23 +517,33 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
 	        OriginatingTo: `room:${roomId}`,
 	      });
 
+      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
+        agentId: route.agentId,
+      });
+      void core.channel.session.recordSessionMetaFromInbound({
+        storePath,
+        sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+        ctx: ctxPayload,
+      }).catch((err) => {
+        logger.warn(
+          { error: String(err), storePath, sessionKey: ctxPayload.SessionKey ?? route.sessionKey },
+          "failed updating session meta",
+        );
+      });
+
       if (isDirectMessage) {
-        const storePath = resolveStorePath(cfg.session?.store, {
-          agentId: route.agentId,
-        });
-        await updateLastRoute({
+        await core.channel.session.updateLastRoute({
           storePath,
           sessionKey: route.mainSessionKey,
           channel: "matrix",
           to: `room:${roomId}`,
           accountId: route.accountId,
+          ctx: ctxPayload,
         });
       }
 
-      if (shouldLogVerbose()) {
-        const preview = bodyText.slice(0, 200).replace(/\n/g, "\\n");
-        logVerbose(`matrix inbound: room=${roomId} from=${senderId} preview="${preview}"`);
-      }
+      const preview = bodyText.slice(0, 200).replace(/\n/g, "\\n");
+      logVerboseMessage(`matrix inbound: room=${roomId} from=${senderId} preview="${preview}"`);
 
       const ackReaction = (cfg.messages?.ackReaction ?? "").trim();
       const ackScope = cfg.messages?.ackReactionScope ?? "group-mentions";
@@ -431,20 +561,20 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       };
       if (shouldAckReaction() && messageId) {
         reactMatrixMessage(roomId, messageId, ackReaction, client).catch((err) => {
-          logVerbose(`matrix react failed for room ${roomId}: ${String(err)}`);
+          logVerboseMessage(`matrix react failed for room ${roomId}: ${String(err)}`);
         });
       }
 
       const replyTarget = ctxPayload.To;
       if (!replyTarget) {
-        runtime.error?.(danger("matrix: missing reply target"));
+        runtime.error?.("matrix: missing reply target");
         return;
       }
 
       let didSendReply = false;
-      const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
-        responsePrefix: resolveEffectiveMessagesConfig(cfg, route.agentId).responsePrefix,
-        humanDelay: resolveHumanDelayConfig(cfg, route.agentId),
+      const { dispatcher, replyOptions, markDispatchIdle } = core.channel.reply.createReplyDispatcherWithTyping({
+        responsePrefix: core.channel.reply.resolveEffectiveMessagesConfig(cfg, route.agentId).responsePrefix,
+        humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
         deliver: async (payload) => {
           await deliverMatrixReplies({
             replies: [payload],
@@ -458,13 +588,13 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
           didSendReply = true;
         },
         onError: (err, info) => {
-          runtime.error?.(danger(`matrix ${info.kind} reply failed: ${String(err)}`));
+          runtime.error?.(`matrix ${info.kind} reply failed: ${String(err)}`);
         },
         onReplyStart: () => sendTypingMatrix(roomId, true, undefined, client).catch(() => {}),
         onIdle: () => sendTypingMatrix(roomId, false, undefined, client).catch(() => {}),
       });
 
-      const { queuedFinal, counts } = await dispatchReplyFromConfig({
+      const { queuedFinal, counts } = await core.channel.reply.dispatchReplyFromConfig({
         ctx: ctxPayload,
         cfg,
         dispatcher,
@@ -476,19 +606,19 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       markDispatchIdle();
       if (!queuedFinal) return;
       didSendReply = true;
-      if (shouldLogVerbose()) {
-        const finalCount = counts.final;
-        logVerbose(`matrix: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`);
-      }
+      const finalCount = counts.final;
+      logVerboseMessage(
+        `matrix: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`,
+      );
       if (didSendReply) {
         const preview = bodyText.replace(/\s+/g, " ").slice(0, 160);
-        enqueueSystemEvent(`Matrix message from ${senderName}: ${preview}`, {
+        core.system.enqueueSystemEvent(`Matrix message from ${senderName}: ${preview}`, {
           sessionKey: route.sessionKey,
           contextKey: `matrix:message:${roomId}:${messageId || "unknown"}`,
         });
       }
     } catch (err) {
-      runtime.error?.(danger(`matrix handler failed: ${String(err)}`));
+      runtime.error?.(`matrix handler failed: ${String(err)}`);
     }
   };
 
