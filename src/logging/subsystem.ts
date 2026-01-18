@@ -1,8 +1,11 @@
 import { Chalk } from "chalk";
 import type { Logger as TsLogger } from "tslog";
 
-import { CHAT_CHANNEL_ORDER } from "../channels/registry.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
+
+// Inline channel order to avoid circular dependency with channels/registry.js
+// (channels/registry imports from plugins which imports from logging)
+const CHAT_CHANNEL_ORDER = ["telegram", "whatsapp", "discord", "slack", "signal", "imessage"];
 import { getConsoleSettings, shouldLogSubsystemToConsole } from "./console.js";
 import { type LogLevel, levelToMinLevel } from "./levels.js";
 import { getChildLogger } from "./logger.js";
