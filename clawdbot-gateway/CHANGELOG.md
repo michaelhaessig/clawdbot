@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.31
+
+- Update gogcli to v0.7.0
+
 ## 2.0.30
 
 - Add Wake-on-LAN tools (`wakeonlan`, `etherwake`) for waking remote machines like Mac for browser automation
