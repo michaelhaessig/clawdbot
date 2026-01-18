@@ -139,19 +139,29 @@ update_clawdbot() {
 
     cd "$APP_DIR"
 
-    # Fetch latest changes
+    # Fetch latest changes (including tags)
     log_info "Fetching updates..."
-    if ! git -c credential.helper= fetch origin --prune; then
+    if ! git -c credential.helper= fetch origin --prune --tags; then
         log_error "Failed to fetch updates"
         return 1
     fi
 
-    # Rebase onto latest
+    # Determine if version is a tag or branch and update accordingly
     log_info "Applying updates..."
-    if ! git rebase "origin/${CLAWDBOT_VERSION}"; then
-        log_error "Rebase failed, aborting update"
-        git rebase --abort 2>/dev/null || true
-        return 1
+    if git show-ref --verify --quiet "refs/tags/${CLAWDBOT_VERSION}"; then
+        # It's a tag - use checkout (tags don't rebase)
+        log_info "Checking out tag ${CLAWDBOT_VERSION}..."
+        if ! git checkout --force "${CLAWDBOT_VERSION}"; then
+            log_error "Failed to checkout tag"
+            return 1
+        fi
+    else
+        # It's a branch - rebase onto origin
+        if ! git rebase "origin/${CLAWDBOT_VERSION}"; then
+            log_error "Rebase failed, aborting update"
+            git rebase --abort 2>/dev/null || true
+            return 1
+        fi
     fi
 
     # Reinstall dependencies (may have changed)
