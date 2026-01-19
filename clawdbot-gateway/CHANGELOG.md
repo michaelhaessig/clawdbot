@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.34
+
+- Fix startup crash when using tag versions: version helper functions now handle `set -e` safely
+
+## 2.0.33
+
+- Add tag version support for `clawdbot_version` config option (e.g., `v2.0.0` instead of `main`)
+
+## 2.0.32
+
+- Update gogcli to v0.7.1
+
 ## 2.0.31
 
 - Update gogcli to v0.7.0

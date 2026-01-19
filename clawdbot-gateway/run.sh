@@ -38,25 +38,26 @@ log_warn() { bashio::log.warning "$1"; }
 log_error() { bashio::log.error "$1"; }
 
 # === Version Helpers ===
+# Note: These functions always return 0 (success) but output empty on failure.
+# This avoids set -e triggering on command substitutions. Callers check for empty output.
 get_remote_version() {
     if [ -d "$APP_DIR/.git" ]; then
-        git -c credential.helper= -C "$APP_DIR" fetch origin --tags 2>/dev/null || return 1
+        git -c credential.helper= -C "$APP_DIR" fetch origin --tags 2>/dev/null || true
         git -C "$APP_DIR" rev-parse "origin/${CLAWDBOT_VERSION}" 2>/dev/null || \
-        git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null
+        git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null || true
     fi
 }
 
 get_local_version() {
     if [ -d "$APP_DIR/.git" ]; then
-        git -C "$APP_DIR" rev-parse HEAD 2>/dev/null
+        git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || true
     fi
 }
 
 is_update_available() {
-    local remote_sha
-    local local_sha
-    remote_sha=$(get_remote_version) || return 1
-    local_sha=$(get_local_version) || return 1
+    local remote_sha local_sha
+    remote_sha=$(get_remote_version)
+    local_sha=$(get_local_version)
     [ -n "$remote_sha" ] && [ -n "$local_sha" ] && [ "$remote_sha" != "$local_sha" ]
 }
 
