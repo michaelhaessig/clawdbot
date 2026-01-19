@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.35
+
+- Fix version check showing "origin/..." instead of SHA: capture git output properly and redirect fetch stdout
+
 ## 2.0.34
 
 - Fix startup crash when using tag versions: version helper functions now handle `set -e` safely

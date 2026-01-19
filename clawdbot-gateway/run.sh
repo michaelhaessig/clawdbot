@@ -41,17 +41,23 @@ log_error() { bashio::log.error "$1"; }
 # Note: These functions always return 0 (success) but output empty on failure.
 # This avoids set -e triggering on command substitutions. Callers check for empty output.
 get_remote_version() {
+    local sha=""
     if [ -d "$APP_DIR/.git" ]; then
-        git -c credential.helper= -C "$APP_DIR" fetch origin --tags 2>/dev/null || true
-        git -C "$APP_DIR" rev-parse "origin/${CLAWDBOT_VERSION}" 2>/dev/null || \
-        git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null || true
+        # Fetch silently (redirect both stdout and stderr)
+        git -c credential.helper= -C "$APP_DIR" fetch origin --tags >/dev/null 2>&1 || true
+        # Try branch ref first (origin/NAME), then tag/direct ref (NAME)
+        sha=$(git -C "$APP_DIR" rev-parse "origin/${CLAWDBOT_VERSION}" 2>/dev/null) || \
+        sha=$(git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null) || true
     fi
+    printf '%s' "$sha"
 }
 
 get_local_version() {
+    local sha=""
     if [ -d "$APP_DIR/.git" ]; then
-        git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || true
+        sha=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null) || true
     fi
+    printf '%s' "$sha"
 }
 
 is_update_available() {
