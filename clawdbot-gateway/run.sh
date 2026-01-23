@@ -244,6 +244,10 @@ mkdir -p "$STATE_DIR/credentials"
 mkdir -p "$WORKSPACE"
 mkdir -p "$WORKSPACE/memory"
 
+# Clean up stale gateway lock files from previous container runs
+# (In Docker, the old PID might coincidentally exist as a different process)
+rm -f "$STATE_DIR"/gateway.*.lock 2>/dev/null || true
+
 # Log workspace skills
 WORKSPACE_SKILLS_DIR="$WORKSPACE/skills"
 if [ -d "$WORKSPACE_SKILLS_DIR" ] && [ "$(ls -A "$WORKSPACE_SKILLS_DIR" 2>/dev/null)" ]; then
