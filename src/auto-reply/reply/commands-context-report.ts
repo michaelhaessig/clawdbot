@@ -1,3 +1,4 @@
+import { resolveSessionAgentIds } from "../../agents/agent-scope.js";
 import { resolveBootstrapMaxChars } from "../../agents/pi-embedded-helpers.js";
 import { createClawdbotCodingTools } from "../../agents/pi-tools.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
@@ -5,6 +6,8 @@ import { buildWorkspaceSkillSnapshot } from "../../agents/skills.js";
 import { getSkillsSnapshotVersion } from "../../agents/skills/refresh.js";
 import { buildAgentSystemPrompt } from "../../agents/system-prompt.js";
 import { buildSystemPromptReport } from "../../agents/system-prompt-report.js";
+import { buildSystemPromptParams } from "../../agents/system-prompt-params.js";
+import { resolveDefaultModelForAgent } from "../../agents/model-selection.js";
 import { buildToolSummaryMap } from "../../agents/tool-summaries.js";
 import { resolveBootstrapContextForRun } from "../../agents/bootstrap-files.js";
 import type { SessionSystemPromptReport } from "../../config/sessions/types.js";
@@ -87,13 +90,29 @@ async function resolveContextReport(
   })();
   const toolSummaries = buildToolSummaryMap(tools);
   const toolNames = tools.map((t) => t.name);
-  const runtimeInfo = {
-    host: "unknown",
-    os: "unknown",
-    arch: "unknown",
-    node: process.version,
-    model: `${params.provider}/${params.model}`,
-  };
+  const { sessionAgentId } = resolveSessionAgentIds({
+    sessionKey: params.sessionKey,
+    config: params.cfg,
+  });
+  const defaultModelRef = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId: sessionAgentId,
+  });
+  const defaultModelLabel = `${defaultModelRef.provider}/${defaultModelRef.model}`;
+  const { runtimeInfo, userTimezone, userTime, userTimeFormat } = buildSystemPromptParams({
+    config: params.cfg,
+    agentId: sessionAgentId,
+    workspaceDir,
+    cwd: process.cwd(),
+    runtime: {
+      host: "unknown",
+      os: "unknown",
+      arch: "unknown",
+      node: process.version,
+      model: `${params.provider}/${params.model}`,
+      defaultModel: defaultModelLabel,
+    },
+  });
   const sandboxInfo = sandboxRuntime.sandboxed
     ? {
         enabled: true,
@@ -101,7 +120,7 @@ async function resolveContextReport(
         workspaceAccess: "rw" as const,
         elevated: {
           allowed: params.elevated.allowed,
-          defaultLevel: params.resolvedElevatedLevel === "off" ? ("off" as const) : ("on" as const),
+          defaultLevel: (params.resolvedElevatedLevel ?? "off") as "on" | "off" | "ask" | "full",
         },
       }
     : { enabled: false };
@@ -116,8 +135,9 @@ async function resolveContextReport(
     toolNames,
     toolSummaries,
     modelAliasLines: [],
-    userTimezone: "",
-    userTime: "",
+    userTimezone,
+    userTime,
+    userTimeFormat,
     contextFiles: injectedFiles,
     skillsPrompt,
     heartbeatPrompt: undefined,

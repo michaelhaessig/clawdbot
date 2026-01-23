@@ -17,6 +17,7 @@ import { resolveSlackChannelAllowlist } from "../resolve-channels.js";
 import { resolveSlackUserAllowlist } from "../resolve-users.js";
 import { resolveSlackAppToken, resolveSlackBotToken } from "../token.js";
 import { normalizeSlackWebhookPath, registerSlackHttpHandler } from "../http/index.js";
+import { resolveSlackWebClientOptions } from "../client.js";
 import { resolveSlackSlashCommandConfig } from "./commands.js";
 import { createSlackMonitorContext } from "./context.js";
 import { registerSlackMonitorEvents } from "./events.js";
@@ -26,7 +27,14 @@ import { normalizeAllowList } from "./allow-list.js";
 
 import type { MonitorSlackOpts } from "./types.js";
 
-const { App, HTTPReceiver } = SlackBolt as typeof import("@slack/bolt");
+const slackBoltModule = SlackBolt as typeof import("@slack/bolt") & {
+  default?: typeof import("@slack/bolt");
+};
+// Bun allows named imports from CJS; Node ESM doesn't. Use default+fallback for compatibility.
+// Fix: Check if module has App property directly (Node 25.x ESM/CJS compat issue)
+const slackBolt =
+  (slackBoltModule.App ? slackBoltModule : slackBoltModule.default) ?? slackBoltModule;
+const { App, HTTPReceiver } = slackBolt;
 function parseApiAppIdFromAppToken(raw?: string) {
   const token = raw?.trim();
   if (!token) return undefined;
@@ -123,16 +131,19 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
           endpoints: slackWebhookPath,
         })
       : null;
+  const clientOptions = resolveSlackWebClientOptions();
   const app = new App(
     slackMode === "socket"
       ? {
           token: botToken,
           appToken,
           socketMode: true,
+          clientOptions,
         }
       : {
           token: botToken,
           receiver: receiver ?? undefined,
+          clientOptions,
         },
   );
   const slackHttpHandler =

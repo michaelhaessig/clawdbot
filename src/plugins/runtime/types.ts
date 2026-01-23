@@ -44,23 +44,29 @@ type DispatchReplyFromConfig =
 type FinalizeInboundContext =
   typeof import("../../auto-reply/reply/inbound-context.js").finalizeInboundContext;
 type FormatAgentEnvelope = typeof import("../../auto-reply/envelope.js").formatAgentEnvelope;
+type FormatInboundEnvelope = typeof import("../../auto-reply/envelope.js").formatInboundEnvelope;
+type ResolveEnvelopeFormatOptions =
+  typeof import("../../auto-reply/envelope.js").resolveEnvelopeFormatOptions;
 type ResolveStateDir = typeof import("../../config/paths.js").resolveStateDir;
 type RecordSessionMetaFromInbound =
   typeof import("../../config/sessions.js").recordSessionMetaFromInbound;
 type ResolveStorePath = typeof import("../../config/sessions.js").resolveStorePath;
+type ReadSessionUpdatedAt = typeof import("../../config/sessions.js").readSessionUpdatedAt;
 type UpdateLastRoute = typeof import("../../config/sessions.js").updateLastRoute;
 type LoadConfig = typeof import("../../config/config.js").loadConfig;
 type WriteConfigFile = typeof import("../../config/config.js").writeConfigFile;
+type RecordChannelActivity = typeof import("../../infra/channel-activity.js").recordChannelActivity;
+type GetChannelActivity = typeof import("../../infra/channel-activity.js").getChannelActivity;
 type EnqueueSystemEvent = typeof import("../../infra/system-events.js").enqueueSystemEvent;
 type RunCommandWithTimeout = typeof import("../../process/exec.js").runCommandWithTimeout;
+type FormatNativeDependencyHint = typeof import("./native-deps.js").formatNativeDependencyHint;
 type LoadWebMedia = typeof import("../../web/media.js").loadWebMedia;
 type DetectMime = typeof import("../../media/mime.js").detectMime;
 type MediaKindFromMime = typeof import("../../media/constants.js").mediaKindFromMime;
 type IsVoiceCompatibleAudio = typeof import("../../media/audio.js").isVoiceCompatibleAudio;
 type GetImageMetadata = typeof import("../../media/image-ops.js").getImageMetadata;
 type ResizeToJpeg = typeof import("../../media/image-ops.js").resizeToJpeg;
-type CreateMemoryGetTool =
-  typeof import("../../agents/tools/memory-tool.js").createMemoryGetTool;
+type CreateMemoryGetTool = typeof import("../../agents/tools/memory-tool.js").createMemoryGetTool;
 type CreateMemorySearchTool =
   typeof import("../../agents/tools/memory-tool.js").createMemorySearchTool;
 type RegisterMemoryCli = typeof import("../../cli/memory-cli.js").registerMemoryCli;
@@ -141,6 +147,7 @@ export type PluginRuntime = {
   system: {
     enqueueSystemEvent: EnqueueSystemEvent;
     runCommandWithTimeout: RunCommandWithTimeout;
+    formatNativeDependencyHint: FormatNativeDependencyHint;
   };
   media: {
     loadWebMedia: LoadWebMedia;
@@ -170,6 +177,8 @@ export type PluginRuntime = {
       dispatchReplyFromConfig: DispatchReplyFromConfig;
       finalizeInboundContext: FinalizeInboundContext;
       formatAgentEnvelope: FormatAgentEnvelope;
+      formatInboundEnvelope: FormatInboundEnvelope;
+      resolveEnvelopeFormatOptions: ResolveEnvelopeFormatOptions;
     };
     routing: {
       resolveAgentRoute: ResolveAgentRoute;
@@ -183,8 +192,13 @@ export type PluginRuntime = {
       fetchRemoteMedia: FetchRemoteMedia;
       saveMediaBuffer: SaveMediaBuffer;
     };
+    activity: {
+      record: RecordChannelActivity;
+      get: GetChannelActivity;
+    };
     session: {
       resolveStorePath: ResolveStorePath;
+      readSessionUpdatedAt: ReadSessionUpdatedAt;
       recordSessionMetaFromInbound: RecordSessionMetaFromInbound;
       updateLastRoute: UpdateLastRoute;
     };

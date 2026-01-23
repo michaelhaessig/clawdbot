@@ -304,7 +304,8 @@ Slack uses Socket Mode only (no HTTP webhook server). Provide both tokens:
       "policy": "pairing",
       "allowFrom": ["U123", "U456", "*"],
       "groupEnabled": false,
-      "groupChannels": ["G123"]
+      "groupChannels": ["G123"],
+      "replyToMode": "all"
     },
     "channels": {
       "C123": { "allow": true, "requireMention": true },
@@ -361,6 +362,73 @@ By default, Clawdbot replies in the main channel. Use `channels.slack.replyToMod
 
 The mode applies to both auto-replies and agent tool calls (`slack sendMessage`).
 
+### Per-chat-type threading
+You can configure different threading behavior per chat type by setting `channels.slack.replyToModeByChatType`:
+
+```json5
+{
+  channels: {
+    slack: {
+      replyToMode: "off",        // default for channels
+      replyToModeByChatType: {
+        direct: "all",           // DMs always thread
+        group: "first"           // group DMs/MPIM thread first reply
+      },
+    }
+  }
+}
+```
+
+Supported chat types:
+- `direct`: 1:1 DMs (Slack `im`)
+- `group`: group DMs / MPIMs (Slack `mpim`)
+- `channel`: standard channels (public/private)
+
+Precedence:
+1) `replyToModeByChatType.<chatType>`
+2) `replyToMode`
+3) Provider default (`off`)
+
+Legacy `channels.slack.dm.replyToMode` is still accepted as a fallback for `direct` when no chat-type override is set.
+
+Examples:
+
+Thread DMs only:
+```json5
+{
+  channels: {
+    slack: {
+      replyToMode: "off",
+      replyToModeByChatType: { direct: "all" }
+    }
+  }
+}
+```
+
+Thread group DMs but keep channels in the root:
+```json5
+{
+  channels: {
+    slack: {
+      replyToMode: "off",
+      replyToModeByChatType: { group: "first" }
+    }
+  }
+}
+```
+
+Make channels thread, keep DMs in the root:
+```json5
+{
+  channels: {
+    slack: {
+      replyToMode: "first",
+      replyToModeByChatType: { direct: "off", group: "off" }
+    }
+  }
+}
+```
+
 ### Manual threading tags
 For fine-grained control, use these tags in agent responses:
 - `[[reply_to_current]]` — reply to the triggering message (start/continue thread).
@@ -378,7 +446,7 @@ For fine-grained control, use these tags in agent responses:
 - Default: `channels.slack.dm.policy="pairing"` — unknown DM senders get a pairing code (expires after 1 hour).
 - Approve via: `clawdbot pairing approve slack <code>`.
 - To allow anyone: set `channels.slack.dm.policy="open"` and `channels.slack.dm.allowFrom=["*"]`.
-- `channels.slack.dm.allowFrom` accepts user IDs, @handles, or emails (resolved at startup when tokens allow).
+- `channels.slack.dm.allowFrom` accepts user IDs, @handles, or emails (resolved at startup when tokens allow). The wizard accepts usernames and resolves them to ids during setup when tokens allow.
 
 ## Group policy
 - `channels.slack.groupPolicy` controls channel handling (`open|disabled|allowlist`).

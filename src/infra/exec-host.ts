@@ -10,6 +10,7 @@ export type ExecHostRequest = {
   needsScreenRecording?: boolean | null;
   agentId?: string | null;
   sessionKey?: string | null;
+  approvalDecision?: "allow-once" | "allow-always" | null;
 };
 
 export type ExecHostRunResult = {
@@ -86,7 +87,12 @@ export async function requestExecHostViaSocket(params: {
         idx = buffer.indexOf("\n");
         if (!line) continue;
         try {
-          const msg = JSON.parse(line) as { type?: string; ok?: boolean; payload?: unknown; error?: unknown };
+          const msg = JSON.parse(line) as {
+            type?: string;
+            ok?: boolean;
+            payload?: unknown;
+            error?: unknown;
+          };
           if (msg?.type === "exec-res") {
             clearTimeout(timer);
             if (msg.ok === true && msg.payload) {

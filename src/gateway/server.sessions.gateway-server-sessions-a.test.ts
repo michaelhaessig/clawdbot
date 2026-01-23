@@ -1,14 +1,16 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { WebSocket } from "ws";
 import {
   connectOk,
   embeddedRunMock,
+  getFreePort,
   installGatewayTestHooks,
   piSdkMock,
   rpcReq,
-  startServerWithClient,
+  startGatewayServer,
   testState,
   writeSessionStore,
 } from "./test-helpers.js";
@@ -39,7 +41,31 @@ vi.mock("../auto-reply/reply/abort.js", async () => {
   };
 });
 
-installGatewayTestHooks();
+installGatewayTestHooks({ scope: "suite" });
+
+let server: Awaited<ReturnType<typeof startGatewayServer>>;
+let port = 0;
+let previousToken: string | undefined;
+
+beforeAll(async () => {
+  previousToken = process.env.CLAWDBOT_GATEWAY_TOKEN;
+  delete process.env.CLAWDBOT_GATEWAY_TOKEN;
+  port = await getFreePort();
+  server = await startGatewayServer(port);
+});
+
+afterAll(async () => {
+  await server.close();
+  if (previousToken === undefined) delete process.env.CLAWDBOT_GATEWAY_TOKEN;
+  else process.env.CLAWDBOT_GATEWAY_TOKEN = previousToken;
+});
+
+const openClient = async (opts?: Parameters<typeof connectOk>[1]) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  await new Promise<void>((resolve) => ws.once("open", resolve));
+  const hello = await connectOk(ws, opts);
+  return { ws, hello };
+};
 
 describe("gateway server sessions", () => {
   beforeEach(() => {
@@ -51,6 +77,8 @@ describe("gateway server sessions", () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-sessions-"));
     const storePath = path.join(dir, "sessions.json");
     const now = Date.now();
+    const recent = now - 30_000;
+    const stale = now - 15 * 60_000;
     testState.sessionStorePath = storePath;
 
     await fs.writeFile(
@@ -70,7 +98,7 @@ describe("gateway server sessions", () => {
       entries: {
         main: {
           sessionId: "sess-main",
-          updatedAt: now - 30_000,
+          updatedAt: recent,
           inputTokens: 10,
           outputTokens: 20,
           thinkingLevel: "low",
@@ -81,12 +109,12 @@ describe("gateway server sessions", () => {
         },
         "discord:group:dev": {
           sessionId: "sess-group",
-          updatedAt: now - 120_000,
+          updatedAt: stale,
           totalTokens: 50,
         },
         "agent:main:subagent:one": {
           sessionId: "sess-subagent",
-          updatedAt: now - 120_000,
+          updatedAt: stale,
           spawnedBy: "agent:main:main",
         },
         global: {
@@ -96,11 +124,11 @@ describe("gateway server sessions", () => {
       },
     });
 
-    const { server, ws } = await startServerWithClient();
-    const hello = await connectOk(ws);
+    const { ws, hello } = await openClient();
     expect((hello as unknown as { features?: { methods?: string[] } }).features?.methods).toEqual(
       expect.arrayContaining([
         "sessions.list",
+        "sessions.preview",
         "sessions.patch",
         "sessions.reset",
         "sessions.delete",
@@ -147,7 +175,7 @@ describe("gateway server sessions", () => {
     }>(ws, "sessions.list", {
       includeGlobal: false,
       includeUnknown: false,
-      activeMinutes: 1,
+      activeMinutes: 5,
     });
     expect(active.ok).toBe(true);
     expect(active.payload?.sessions.map((s) => s.key)).toEqual(["agent:main:main"]);
@@ -333,7 +361,51 @@ describe("gateway server sessions", () => {
     );
 
     ws.close();
-    await server.close();
+  });
+
+  test("sessions.preview returns transcript previews", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-sessions-preview-"));
+    const storePath = path.join(dir, "sessions.json");
+    testState.sessionStorePath = storePath;
+    const sessionId = "sess-preview";
+    const transcriptPath = path.join(dir, `${sessionId}.jsonl`);
+    const lines = [
+      JSON.stringify({ type: "session", version: 1, id: sessionId }),
+      JSON.stringify({ message: { role: "user", content: "Hello" } }),
+      JSON.stringify({ message: { role: "assistant", content: "Hi" } }),
+      JSON.stringify({
+        message: { role: "assistant", content: [{ type: "toolcall", name: "weather" }] },
+      }),
+      JSON.stringify({ message: { role: "assistant", content: "Forecast ready" } }),
+    ];
+    await fs.writeFile(transcriptPath, lines.join("\n"), "utf-8");
+
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId,
+          updatedAt: Date.now(),
+        },
+      },
+    });
+
+    const { ws } = await openClient();
+    const preview = await rpcReq<{
+      previews: Array<{
+        key: string;
+        status: string;
+        items: Array<{ role: string; text: string }>;
+      }>;
+    }>(ws, "sessions.preview", { keys: ["main"], limit: 3, maxChars: 120 });
+
+    expect(preview.ok).toBe(true);
+    const entry = preview.payload?.previews[0];
+    expect(entry?.key).toBe("main");
+    expect(entry?.status).toBe("ok");
+    expect(entry?.items.map((item) => item.role)).toEqual(["assistant", "tool", "assistant"]);
+    expect(entry?.items[1]?.text).toContain("call weather");
+
+    ws.close();
   });
 
   test("sessions.delete rejects main and aborts active runs", async () => {
@@ -365,8 +437,7 @@ describe("gateway server sessions", () => {
     embeddedRunMock.activeIds.add("sess-active");
     embeddedRunMock.waitResults.set("sess-active", true);
 
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
+    const { ws } = await openClient();
 
     const mainDelete = await rpcReq(ws, "sessions.delete", { key: "main" });
     expect(mainDelete.ok).toBe(false);
@@ -389,6 +460,5 @@ describe("gateway server sessions", () => {
     expect(embeddedRunMock.waitCalls).toEqual(["sess-active"]);
 
     ws.close();
-    await server.close();
   });
 });

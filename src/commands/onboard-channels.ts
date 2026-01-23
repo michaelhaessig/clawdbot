@@ -14,6 +14,7 @@ import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { formatDocsLink } from "../terminal/links.js";
+import { formatCliCommand } from "../cli/command-format.js";
 import { enablePluginInConfig } from "../plugins/enable.js";
 import type { WizardPrompter, WizardSelectOption } from "../wizard/prompts.js";
 import type { ChannelChoice } from "./onboard-types.js";
@@ -186,7 +187,7 @@ async function noteChannelPrimer(
   await prompter.note(
     [
       "DM security: default is pairing; unknown DMs get a pairing code.",
-      "Approve with: clawdbot pairing approve <channel> <code>",
+      `Approve with: ${formatCliCommand("clawdbot pairing approve <channel> <code>")}`,
       'Public DMs require dmPolicy="open" + allowFrom=["*"].',
       'Multi-user DMs: set session.dmScope="per-channel-peer" to isolate sessions.',
       `Docs: ${formatDocsLink("/start/pairing", "start/pairing")}`,
@@ -214,8 +215,9 @@ async function maybeConfigureDmPolicies(params: {
   cfg: ClawdbotConfig;
   selection: ChannelChoice[];
   prompter: WizardPrompter;
+  accountIdsByChannel?: Map<ChannelChoice, string>;
 }): Promise<ClawdbotConfig> {
-  const { selection, prompter } = params;
+  const { selection, prompter, accountIdsByChannel } = params;
   const dmPolicies = selection
     .map((channel) => getChannelOnboardingAdapter(channel)?.dmPolicy)
     .filter(Boolean) as ChannelOnboardingDmPolicy[];
@@ -232,7 +234,8 @@ async function maybeConfigureDmPolicies(params: {
     await prompter.note(
       [
         "Default: pairing (unknown DMs get a pairing code).",
-        `Approve: clawdbot pairing approve ${policy.channel} <code>`,
+        `Approve: ${formatCliCommand(`clawdbot pairing approve ${policy.channel} <code>`)}`,
+        `Allowlist DMs: ${policy.policyKey}="allowlist" + ${policy.allowFromKey} entries.`,
         `Public DMs: ${policy.policyKey}="open" + ${policy.allowFromKey} includes "*".`,
         'Multi-user DMs: set session.dmScope="per-channel-peer" to isolate sessions.',
         `Docs: ${formatDocsLink("/start/pairing", "start/pairing")}`,
@@ -243,6 +246,7 @@ async function maybeConfigureDmPolicies(params: {
       message: `${policy.label} DM policy`,
       options: [
         { value: "pairing", label: "Pairing (recommended)" },
+        { value: "allowlist", label: "Allowlist (specific users only)" },
         { value: "open", label: "Open (public inbound DMs)" },
         { value: "disabled", label: "Disabled (ignore DMs)" },
       ],
@@ -254,6 +258,13 @@ async function maybeConfigureDmPolicies(params: {
     const nextPolicy = await selectPolicy(policy);
     if (nextPolicy !== current) {
       cfg = policy.setPolicy(cfg, nextPolicy);
+    }
+    if (nextPolicy === "allowlist" && policy.promptAllowFrom) {
+      cfg = await policy.promptAllowFrom({
+        cfg,
+        prompter,
+        accountId: accountIdsByChannel?.get(policy.channel),
+      });
     }
   }
 
@@ -320,10 +331,12 @@ export async function setupChannels(
     options?.initialSelection?.[0] ?? resolveQuickstartDefault(statusByChannel);
 
   const shouldPromptAccountIds = options?.promptAccountIds === true;
+  const accountIdsByChannel = new Map<ChannelChoice, string>();
   const recordAccount = (channel: ChannelChoice, accountId: string) => {
     options?.onAccountId?.(channel, accountId);
     const adapter = getChannelOnboardingAdapter(channel);
     adapter?.onAccountRecorded?.(accountId, options);
+    accountIdsByChannel.set(channel, accountId);
   };
 
   const selection: ChannelChoice[] = [];
@@ -569,7 +582,7 @@ export async function setupChannels(
         {
           value: "__skip__",
           label: "Skip for now",
-          hint: "You can add channels later via `clawdbot channels add`",
+          hint: `You can add channels later via \`${formatCliCommand("clawdbot channels add")}\``,
         },
       ],
       initialValue: quickstartDefault,
@@ -614,7 +627,12 @@ export async function setupChannels(
   }
 
   if (!options?.skipDmPolicyPrompt) {
-    next = await maybeConfigureDmPolicies({ cfg: next, selection, prompter });
+    next = await maybeConfigureDmPolicies({
+      cfg: next,
+      selection,
+      prompter,
+      accountIdsByChannel,
+    });
   }
 
   return next;

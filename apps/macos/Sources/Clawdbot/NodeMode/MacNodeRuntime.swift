@@ -133,7 +133,7 @@ actor MacNodeRuntime {
 
             let sessionKey = self.mainSessionKey
             let path = try await CanvasManager.shared.snapshot(sessionKey: sessionKey, outPath: nil)
-            defer { try? FileManager.default.removeItem(atPath: path) }
+            defer { try? FileManager().removeItem(atPath: path) }
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             guard let image = NSImage(data: data) else {
                 return Self.errorResponse(req, code: .unavailable, message: "canvas snapshot decode failed")
@@ -206,7 +206,7 @@ actor MacNodeRuntime {
                 includeAudio: params.includeAudio ?? true,
                 deviceId: params.deviceId,
                 outPath: nil)
-            defer { try? FileManager.default.removeItem(atPath: res.path) }
+            defer { try? FileManager().removeItem(atPath: res.path) }
             let data = try Data(contentsOf: URL(fileURLWithPath: res.path))
             struct ClipPayload: Encodable {
                 var format: String
@@ -312,7 +312,7 @@ actor MacNodeRuntime {
             fps: params.fps,
             includeAudio: params.includeAudio,
             outPath: nil)
-        defer { try? FileManager.default.removeItem(atPath: res.path) }
+        defer { try? FileManager().removeItem(atPath: res.path) }
         let data = try Data(contentsOf: URL(fileURLWithPath: res.path))
         struct ScreenPayload: Encodable {
             var format: String
@@ -443,7 +443,6 @@ actor MacNodeRuntime {
         let approvals = ExecApprovalsStore.resolve(agentId: agentId)
         let security = approvals.agent.security
         let ask = approvals.agent.ask
-        let askFallback = approvals.agent.askFallback
         let autoAllowSkills = approvals.agent.autoAllowSkills
         let sessionKey = (params.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
             ? params.sessionKey!.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -481,89 +480,29 @@ actor MacNodeRuntime {
                 message: "SYSTEM_RUN_DISABLED: security=deny")
         }
 
-        let requiresAsk: Bool = {
-            if ask == .always { return true }
-            if ask == .onMiss && security == .allowlist && allowlistMatch == nil && !skillAllow { return true }
-            return false
-        }()
-
-        var approvedByAsk = false
-        if requiresAsk {
-            let decision: ExecApprovalDecision? = await ExecApprovalsPromptPresenter.prompt(
-                ExecApprovalPromptRequest(
-                    command: displayCommand,
-                    cwd: params.cwd,
-                    host: "node",
-                    security: security.rawValue,
-                    ask: ask.rawValue,
-                    agentId: agentId,
-                    resolvedPath: resolution?.resolvedPath))
-
-            switch decision {
-            case .deny?:
-                await self.emitExecEvent(
-                    "exec.denied",
-                    payload: ExecEventPayload(
-                        sessionKey: sessionKey,
-                        runId: runId,
-                        host: "node",
-                        command: displayCommand,
-                        reason: "user-denied"))
-                return Self.errorResponse(
-                    req,
-                    code: .unavailable,
-                    message: "SYSTEM_RUN_DENIED: user denied")
-            case nil:
-                if askFallback == .full {
-                    approvedByAsk = true
-                } else if askFallback == .allowlist {
-                    if allowlistMatch != nil || skillAllow {
-                        approvedByAsk = true
-                    } else {
-                        await self.emitExecEvent(
-                            "exec.denied",
-                            payload: ExecEventPayload(
-                                sessionKey: sessionKey,
-                                runId: runId,
-                                host: "node",
-                                command: displayCommand,
-                                reason: "approval-required"))
-                        return Self.errorResponse(
-                            req,
-                            code: .unavailable,
-                            message: "SYSTEM_RUN_DENIED: approval required")
-                    }
-                } else {
-                    await self.emitExecEvent(
-                        "exec.denied",
-                        payload: ExecEventPayload(
-                            sessionKey: sessionKey,
-                            runId: runId,
-                            host: "node",
-                            command: displayCommand,
-                            reason: "approval-required"))
-                    return Self.errorResponse(
-                        req,
-                        code: .unavailable,
-                        message: "SYSTEM_RUN_DENIED: approval required")
-                }
-            case .allowAlways?:
-                approvedByAsk = true
-                if security == .allowlist {
-                    let pattern = resolution?.resolvedPath ??
-                        resolution?.rawExecutable ??
-                        command.first?.trimmingCharacters(in: .whitespacesAndNewlines) ??
-                        ""
-                    if !pattern.isEmpty {
-                        ExecApprovalsStore.addAllowlistEntry(agentId: agentId, pattern: pattern)
-                    }
-                }
-            case .allowOnce?:
-                approvedByAsk = true
-            }
+        let approval = await self.resolveSystemRunApproval(
+            req: req,
+            params: params,
+            context: ExecRunContext(
+                displayCommand: displayCommand,
+                security: security,
+                ask: ask,
+                agentId: agentId,
+                resolution: resolution,
+                allowlistMatch: allowlistMatch,
+                skillAllow: skillAllow,
+                sessionKey: sessionKey,
+                runId: runId))
+        if let response = approval.response { return response }
+        let approvedByAsk = approval.approvedByAsk
+        let persistAllowlist = approval.persistAllowlist
+        if persistAllowlist, security == .allowlist,
+           let pattern = ExecApprovalHelpers.allowlistPattern(command: command, resolution: resolution)
+        {
+            ExecApprovalsStore.addAllowlistEntry(agentId: agentId, pattern: pattern)
         }
 
-        if security == .allowlist && allowlistMatch == nil && !skillAllow && !approvedByAsk {
+        if security == .allowlist, allowlistMatch == nil, !skillAllow, !approvedByAsk {
             await self.emitExecEvent(
                 "exec.denied",
                 payload: ExecEventPayload(
@@ -619,7 +558,7 @@ actor MacNodeRuntime {
             env: env,
             timeout: timeoutSec)
         let combined = [result.stdout, result.stderr, result.errorMessage]
-            .compactMap { $0 }
+            .compactMap(\.self)
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
         await self.emitExecEvent(
@@ -680,6 +619,100 @@ actor MacNodeRuntime {
         return BridgeInvokeResponse(id: req.id, ok: true, payloadJSON: payload)
     }
 
+    private struct ExecApprovalOutcome {
+        var approvedByAsk: Bool
+        var persistAllowlist: Bool
+        var response: BridgeInvokeResponse?
+    }
+
+    private struct ExecRunContext {
+        var displayCommand: String
+        var security: ExecSecurity
+        var ask: ExecAsk
+        var agentId: String?
+        var resolution: ExecCommandResolution?
+        var allowlistMatch: ExecAllowlistEntry?
+        var skillAllow: Bool
+        var sessionKey: String
+        var runId: String
+    }
+
+    private func resolveSystemRunApproval(
+        req: BridgeInvokeRequest,
+        params: ClawdbotSystemRunParams,
+        context: ExecRunContext) async -> ExecApprovalOutcome
+    {
+        let requiresAsk = ExecApprovalHelpers.requiresAsk(
+            ask: context.ask,
+            security: context.security,
+            allowlistMatch: context.allowlistMatch,
+            skillAllow: context.skillAllow)
+
+        let decisionFromParams = ExecApprovalHelpers.parseDecision(params.approvalDecision)
+        var approvedByAsk = params.approved == true || decisionFromParams != nil
+        var persistAllowlist = decisionFromParams == .allowAlways
+        if decisionFromParams == .deny {
+            await self.emitExecEvent(
+                "exec.denied",
+                payload: ExecEventPayload(
+                    sessionKey: context.sessionKey,
+                    runId: context.runId,
+                    host: "node",
+                    command: context.displayCommand,
+                    reason: "user-denied"))
+            return ExecApprovalOutcome(
+                approvedByAsk: approvedByAsk,
+                persistAllowlist: persistAllowlist,
+                response: Self.errorResponse(
+                    req,
+                    code: .unavailable,
+                    message: "SYSTEM_RUN_DENIED: user denied"))
+        }
+
+        if requiresAsk, !approvedByAsk {
+            let decision = await MainActor.run {
+                ExecApprovalsPromptPresenter.prompt(
+                    ExecApprovalPromptRequest(
+                        command: context.displayCommand,
+                        cwd: params.cwd,
+                        host: "node",
+                        security: context.security.rawValue,
+                        ask: context.ask.rawValue,
+                        agentId: context.agentId,
+                        resolvedPath: context.resolution?.resolvedPath,
+                        sessionKey: context.sessionKey))
+            }
+            switch decision {
+            case .deny:
+                await self.emitExecEvent(
+                    "exec.denied",
+                    payload: ExecEventPayload(
+                        sessionKey: context.sessionKey,
+                        runId: context.runId,
+                        host: "node",
+                        command: context.displayCommand,
+                        reason: "user-denied"))
+                return ExecApprovalOutcome(
+                    approvedByAsk: approvedByAsk,
+                    persistAllowlist: persistAllowlist,
+                    response: Self.errorResponse(
+                        req,
+                        code: .unavailable,
+                        message: "SYSTEM_RUN_DENIED: user denied"))
+            case .allowAlways:
+                approvedByAsk = true
+                persistAllowlist = true
+            case .allowOnce:
+                approvedByAsk = true
+            }
+        }
+
+        return ExecApprovalOutcome(
+            approvedByAsk: approvedByAsk,
+            persistAllowlist: persistAllowlist,
+            response: nil)
+    }
+
     private func handleSystemExecApprovalsGet(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
         _ = ExecApprovalsStore.ensureFile()
         let snapshot = ExecApprovalsStore.readSnapshot()
@@ -729,7 +762,7 @@ actor MacNodeRuntime {
         let resolvedPath = (socketPath?.isEmpty == false)
             ? socketPath!
             : current.socket?.path?.trimmingCharacters(in: .whitespacesAndNewlines) ??
-                ExecApprovalsStore.socketPath()
+            ExecApprovalsStore.socketPath()
         let resolvedToken = (token?.isEmpty == false)
             ? token!
             : current.socket?.token?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -794,10 +827,12 @@ actor MacNodeRuntime {
             return BridgeInvokeResponse(id: req.id, ok: true)
         }
     }
+}
 
+extension MacNodeRuntime {
     private static func decodeParams<T: Decodable>(_ type: T.Type, from json: String?) throws -> T {
         guard let json, let data = json.data(using: .utf8) else {
-            throw NSError(domain: "Bridge", code: 20, userInfo: [
+            throw NSError(domain: "Gateway", code: 20, userInfo: [
                 NSLocalizedDescriptionKey: "INVALID_REQUEST: paramsJSON required",
             ])
         }

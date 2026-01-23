@@ -2,8 +2,9 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
 import type { ThinkLevel } from "../auto-reply/thinking.js";
 import type { ClawdbotConfig } from "../config/config.js";
+import { isTruthyEnvValue } from "../infra/env.js";
 import { shouldLogVerbose } from "../globals.js";
-import { createSubsystemLogger } from "../logging.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveClawdbotDocsPath } from "./docs-path.js";
@@ -44,6 +45,7 @@ export async function runCliAgent(params: {
   timeoutMs: number;
   runId: string;
   extraSystemPrompt?: string;
+  streamParams?: import("../commands/agent/types.js").AgentStreamParams;
   ownerNumbers?: string[];
   cliSessionId?: string;
   images?: ImageContent[];
@@ -101,6 +103,7 @@ export async function runCliAgent(params: {
     tools: [],
     contextFiles,
     modelDisplay,
+    agentId: sessionAgentId,
   });
 
   const { sessionId: cliSessionIdToSend, isNew } = resolveSessionIdToSend({
@@ -164,7 +167,7 @@ export async function runCliAgent(params: {
       log.info(
         `cli exec: provider=${params.provider} model=${normalizedModel} promptChars=${params.prompt.length}`,
       );
-      const logOutputText = process.env.CLAWDBOT_CLAUDE_CLI_LOG_OUTPUT === "1";
+      const logOutputText = isTruthyEnvValue(process.env.CLAWDBOT_CLAUDE_CLI_LOG_OUTPUT);
       if (logOutputText) {
         const logArgs: string[] = [];
         for (let i = 0; i < args.length; i += 1) {

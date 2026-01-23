@@ -8,7 +8,11 @@ import {
   type ResponsePrefixContext,
 } from "../../auto-reply/reply/response-prefix-template.js";
 import { hasControlCommand } from "../../auto-reply/command-detection.js";
-import { formatInboundEnvelope, formatInboundFromLabel } from "../../auto-reply/envelope.js";
+import {
+  formatInboundEnvelope,
+  formatInboundFromLabel,
+  resolveEnvelopeFormatOptions,
+} from "../../auto-reply/envelope.js";
 import {
   createInboundDebouncer,
   resolveInboundDebounceMs,
@@ -19,8 +23,9 @@ import {
   clearHistoryEntries,
 } from "../../auto-reply/reply/history.js";
 import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.js";
-import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
+import { createReplyDispatcherWithTyping } from "../../auto-reply/reply/reply-dispatcher.js";
 import {
+  readSessionUpdatedAt,
   recordSessionMetaFromInbound,
   resolveStorePath,
   updateLastRoute,
@@ -45,7 +50,7 @@ import {
   resolveSignalRecipient,
   resolveSignalSender,
 } from "../identity.js";
-import { sendMessageSignal } from "../send.js";
+import { sendMessageSignal, sendReadReceiptSignal, sendTypingSignal } from "../send.js";
 
 import type { SignalEventHandlerDeps, SignalReceivePayload } from "./event-handler.types.js";
 
@@ -77,6 +82,23 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       directLabel: entry.senderName,
       directId: entry.senderDisplay,
     });
+    const route = resolveAgentRoute({
+      cfg: deps.cfg,
+      channel: "signal",
+      accountId: deps.accountId,
+      peer: {
+        kind: entry.isGroup ? "group" : "dm",
+        id: entry.isGroup ? (entry.groupId ?? "unknown") : entry.senderPeerId,
+      },
+    });
+    const storePath = resolveStorePath(deps.cfg.session?.store, {
+      agentId: route.agentId,
+    });
+    const envelopeOptions = resolveEnvelopeFormatOptions(deps.cfg);
+    const previousTimestamp = readSessionUpdatedAt({
+      storePath,
+      sessionKey: route.sessionKey,
+    });
     const body = formatInboundEnvelope({
       channel: "Signal",
       from: fromLabel,
@@ -84,6 +106,8 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       body: entry.bodyText,
       chatType: entry.isGroup ? "group" : "direct",
       sender: { name: entry.senderName, id: entry.senderDisplay },
+      previousTimestamp,
+      envelope: envelopeOptions,
     });
     let combinedBody = body;
     const historyKey = entry.isGroup ? String(entry.groupId ?? "unknown") : undefined;
@@ -103,19 +127,10 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
             }`,
             chatType: "group",
             senderLabel: historyEntry.sender,
+            envelope: envelopeOptions,
           }),
       });
     }
-
-    const route = resolveAgentRoute({
-      cfg: deps.cfg,
-      channel: "signal",
-      accountId: deps.accountId,
-      peer: {
-        kind: entry.isGroup ? "group" : "dm",
-        id: entry.isGroup ? (entry.groupId ?? "unknown") : entry.senderPeerId,
-      },
-    });
     const signalTo = entry.isGroup ? `group:${entry.groupId}` : `signal:${entry.senderRecipient}`;
     const ctxPayload = finalizeInboundContext({
       Body: combinedBody,
@@ -144,9 +159,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       OriginatingTo: signalTo,
     });
 
-    const storePath = resolveStorePath(deps.cfg.session?.store, {
-      agentId: route.agentId,
-    });
     void recordSessionMetaFromInbound({
       storePath,
       sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
@@ -178,7 +190,20 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       identityName: resolveIdentityName(deps.cfg, route.agentId),
     };
 
-    const dispatcher = createReplyDispatcher({
+    const onReplyStart = async () => {
+      try {
+        if (!ctxPayload.To) return;
+        await sendTypingSignal(ctxPayload.To, {
+          baseUrl: deps.baseUrl,
+          account: deps.account,
+          accountId: deps.accountId,
+        });
+      } catch (err) {
+        logVerbose(`signal typing cue failed for ${ctxPayload.To}: ${String(err)}`);
+      }
+    };
+
+    const { dispatcher, replyOptions, markDispatchIdle } = createReplyDispatcherWithTyping({
       responsePrefix: resolveEffectiveMessagesConfig(deps.cfg, route.agentId).responsePrefix,
       responsePrefixContextProvider: () => prefixContext,
       humanDelay: resolveHumanDelayConfig(deps.cfg, route.agentId),
@@ -197,6 +222,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       onError: (err, info) => {
         deps.runtime.error?.(danger(`signal ${info.kind} reply failed: ${String(err)}`));
       },
+      onReplyStart,
     });
 
     const { queuedFinal } = await dispatchReplyFromConfig({
@@ -204,6 +230,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       cfg: deps.cfg,
       dispatcher,
       replyOptions: {
+        ...replyOptions,
         disableBlockStreaming:
           typeof deps.blockStreaming === "boolean" ? !deps.blockStreaming : undefined,
         onModelSelected: (ctx) => {
@@ -215,6 +242,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         },
       },
     });
+    markDispatchIdle();
     if (!queuedFinal) {
       if (entry.isGroup && historyKey && deps.historyLimit > 0) {
         clearHistoryEntries({ historyMap: deps.groupHistories, historyKey });
@@ -466,6 +494,31 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
 
     const bodyText = messageText || placeholder || dataMessage.quote?.text?.trim() || "";
     if (!bodyText) return;
+
+    const receiptTimestamp =
+      typeof envelope.timestamp === "number"
+        ? envelope.timestamp
+        : typeof dataMessage.timestamp === "number"
+          ? dataMessage.timestamp
+          : undefined;
+    if (deps.sendReadReceipts && !deps.readReceiptsViaDaemon && !isGroup && receiptTimestamp) {
+      try {
+        await sendReadReceiptSignal(`signal:${senderRecipient}`, receiptTimestamp, {
+          baseUrl: deps.baseUrl,
+          account: deps.account,
+          accountId: deps.accountId,
+        });
+      } catch (err) {
+        logVerbose(`signal read receipt failed for ${senderDisplay}: ${String(err)}`);
+      }
+    } else if (
+      deps.sendReadReceipts &&
+      !deps.readReceiptsViaDaemon &&
+      !isGroup &&
+      !receiptTimestamp
+    ) {
+      logVerbose(`signal read receipt skipped (missing timestamp) for ${senderDisplay}`);
+    }
 
     const senderName = envelope.sourceName ?? senderDisplay;
     const messageId =

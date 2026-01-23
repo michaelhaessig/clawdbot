@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import type { ChannelPlugin } from "../channels/plugins/types.js";
+import type { PluginRegistry } from "../plugins/registry.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
 import {
   agentCommand,
   connectOk,
@@ -12,7 +15,54 @@ import {
   writeSessionStore,
 } from "./test-helpers.js";
 
-installGatewayTestHooks();
+installGatewayTestHooks({ scope: "suite" });
+
+let server: Awaited<ReturnType<typeof startServerWithClient>>["server"];
+let ws: Awaited<ReturnType<typeof startServerWithClient>>["ws"];
+
+beforeAll(async () => {
+  const started = await startServerWithClient();
+  server = started.server;
+  ws = started.ws;
+  await connectOk(ws);
+});
+
+afterAll(async () => {
+  ws.close();
+  await server.close();
+});
+
+const registryState = vi.hoisted(() => ({
+  registry: {
+    plugins: [],
+    tools: [],
+    channels: [],
+    providers: [],
+    gatewayHandlers: {},
+    httpHandlers: [],
+    cliRegistrars: [],
+    services: [],
+    diagnostics: [],
+  } as PluginRegistry,
+}));
+
+vi.mock("./server-plugins.js", async () => {
+  const { setActivePluginRegistry } = await import("../plugins/runtime.js");
+  return {
+    loadGatewayPlugins: (params: { baseMethods: string[] }) => {
+      setActivePluginRegistry(registryState.registry);
+      return {
+        pluginRegistry: registryState.registry,
+        gatewayMethods: params.baseMethods ?? [],
+      };
+    },
+  };
+});
+
+const setRegistry = (registry: PluginRegistry) => {
+  registryState.registry = registry;
+  setActivePluginRegistry(registry);
+};
 
 const BASE_IMAGE_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X3mIAAAAASUVORK5CYII=";
@@ -20,10 +70,100 @@ const BASE_IMAGE_PNG =
 function expectChannels(call: Record<string, unknown>, channel: string) {
   expect(call.channel).toBe(channel);
   expect(call.messageChannel).toBe(channel);
+  const runContext = call.runContext as { messageChannel?: string } | undefined;
+  expect(runContext?.messageChannel).toBe(channel);
 }
+
+const createRegistry = (channels: PluginRegistry["channels"]): PluginRegistry => ({
+  plugins: [],
+  tools: [],
+  channels,
+  providers: [],
+  gatewayHandlers: {},
+  httpHandlers: [],
+  cliRegistrars: [],
+  services: [],
+  diagnostics: [],
+});
+
+const createStubChannelPlugin = (params: {
+  id: ChannelPlugin["id"];
+  label: string;
+  resolveAllowFrom?: (cfg: Record<string, unknown>) => string[];
+}): ChannelPlugin => ({
+  id: params.id,
+  meta: {
+    id: params.id,
+    label: params.label,
+    selectionLabel: params.label,
+    docsPath: `/channels/${params.id}`,
+    blurb: "test stub.",
+  },
+  capabilities: { chatTypes: ["direct"] },
+  config: {
+    listAccountIds: () => ["default"],
+    resolveAccount: () => ({}),
+    resolveAllowFrom: params.resolveAllowFrom
+      ? ({ cfg }) => params.resolveAllowFrom?.(cfg as Record<string, unknown>) ?? []
+      : undefined,
+  },
+  outbound: {
+    deliveryMode: "direct",
+    resolveTarget: ({ to, allowFrom }) => {
+      const trimmed = to?.trim() ?? "";
+      if (trimmed) return { ok: true, to: trimmed };
+      const first = allowFrom?.[0];
+      if (first) return { ok: true, to: String(first) };
+      return {
+        ok: false,
+        error: new Error(`missing target for ${params.id}`),
+      };
+    },
+    sendText: async () => ({ channel: params.id, messageId: "msg-test" }),
+    sendMedia: async () => ({ channel: params.id, messageId: "msg-test" }),
+  },
+});
+
+const defaultRegistry = createRegistry([
+  {
+    pluginId: "whatsapp",
+    source: "test",
+    plugin: createStubChannelPlugin({
+      id: "whatsapp",
+      label: "WhatsApp",
+      resolveAllowFrom: (cfg) => {
+        const channels = cfg.channels as Record<string, unknown> | undefined;
+        const entry = channels?.whatsapp as Record<string, unknown> | undefined;
+        const allow = entry?.allowFrom;
+        return Array.isArray(allow) ? allow.map((value) => String(value)) : [];
+      },
+    }),
+  },
+  {
+    pluginId: "telegram",
+    source: "test",
+    plugin: createStubChannelPlugin({ id: "telegram", label: "Telegram" }),
+  },
+  {
+    pluginId: "discord",
+    source: "test",
+    plugin: createStubChannelPlugin({ id: "discord", label: "Discord" }),
+  },
+  {
+    pluginId: "slack",
+    source: "test",
+    plugin: createStubChannelPlugin({ id: "slack", label: "Slack" }),
+  },
+  {
+    pluginId: "signal",
+    source: "test",
+    plugin: createStubChannelPlugin({ id: "signal", label: "Signal" }),
+  },
+]);
 
 describe("gateway server agent", () => {
   test("agent marks implicit delivery when lastTo is stale", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+436769770569"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -37,10 +177,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -56,13 +192,11 @@ describe("gateway server agent", () => {
     expect(call.to).toBe("+1555");
     expect(call.deliveryTargetMode).toBe("implicit");
     expect(call.sessionId).toBe("sess-main-stale");
-
-    ws.close();
-    await server.close();
     testState.allowFrom = undefined;
   });
 
   test("agent forwards sessionKey to agentCommand", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -73,10 +207,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "agent:main:subagent:abc",
@@ -91,12 +221,67 @@ describe("gateway server agent", () => {
     expectChannels(call, "webchat");
     expect(call.deliver).toBe(false);
     expect(call.to).toBeUndefined();
+  });
 
-    ws.close();
-    await server.close();
+  test("agent derives sessionKey from agentId", async () => {
+    setRegistry(defaultRegistry);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
+    testState.sessionStorePath = path.join(dir, "sessions.json");
+    testState.agentsConfig = { list: [{ id: "ops" }] };
+    await writeSessionStore({
+      agentId: "ops",
+      entries: {
+        main: {
+          sessionId: "sess-ops",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    const res = await rpcReq(ws, "agent", {
+      message: "hi",
+      agentId: "ops",
+      idempotencyKey: "idem-agent-id",
+    });
+    expect(res.ok).toBe(true);
+
+    const spy = vi.mocked(agentCommand);
+    const call = spy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(call.sessionKey).toBe("agent:ops:main");
+    expect(call.sessionId).toBe("sess-ops");
+  });
+
+  test("agent rejects unknown reply channel", async () => {
+    setRegistry(defaultRegistry);
+    const res = await rpcReq(ws, "agent", {
+      message: "hi",
+      replyChannel: "unknown-channel",
+      idempotencyKey: "idem-agent-reply-unknown",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error?.message).toContain("unknown channel");
+
+    const spy = vi.mocked(agentCommand);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("agent rejects mismatched agentId and sessionKey", async () => {
+    setRegistry(defaultRegistry);
+    testState.agentsConfig = { list: [{ id: "ops" }] };
+    const res = await rpcReq(ws, "agent", {
+      message: "hi",
+      agentId: "ops",
+      sessionKey: "agent:main:main",
+      idempotencyKey: "idem-agent-mismatch",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error?.message).toContain("does not match session key agent");
+
+    const spy = vi.mocked(agentCommand);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   test("agent forwards accountId to agentCommand", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -111,10 +296,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -129,13 +310,13 @@ describe("gateway server agent", () => {
     expectChannels(call, "whatsapp");
     expect(call.to).toBe("+1555");
     expect(call.accountId).toBe("kev");
-
-    ws.close();
-    await server.close();
+    const runContext = call.runContext as { accountId?: string } | undefined;
+    expect(runContext?.accountId).toBe("kev");
     testState.allowFrom = undefined;
   });
 
   test("agent avoids lastAccountId when explicit to is provided", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -150,10 +331,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -168,13 +345,11 @@ describe("gateway server agent", () => {
     expectChannels(call, "whatsapp");
     expect(call.to).toBe("+1666");
     expect(call.accountId).toBeUndefined();
-
-    ws.close();
-    await server.close();
     testState.allowFrom = undefined;
   });
 
   test("agent keeps explicit accountId when explicit to is provided", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -189,10 +364,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -208,13 +379,11 @@ describe("gateway server agent", () => {
     expectChannels(call, "whatsapp");
     expect(call.to).toBe("+1666");
     expect(call.accountId).toBe("primary");
-
-    ws.close();
-    await server.close();
     testState.allowFrom = undefined;
   });
 
   test("agent falls back to lastAccountId for implicit delivery", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -229,10 +398,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -246,13 +411,11 @@ describe("gateway server agent", () => {
     expectChannels(call, "whatsapp");
     expect(call.to).toBe("+1555");
     expect(call.accountId).toBe("kev");
-
-    ws.close();
-    await server.close();
     testState.allowFrom = undefined;
   });
 
   test("agent forwards image attachments as images[]", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -263,10 +426,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "what is in the image?",
       sessionKey: "main",
@@ -293,12 +452,10 @@ describe("gateway server agent", () => {
     expect(images[0]?.type).toBe("image");
     expect(images[0]?.mimeType).toBe("image/png");
     expect(images[0]?.data).toBe(BASE_IMAGE_PNG);
-
-    ws.close();
-    await server.close();
   });
 
   test("agent falls back to whatsapp when delivery requested and no last channel exists", async () => {
+    setRegistry(defaultRegistry);
     testState.allowFrom = ["+1555"];
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
@@ -310,10 +467,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -328,13 +481,11 @@ describe("gateway server agent", () => {
     expect(call.to).toBe("+1555");
     expect(call.deliver).toBe(true);
     expect(call.sessionId).toBe("sess-main-missing-provider");
-
-    ws.close();
-    await server.close();
     testState.allowFrom = undefined;
   });
 
   test("agent routes main last-channel whatsapp", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -347,10 +498,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -368,12 +515,10 @@ describe("gateway server agent", () => {
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
     expect(call.sessionId).toBe("sess-main-whatsapp");
-
-    ws.close();
-    await server.close();
   });
 
   test("agent routes main last-channel telegram", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -386,10 +531,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -406,12 +547,10 @@ describe("gateway server agent", () => {
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
     expect(call.sessionId).toBe("sess-main");
-
-    ws.close();
-    await server.close();
   });
 
   test("agent routes main last-channel discord", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -424,10 +563,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -444,12 +579,10 @@ describe("gateway server agent", () => {
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
     expect(call.sessionId).toBe("sess-discord");
-
-    ws.close();
-    await server.close();
   });
 
   test("agent routes main last-channel slack", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -462,10 +595,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -482,12 +611,10 @@ describe("gateway server agent", () => {
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
     expect(call.sessionId).toBe("sess-slack");
-
-    ws.close();
-    await server.close();
   });
 
   test("agent routes main last-channel signal", async () => {
+    setRegistry(defaultRegistry);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "clawdbot-gw-"));
     testState.sessionStorePath = path.join(dir, "sessions.json");
     await writeSessionStore({
@@ -500,10 +627,6 @@ describe("gateway server agent", () => {
         },
       },
     });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
     const res = await rpcReq(ws, "agent", {
       message: "hi",
       sessionKey: "main",
@@ -520,8 +643,5 @@ describe("gateway server agent", () => {
     expect(call.deliver).toBe(true);
     expect(call.bestEffortDeliver).toBe(true);
     expect(call.sessionId).toBe("sess-signal");
-
-    ws.close();
-    await server.close();
   });
 });
