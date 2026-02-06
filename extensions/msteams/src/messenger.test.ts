@@ -1,6 +1,5 @@
+import { SILENT_REPLY_TOKEN, type PluginRuntime } from "openclaw/plugin-sdk";
 import { beforeEach, describe, expect, it } from "vitest";
-
-import { SILENT_REPLY_TOKEN, type PluginRuntime } from "clawdbot/plugin-sdk";
 import type { StoredConversationReference } from "./conversation-store.js";
 import {
   type MSTeamsAdapter,
@@ -9,18 +8,27 @@ import {
 } from "./messenger.js";
 import { setMSTeamsRuntime } from "./runtime.js";
 
+const chunkMarkdownText = (text: string, limit: number) => {
+  if (!text) {
+    return [];
+  }
+  if (limit <= 0 || text.length <= limit) {
+    return [text];
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < text.length; index += limit) {
+    chunks.push(text.slice(index, index + limit));
+  }
+  return chunks;
+};
+
 const runtimeStub = {
   channel: {
     text: {
-      chunkMarkdownText: (text: string, limit: number) => {
-        if (!text) return [];
-        if (limit <= 0 || text.length <= limit) return [text];
-        const chunks: string[] = [];
-        for (let index = 0; index < text.length; index += limit) {
-          chunks.push(text.slice(index, index + limit));
-        }
-        return chunks;
-      },
+      chunkMarkdownText,
+      chunkMarkdownTextWithMode: chunkMarkdownText,
+      resolveMarkdownTableMode: () => "code",
+      convertMarkdownTables: (text: string) => text,
     },
   },
 } as unknown as PluginRuntime;
@@ -34,6 +42,7 @@ describe("msteams messenger", () => {
     it("filters silent replies", () => {
       const messages = renderReplyPayloadsToMessages([{ text: SILENT_REPLY_TOKEN }], {
         textChunkLimit: 4000,
+        tableMode: "code",
       });
       expect(messages).toEqual([]);
     });
@@ -41,7 +50,7 @@ describe("msteams messenger", () => {
     it("filters silent reply prefixes", () => {
       const messages = renderReplyPayloadsToMessages(
         [{ text: `${SILENT_REPLY_TOKEN} -- ignored` }],
-        { textChunkLimit: 4000 },
+        { textChunkLimit: 4000, tableMode: "code" },
       );
       expect(messages).toEqual([]);
     });
@@ -49,7 +58,7 @@ describe("msteams messenger", () => {
     it("splits media into separate messages by default", () => {
       const messages = renderReplyPayloadsToMessages(
         [{ text: "hi", mediaUrl: "https://example.com/a.png" }],
-        { textChunkLimit: 4000 },
+        { textChunkLimit: 4000, tableMode: "code" },
       );
       expect(messages).toEqual([{ text: "hi" }, { mediaUrl: "https://example.com/a.png" }]);
     });
@@ -57,7 +66,7 @@ describe("msteams messenger", () => {
     it("supports inline media mode", () => {
       const messages = renderReplyPayloadsToMessages(
         [{ text: "hi", mediaUrl: "https://example.com/a.png" }],
-        { textChunkLimit: 4000, mediaMode: "inline" },
+        { textChunkLimit: 4000, mediaMode: "inline", tableMode: "code" },
       );
       expect(messages).toEqual([{ text: "hi", mediaUrl: "https://example.com/a.png" }]);
     });
@@ -66,6 +75,7 @@ describe("msteams messenger", () => {
       const long = "hello ".repeat(200);
       const messages = renderReplyPayloadsToMessages([{ text: long }], {
         textChunkLimit: 50,
+        tableMode: "code",
       });
       expect(messages.length).toBeGreaterThan(1);
     });

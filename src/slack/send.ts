@@ -1,10 +1,14 @@
 import { type FilesUploadV2Arguments, type WebClient } from "@slack/web-api";
-
-import { resolveTextChunkLimit } from "../auto-reply/chunk.js";
+import type { SlackTokenSource } from "./accounts.js";
+import {
+  chunkMarkdownTextWithMode,
+  resolveChunkMode,
+  resolveTextChunkLimit,
+} from "../auto-reply/chunk.js";
 import { loadConfig } from "../config/config.js";
+import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { logVerbose } from "../globals.js";
 import { loadWebMedia } from "../web/media.js";
-import type { SlackTokenSource } from "./accounts.js";
 import { resolveSlackAccount } from "./accounts.js";
 import { createSlackWebClient } from "./client.js";
 import { markdownToSlackMrkdwnChunks } from "./format.js";
@@ -43,7 +47,9 @@ function resolveToken(params: {
   fallbackSource?: SlackTokenSource;
 }) {
   const explicit = resolveSlackBotToken(params.explicit);
-  if (explicit) return explicit;
+  if (explicit) {
+    return explicit;
+  }
   const fallback = resolveSlackBotToken(params.fallbackToken);
   if (!fallback) {
     logVerbose(
@@ -143,7 +149,22 @@ export async function sendMessageSlack(
   const { channelId } = await resolveChannelId(client, recipient);
   const textLimit = resolveTextChunkLimit(cfg, "slack", account.accountId);
   const chunkLimit = Math.min(textLimit, SLACK_TEXT_LIMIT);
-  const chunks = markdownToSlackMrkdwnChunks(trimmedMessage, chunkLimit);
+  const tableMode = resolveMarkdownTableMode({
+    cfg,
+    channel: "slack",
+    accountId: account.accountId,
+  });
+  const chunkMode = resolveChunkMode(cfg, "slack", account.accountId);
+  const markdownChunks =
+    chunkMode === "newline"
+      ? chunkMarkdownTextWithMode(trimmedMessage, chunkLimit, chunkMode)
+      : [trimmedMessage];
+  const chunks = markdownChunks.flatMap((markdown) =>
+    markdownToSlackMrkdwnChunks(markdown, chunkLimit, { tableMode }),
+  );
+  if (!chunks.length && trimmedMessage) {
+    chunks.push(trimmedMessage);
+  }
   const mediaMaxBytes =
     typeof account.config.mediaMaxMb === "number"
       ? account.config.mediaMaxMb * 1024 * 1024

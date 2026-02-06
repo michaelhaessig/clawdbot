@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-
+import { loadConfig } from "../config/config.js";
+import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { getChildLogger } from "../logging/logger.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { convertMarkdownTables } from "../markdown/tables.js";
 import { normalizePollInput, type PollInput } from "../polls.js";
 import { toWhatsappJid } from "../utils.js";
 import { type ActiveWebSendOptions, requireActiveWebListener } from "./active-listener.js";
@@ -25,6 +27,13 @@ export async function sendMessageWhatsApp(
   const { listener: active, accountId: resolvedAccountId } = requireActiveWebListener(
     options.accountId,
   );
+  const cfg = loadConfig();
+  const tableMode = resolveMarkdownTableMode({
+    cfg,
+    channel: "whatsapp",
+    accountId: resolvedAccountId ?? options.accountId,
+  });
+  text = convertMarkdownTables(text ?? "", tableMode);
   const logger = getChildLogger({
     module: "web-outbound",
     correlationId,

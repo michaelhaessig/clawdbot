@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-
 import {
   extractContentFromMessage,
   extractTextFromMessage,
   extractThinkingFromMessage,
+  isCommandMessage,
 } from "./tui-formatters.js";
 
 describe("extractTextFromMessage", () => {
@@ -96,5 +96,13 @@ describe("extractContentFromMessage", () => {
     });
 
     expect(text).toContain("HTTP 429");
+  });
+});
+
+describe("isCommandMessage", () => {
+  it("detects command-marked messages", () => {
+    expect(isCommandMessage({ command: true })).toBe(true);
+    expect(isCommandMessage({ command: false })).toBe(false);
+    expect(isCommandMessage({})).toBe(false);
   });
 });
