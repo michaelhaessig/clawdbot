@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0.0
+
+**Upstream sync to v2026.2.3 + OpenClaw rebrand**
+
+### Breaking Changes
+- **Rebrand:** upstream renamed from `clawdbot` to `openclaw` (github.com/openclaw/openclaw)
+- **Gateway auth required:** auth mode "none" removed in upstream v2026.1.29 — `gateway_token` must be set
+- **Config options renamed:** `clawdbot_repo` → `openclaw_repo`, `clawdbot_version` → `openclaw_version`
+- **Environment variables renamed:** `CLAWDBOT_*` → `OPENCLAW_*` (`OPENCLAW_STATE_DIR`, `OPENCLAW_WORKSPACE_DIR`, `OPENCLAW_APP_DIR`, `OPENCLAW_GATEWAY_TOKEN`, `OPENCLAW_NO_RESPAWN`)
+- **Default workspace path:** `/share/clawdbot` → `/share/openclaw`
+- **Default state/app dirs:** `/config/clawdbot` → `/config/openclaw`, `/config/clawdbot-app` → `/config/openclaw-app`
+- **Config file:** `clawdbot.json` → `openclaw.json`
+
+### Migration
+- Legacy directories (`/config/clawdbot`, `/config/clawdbot-app`) are auto-migrated on first start
+- Legacy config file (`clawdbot.json`) is auto-migrated to `openclaw.json`
+- Legacy `clawdbot` CLI wrapper kept as symlink to `openclaw`
+
+### Upstream highlights (v2026.1.23 → v2026.2.3)
+- 30+ security fixes (gateway auth bypass, SSRF, path traversal, credential exfiltration, sandbox hardening)
+- New channels: LINE, Feishu/Lark
+- New providers: xAI Grok, Cloudflare AI Gateway, Moonshot
+- Web UI: token usage dashboard, agents dashboard
+- Cron overhaul: announce delivery, one-shot jobs, ISO 8601 schedules
+- Build system: tsc → tsdown/tsgo (faster builds)
+- Gateway: config.patch tool, TLS 1.3 minimum, diagnostic flags
+
 ## 2.0.35
 
 - Fix version check showing "origin/..." instead of SHA: capture git output properly and redirect fetch stdout

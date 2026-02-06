@@ -6,23 +6,23 @@ set -euo pipefail
 export GIT_TERMINAL_PROMPT=0
 
 # =============================================================================
-# Clawdbot Self-Updating Home Assistant Addon
+# OpenClaw Self-Updating Home Assistant Addon
 # =============================================================================
-# This script manages clawdbot installation and updates in persistent storage.
-# On first start, it clones and builds clawdbot from the configured repository.
+# This script manages openclaw installation and updates in persistent storage.
+# On first start, it clones and builds openclaw from the configured repository.
 # On subsequent starts, it checks for updates based on the update_mode setting.
 # =============================================================================
 
 # === Configuration ===
-APP_DIR="${CLAWDBOT_APP_DIR:-/config/clawdbot-app}"
-STATE_DIR="${CLAWDBOT_STATE_DIR:-/config/clawdbot}"
+APP_DIR="${OPENCLAW_APP_DIR:-/config/openclaw-app}"
+STATE_DIR="${OPENCLAW_STATE_DIR:-/config/openclaw}"
 BACKUP_DIR="${APP_DIR}.backup"
 STAGING_DIR="${APP_DIR}.new"
 INSTALL_MARKER="${APP_DIR}/.install-marker"
 
 # Read addon configuration with defaults
-CLAWDBOT_REPO=$(bashio::config 'clawdbot_repo' 'https://github.com/clawdbot/clawdbot.git')
-CLAWDBOT_VERSION=$(bashio::config 'clawdbot_version' 'main')
+OPENCLAW_REPO=$(bashio::config 'openclaw_repo' 'https://github.com/openclaw/openclaw.git')
+OPENCLAW_VERSION=$(bashio::config 'openclaw_version' 'main')
 UPDATE_MODE=$(bashio::config 'update_mode' 'auto')
 PIN_VERSION=$(bashio::config 'pin_version' 'false')
 GATEWAY_PORT=$(bashio::config 'gateway_port')
@@ -46,8 +46,8 @@ get_remote_version() {
         # Fetch silently (redirect both stdout and stderr)
         git -c credential.helper= -C "$APP_DIR" fetch origin --tags >/dev/null 2>&1 || true
         # Try branch ref first (origin/NAME), then tag/direct ref (NAME)
-        sha=$(git -C "$APP_DIR" rev-parse "origin/${CLAWDBOT_VERSION}" 2>/dev/null) || \
-        sha=$(git -C "$APP_DIR" rev-parse "${CLAWDBOT_VERSION}" 2>/dev/null) || true
+        sha=$(git -C "$APP_DIR" rev-parse "origin/${OPENCLAW_VERSION}" 2>/dev/null) || \
+        sha=$(git -C "$APP_DIR" rev-parse "${OPENCLAW_VERSION}" 2>/dev/null) || true
     fi
     printf '%s' "$sha"
 }
@@ -68,10 +68,10 @@ is_update_available() {
 }
 
 # === Installation ===
-install_clawdbot() {
-    log_info "=== Installing Clawdbot ==="
-    log_info "Repository: ${CLAWDBOT_REPO}"
-    log_info "Version: ${CLAWDBOT_VERSION}"
+install_openclaw() {
+    log_info "=== Installing OpenClaw ==="
+    log_info "Repository: ${OPENCLAW_REPO}"
+    log_info "Version: ${OPENCLAW_VERSION}"
     log_info "This may take 15-25 minutes on ARM devices..."
 
     # Clean up any failed previous attempts
@@ -79,7 +79,7 @@ install_clawdbot() {
 
     # Clone repository (disable credential helpers to avoid prompts for public repos)
     log_info "Cloning repository..."
-    if ! git -c credential.helper= clone --depth 1 --branch "$CLAWDBOT_VERSION" "$CLAWDBOT_REPO" "$STAGING_DIR"; then
+    if ! git -c credential.helper= clone --depth 1 --branch "$OPENCLAW_VERSION" "$OPENCLAW_REPO" "$STAGING_DIR"; then
         log_error "Failed to clone repository"
         return 1
     fi
@@ -127,8 +127,8 @@ install_clawdbot() {
     {
         echo "version=$(git -C "$APP_DIR" rev-parse HEAD)"
         echo "timestamp=$(date -Iseconds)"
-        echo "branch=$CLAWDBOT_VERSION"
-        echo "repo=$CLAWDBOT_REPO"
+        echo "branch=$OPENCLAW_VERSION"
+        echo "repo=$OPENCLAW_REPO"
     } > "$INSTALL_MARKER"
 
     log_info "=== Installation complete! ==="
@@ -136,8 +136,8 @@ install_clawdbot() {
 }
 
 # === Update ===
-update_clawdbot() {
-    log_info "=== Updating Clawdbot ==="
+update_openclaw() {
+    log_info "=== Updating OpenClaw ==="
 
     # Backup current installation
     log_info "Backing up current installation..."
@@ -155,16 +155,16 @@ update_clawdbot() {
 
     # Determine if version is a tag or branch and update accordingly
     log_info "Applying updates..."
-    if git show-ref --verify --quiet "refs/tags/${CLAWDBOT_VERSION}"; then
+    if git show-ref --verify --quiet "refs/tags/${OPENCLAW_VERSION}"; then
         # It's a tag - use checkout (tags don't rebase)
-        log_info "Checking out tag ${CLAWDBOT_VERSION}..."
-        if ! git checkout --force "${CLAWDBOT_VERSION}"; then
+        log_info "Checking out tag ${OPENCLAW_VERSION}..."
+        if ! git checkout --force "${OPENCLAW_VERSION}"; then
             log_error "Failed to checkout tag"
             return 1
         fi
     else
         # It's a branch - rebase onto origin
-        if ! git rebase "origin/${CLAWDBOT_VERSION}"; then
+        if ! git rebase "origin/${OPENCLAW_VERSION}"; then
             log_error "Rebase failed, aborting update"
             git rebase --abort 2>/dev/null || true
             return 1
@@ -204,8 +204,8 @@ update_clawdbot() {
     {
         echo "version=$(git rev-parse HEAD)"
         echo "timestamp=$(date -Iseconds)"
-        echo "branch=$CLAWDBOT_VERSION"
-        echo "repo=$CLAWDBOT_REPO"
+        echo "branch=$OPENCLAW_VERSION"
+        echo "repo=$OPENCLAW_REPO"
         echo "updated_from=$old_version"
     } > "$INSTALL_MARKER"
 
@@ -214,7 +214,7 @@ update_clawdbot() {
 }
 
 # === Rollback ===
-rollback_clawdbot() {
+rollback_openclaw() {
     if [ -d "$BACKUP_DIR" ]; then
         log_warn "Rolling back to previous version..."
         rm -rf "$APP_DIR"
@@ -238,6 +238,18 @@ verify_installation() {
 # Main Startup Flow
 # =============================================================================
 
+# Migrate legacy state dir if needed (clawdbot -> openclaw)
+LEGACY_STATE_DIR="/config/clawdbot"
+LEGACY_APP_DIR="/config/clawdbot-app"
+if [ -d "$LEGACY_STATE_DIR" ] && [ ! -d "$STATE_DIR" ]; then
+    log_info "Migrating state directory: ${LEGACY_STATE_DIR} -> ${STATE_DIR}"
+    mv "$LEGACY_STATE_DIR" "$STATE_DIR"
+fi
+if [ -d "$LEGACY_APP_DIR" ] && [ ! -d "$APP_DIR" ]; then
+    log_info "Migrating app directory: ${LEGACY_APP_DIR} -> ${APP_DIR}"
+    mv "$LEGACY_APP_DIR" "$APP_DIR"
+fi
+
 # Set up directories
 mkdir -p "$STATE_DIR"
 mkdir -p "$STATE_DIR/credentials"
@@ -259,9 +271,10 @@ if [ -d "$WORKSPACE_SKILLS_DIR" ] && [ "$(ls -A "$WORKSPACE_SKILLS_DIR" 2>/dev/n
     done
 fi
 
-# Export environment variables
-export CLAWDBOT_STATE_DIR="$STATE_DIR"
-export CLAWDBOT_WORKSPACE_DIR="$WORKSPACE"
+# Export environment variables (set both old and new names for compatibility)
+export OPENCLAW_STATE_DIR="$STATE_DIR"
+export OPENCLAW_WORKSPACE_DIR="$WORKSPACE"
+export OPENCLAW_NO_RESPAWN=1
 export HOME="$STATE_DIR"
 
 # Symlink /root/.gemini to persistent storage so Gemini CLI works in interactive shells
@@ -281,21 +294,20 @@ if [ -n "${GOG_KEYRING:-}" ]; then
     export GOG_KEYRING_PASSWORD="$GOG_KEYRING"
 fi
 
-# Gateway token handling
-# Empty config = no auth (for HA ingress which handles its own auth)
-# Non-empty config = use that token
-# Legacy: if token file exists and config is empty, use file token (migration)
+# Gateway token handling - token auth is required (auth "none" removed in v2026.1.29)
 if [ -z "${GATEWAY_TOKEN}" ]; then
+    # Check for legacy token file
     if [ -f "${STATE_DIR}/.gateway_token" ]; then
-        # Migration: use existing token file, but warn user
         GATEWAY_TOKEN=$(cat "${STATE_DIR}/.gateway_token")
         log_warn "Using legacy token from ${STATE_DIR}/.gateway_token"
-        log_warn "To disable auth, delete this file and restart"
+        log_warn "Please set gateway_token in addon config and remove this file"
     else
-        log_info "No gateway token configured - auth disabled (HA ingress handles auth)"
+        log_error "No gateway token configured! Gateway auth is required since v2026.1.29."
+        log_error "Set gateway_token in the addon configuration and restart."
+        exit 1
     fi
 fi
-export CLAWDBOT_GATEWAY_TOKEN="${GATEWAY_TOKEN}"
+export OPENCLAW_GATEWAY_TOKEN="${GATEWAY_TOKEN}"
 
 # =============================================================================
 # Installation / Update Logic
@@ -305,11 +317,11 @@ if [ ! -f "$INSTALL_MARKER" ] || ! verify_installation; then
     # First install or corrupted installation
     log_info "No valid installation found, performing initial install..."
 
-    if ! install_clawdbot; then
+    if ! install_openclaw; then
         log_error "Initial installation failed!"
 
         # Try rollback if backup exists (from previous corrupted install)
-        if rollback_clawdbot; then
+        if rollback_openclaw; then
             log_warn "Rolled back to backup version"
         else
             log_error "No backup available, cannot start"
@@ -343,9 +355,9 @@ else
                 remote_ver=$(get_remote_version | head -c 7)
                 log_info "Update available: ${local_ver}... -> ${remote_ver}..."
 
-                if ! update_clawdbot; then
+                if ! update_openclaw; then
                     log_error "Update failed, attempting rollback..."
-                    if rollback_clawdbot; then
+                    if rollback_openclaw; then
                         log_warn "Rolled back to previous version, continuing..."
                     else
                         log_error "Rollback failed, continuing with current state..."
@@ -369,28 +381,31 @@ if ! verify_installation; then
 fi
 
 # =============================================================================
-# Create clawdbot CLI wrapper in PATH
+# Create CLI wrappers in PATH
 # =============================================================================
-cat > /usr/local/bin/clawdbot << 'WRAPPER'
+cat > /usr/local/bin/openclaw << 'WRAPPER'
 #!/bin/sh
-exec node /config/clawdbot-app/dist/index.js "$@"
+exec node /config/openclaw-app/dist/index.js "$@"
 WRAPPER
-chmod +x /usr/local/bin/clawdbot
-log_info "CLI available: clawdbot <command>"
+chmod +x /usr/local/bin/openclaw
+# Keep legacy name for backwards compatibility
+ln -sf /usr/local/bin/openclaw /usr/local/bin/clawdbot
+log_info "CLI available: openclaw <command> (also: clawdbot)"
 
 # =============================================================================
 # First Start Onboarding
 # =============================================================================
 
-CONFIG_FILE="${STATE_DIR}/clawdbot.json"
+# Check both new and legacy config file locations
+CONFIG_FILE="${STATE_DIR}/openclaw.json"
+LEGACY_CONFIG_FILE="${STATE_DIR}/clawdbot.json"
+if [ ! -f "${CONFIG_FILE}" ] && [ -f "${LEGACY_CONFIG_FILE}" ]; then
+    log_info "Migrating config: clawdbot.json -> openclaw.json"
+    mv "${LEGACY_CONFIG_FILE}" "${CONFIG_FILE}"
+fi
+
 if [ ! -f "${CONFIG_FILE}" ]; then
     log_info "First start detected - running initial setup..."
-
-    # Determine auth mode based on token
-    AUTH_MODE="token"
-    if [ -z "${GATEWAY_TOKEN}" ]; then
-        AUTH_MODE="off"
-    fi
 
     cd "$APP_DIR"
     node dist/index.js onboard \
@@ -398,7 +413,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
         --mode local \
         --workspace "${WORKSPACE}" \
         --gateway-port "${GATEWAY_PORT}" \
-        --gateway-auth "${AUTH_MODE}" \
+        --gateway-auth token \
         --gateway-token "${GATEWAY_TOKEN}" \
         --auth-choice skip \
         --skip-health \
@@ -420,17 +435,10 @@ if (!cfg.gateway) cfg.gateway = {};
 if (!cfg.gateway.mode) { cfg.gateway.mode = 'local'; changed = true; }
 // HA addon needs LAN binding for ingress access
 if (cfg.gateway.bind !== 'lan') { cfg.gateway.bind = 'lan'; changed = true; }
-// Set auth mode based on whether token is configured
+// Token auth is always required
 if (!cfg.gateway.auth) cfg.gateway.auth = {};
-if (token) {
-  // Token auth enabled
-  if (cfg.gateway.auth.mode !== 'token') { cfg.gateway.auth.mode = 'token'; changed = true; }
-  if (cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
-} else {
-  // No auth - delete mode field (resolveGatewayAuth defaults to 'none')
-  if (cfg.gateway.auth.mode) { delete cfg.gateway.auth.mode; changed = true; }
-  if (cfg.gateway.auth.token) { delete cfg.gateway.auth.token; changed = true; }
-}
+if (cfg.gateway.auth.mode !== 'token') { cfg.gateway.auth.mode = 'token'; changed = true; }
+if (cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
 if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
 " 2>/dev/null || true
 fi
@@ -442,10 +450,10 @@ fi
 # Get version info for logging
 INSTALLED_VERSION=$(grep "^version=" "$INSTALL_MARKER" 2>/dev/null | cut -d= -f2 | head -c 7 || echo "unknown")
 
-log_info "=== Starting Clawdbot Gateway ==="
+log_info "=== Starting OpenClaw Gateway ==="
 log_info "  Version: ${INSTALLED_VERSION}..."
-log_info "  Repository: ${CLAWDBOT_REPO}"
-log_info "  Branch: ${CLAWDBOT_VERSION}"
+log_info "  Repository: ${OPENCLAW_REPO}"
+log_info "  Branch: ${OPENCLAW_VERSION}"
 log_info "  Update Mode: ${UPDATE_MODE}"
 log_info "  Gateway Port: ${GATEWAY_PORT}"
 log_info "  Bridge Port: ${BRIDGE_PORT}"

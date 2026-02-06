@@ -3,4 +3,4 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
 args:
   BUILD_FROM: ghcr.io/home-assistant/${arch}-base-debian:bookworm
-  CLAWDBOT_VERSION: main
+  OPENCLAW_VERSION: main
