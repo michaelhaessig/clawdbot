@@ -2,8 +2,9 @@
 
 set -euo pipefail
 
-# Disable git credential prompts (required for non-interactive container)
+# Non-interactive container: suppress TTY prompts from git and pnpm
 export GIT_TERMINAL_PROMPT=0
+export CI=true
 
 # =============================================================================
 # OpenClaw Self-Updating Home Assistant Addon

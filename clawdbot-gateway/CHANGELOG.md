@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1
+
+- Fix pnpm aborting in container: set `CI=true` for non-interactive mode
+
 ## 3.0.0
 
 **Upstream sync to v2026.2.3 + OpenClaw rebrand**
