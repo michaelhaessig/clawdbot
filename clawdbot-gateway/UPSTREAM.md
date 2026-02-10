@@ -4,7 +4,7 @@
 
 - **Repo:** `https://github.com/openclaw/openclaw`
 - **Git remote:** `upstream` (set via `git remote set-url upstream https://github.com/openclaw/openclaw.git`)
-- **Last synced:** `v2026.2.3`
+- **Last synced:** `v2026.2.9`
 
 Previously at `https://github.com/clawdbot/clawdbot` (moved in v2026.1.29 rebrand).
 
@@ -33,13 +33,17 @@ After merging, verify these are still supported:
 
 3. **Auth:** gateway auth mode "none" was removed in v2026.1.29 — token is always required
 
-4. **Check for breaking changes:**
+4. **Device pairing:** v2026.2.9 introduced mandatory device pairing (public-key + approval).
+   - Local connections (127.0.0.1/::1) are auto-approved; LAN connections require explicit pairing.
+   - HA addon sets `gateway.controlUi.allowInsecureAuth = true` to bypass this (HA provides its own auth).
+
+5. **Check for breaking changes:**
    ```bash
    git log --oneline home-assistant..upstream/main
    head -100 CHANGELOG.md  # Look for "Breaking" section
    ```
 
-5. **Verify no conflicts in:**
+6. **Verify no conflicts in:**
    - `clawdbot-gateway/run.sh`
    - `clawdbot-gateway/config.yaml`
 
