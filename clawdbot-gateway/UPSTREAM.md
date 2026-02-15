@@ -4,7 +4,7 @@
 
 - **Repo:** `https://github.com/openclaw/openclaw`
 - **Git remote:** `upstream` (set via `git remote set-url upstream https://github.com/openclaw/openclaw.git`)
-- **Last synced:** `v2026.2.9`
+- **Last synced:** `v2026.2.14`
 
 Previously at `https://github.com/clawdbot/clawdbot` (moved in v2026.1.29 rebrand).
 
