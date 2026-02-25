@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.2
+
+- Fix gateway startup failure after upstream sync to v2026.2.24: enable `dangerouslyAllowHostHeaderOriginFallback` for non-loopback Control UI (HA provides its own auth via ingress)
+
 ## 3.0.1
 
 - Fix pnpm aborting in container: set `CI=true` for non-interactive mode

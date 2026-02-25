@@ -440,6 +440,9 @@ if (cfg.gateway.bind !== 'lan') { cfg.gateway.bind = 'lan'; changed = true; }
 if (!cfg.gateway.auth) cfg.gateway.auth = {};
 if (cfg.gateway.auth.mode !== 'token') { cfg.gateway.auth.mode = 'token'; changed = true; }
 if (cfg.gateway.auth.token !== token) { cfg.gateway.auth.token = token; changed = true; }
+// HA provides its own auth via ingress, so allow host-header origin fallback for non-loopback binding
+if (!cfg.gateway.controlUi) cfg.gateway.controlUi = {};
+if (!cfg.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback) { cfg.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true; changed = true; }
 if (changed) fs.writeFileSync('${CONFIG_FILE}', JSON.stringify(cfg, null, 2));
 " 2>/dev/null || true
 fi
