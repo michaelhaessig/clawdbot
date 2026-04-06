@@ -80,11 +80,14 @@ install_from_bundled() {
 
     log_info "Installing from bundled image (fast, no build needed)..."
 
+    # Ensure clean target, then copy contents.
     # Use hardlinks (cp -al) for speed and disk efficiency.
     # Falls back to regular copy if hardlinks fail (different filesystems).
-    if ! cp -al "$BUNDLED_APP_DIR" "$APP_DIR" 2>/dev/null; then
+    rm -rf "$APP_DIR"
+    mkdir -p "$APP_DIR"
+    if ! cp -al "$BUNDLED_APP_DIR"/. "$APP_DIR"/ 2>/dev/null; then
         log_info "Hardlink copy failed, using regular copy..."
-        cp -a "$BUNDLED_APP_DIR" "$APP_DIR"
+        cp -a "$BUNDLED_APP_DIR"/. "$APP_DIR"/
     fi
 
     # Create install marker

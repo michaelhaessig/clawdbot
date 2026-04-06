@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.2
+
+- Fix bundled install creating nested directory (`openclaw-app/openclaw-app/`) when target dir already exists
+
 ## 3.1.1
 
 - Bundled mode now auto-updates when the Docker image ships a newer version (compares package.json versions)
