@@ -389,7 +389,22 @@ else
 
     case "$UPDATE_MODE" in
         bundled)
-            log_info "Using bundled version from Docker image (no runtime updates)"
+            # Check if the Docker image ships a newer version than what's installed
+            bundled_ver=$(jq -r '.version // empty' "$BUNDLED_APP_DIR/package.json" 2>/dev/null || true)
+            installed_ver=$(jq -r '.version // empty' "$APP_DIR/package.json" 2>/dev/null || true)
+            if [ -n "$bundled_ver" ] && [ "$bundled_ver" != "$installed_ver" ]; then
+                log_info "Bundled version ($bundled_ver) differs from installed ($installed_ver), updating..."
+                rm -rf "$BACKUP_DIR"
+                mv "$APP_DIR" "$BACKUP_DIR"
+                if install_from_bundled; then
+                    rm -rf "$BACKUP_DIR"
+                else
+                    log_error "Bundled update failed, rolling back..."
+                    rollback_openclaw
+                fi
+            else
+                log_info "Using bundled version from Docker image (up to date)"
+            fi
             ;;
         disabled)
             log_info "Update checks disabled"
