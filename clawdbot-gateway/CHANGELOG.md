@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.3
+
+- Fix disk space exhaustion during updates: use hardlink backup (`cp -al`) instead of full copy
+- Prune pnpm store after install/update to prevent multi-GB cache bloat on eMMC devices
+- Remove backup directory after successful install/update to reclaim space immediately
+
 ## 3.0.2
 
 - Fix gateway startup failure after upstream sync to v2026.2.24: enable `dangerouslyAllowHostHeaderOriginFallback` for non-loopback Control UI (HA provides its own auth via ingress)

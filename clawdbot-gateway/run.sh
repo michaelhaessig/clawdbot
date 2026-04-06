@@ -112,17 +112,21 @@ install_openclaw() {
         return 1
     fi
 
-    # Prune dev dependencies to save space
+    # Prune dev dependencies and pnpm store to save disk space
     log_info "Pruning dev dependencies..."
     pnpm prune --prod || true
+    pnpm store prune || true
 
     # Move to final location (atomic swap)
     if [ -d "$APP_DIR" ]; then
-        log_info "Backing up previous installation..."
+        log_info "Replacing previous installation..."
         rm -rf "$BACKUP_DIR"
         mv "$APP_DIR" "$BACKUP_DIR"
     fi
     mv "$STAGING_DIR" "$APP_DIR"
+
+    # Clean up backup after successful install
+    rm -rf "$BACKUP_DIR"
 
     # Create install marker
     {
@@ -140,10 +144,10 @@ install_openclaw() {
 update_openclaw() {
     log_info "=== Updating OpenClaw ==="
 
-    # Backup current installation
+    # Backup current installation (move instead of copy to save disk space)
     log_info "Backing up current installation..."
     rm -rf "$BACKUP_DIR"
-    cp -a "$APP_DIR" "$BACKUP_DIR"
+    cp -al "$APP_DIR" "$BACKUP_DIR"
 
     cd "$APP_DIR"
 
@@ -196,8 +200,12 @@ update_openclaw() {
         return 1
     fi
 
-    # Prune dev dependencies
+    # Prune dev dependencies and pnpm store to save disk space
     pnpm prune --prod || true
+    pnpm store prune || true
+
+    # Remove backup now that update succeeded
+    rm -rf "$BACKUP_DIR"
 
     # Update marker
     local old_version
