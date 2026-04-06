@@ -1,9 +1,20 @@
-# Dockerfile for self-updating HA addon
-# This creates a bootstrap image with build tools - clawdbot is installed at runtime
-#
-# The addon will clone and build clawdbot on first start, storing it in persistent
-# storage (/config/clawdbot-app). Updates happen automatically without container rebuild.
+# Dockerfile for HA addon with pre-built openclaw app
+# Stage 1 builds openclaw from source in CI (plenty of disk/CPU).
+# Stage 2 copies the built artifacts into the HA runtime image.
+# This avoids building on-device, which exhausts the 28 GB eMMC on HA Green.
 
+# === Stage 1: Build openclaw ===
+FROM node:22-bookworm AS builder
+WORKDIR /app
+COPY . .
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN pnpm install --frozen-lockfile
+RUN pnpm build
+RUN pnpm ui:install && pnpm ui:build
+# Remove dev deps to shrink the final image
+RUN pnpm prune --prod
+
+# === Stage 2: Runtime image ===
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
 FROM ${BUILD_FROM}
 
@@ -107,6 +118,12 @@ COPY clawdbot-gateway/tools/ /opt/addon-tools/
 
 # Build addon tools (supports TypeScript/bun, Go, and pre-built binaries)
 RUN /opt/build-tools.sh
+
+# Copy pre-built openclaw app from builder stage
+COPY --from=builder /app/dist /opt/openclaw-app/dist
+COPY --from=builder /app/node_modules /opt/openclaw-app/node_modules
+COPY --from=builder /app/package.json /opt/openclaw-app/package.json
+COPY --from=builder /app/ui/dist /opt/openclaw-app/ui/dist
 
 ENV NODE_ENV=production
 ENV CLAWDBOT_APP_DIR=/config/clawdbot-app

@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.1.0
+
+**Pre-build openclaw in Docker image to prevent disk exhaustion on constrained devices (HA Green 28 GB eMMC)**
+
+### Changes
+- Pre-build openclaw app in CI via multi-stage Dockerfile — no more 15-25 min on-device builds
+- New `bundled` update mode (now the default): uses the image-bundled app, never attempts runtime builds
+- First start is now seconds instead of 15+ minutes
+- Existing `auto`, `check`, and `disabled` update modes still work as opt-in for runtime git updates
+
+### Migration
+- Existing installations are preserved; the bundled app is only used for fresh installs
+- Default `update_mode` changed from `auto` to `bundled` — set to `auto` if you want runtime git updates
+
 ## 3.0.3
 
 - Fix disk space exhaustion during updates: use hardlink backup (`cp -al`) instead of full copy

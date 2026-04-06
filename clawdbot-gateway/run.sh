@@ -21,10 +21,13 @@ BACKUP_DIR="${APP_DIR}.backup"
 STAGING_DIR="${APP_DIR}.new"
 INSTALL_MARKER="${APP_DIR}/.install-marker"
 
+# Pre-built app bundled in the Docker image
+BUNDLED_APP_DIR="/opt/openclaw-app"
+
 # Read addon configuration with defaults
 OPENCLAW_REPO=$(bashio::config 'openclaw_repo' 'https://github.com/openclaw/openclaw.git')
 OPENCLAW_VERSION=$(bashio::config 'openclaw_version' 'main')
-UPDATE_MODE=$(bashio::config 'update_mode' 'auto')
+UPDATE_MODE=$(bashio::config 'update_mode' 'bundled')
 PIN_VERSION=$(bashio::config 'pin_version' 'false')
 GATEWAY_PORT=$(bashio::config 'gateway_port')
 BRIDGE_PORT=$(bashio::config 'bridge_port')
@@ -68,7 +71,34 @@ is_update_available() {
     [ -n "$remote_sha" ] && [ -n "$local_sha" ] && [ "$remote_sha" != "$local_sha" ]
 }
 
-# === Installation ===
+# === Install from bundled image ===
+install_from_bundled() {
+    if [ ! -d "$BUNDLED_APP_DIR/dist" ]; then
+        log_error "No bundled app found at $BUNDLED_APP_DIR"
+        return 1
+    fi
+
+    log_info "Installing from bundled image (fast, no build needed)..."
+
+    # Use hardlinks (cp -al) for speed and disk efficiency.
+    # Falls back to regular copy if hardlinks fail (different filesystems).
+    if ! cp -al "$BUNDLED_APP_DIR" "$APP_DIR" 2>/dev/null; then
+        log_info "Hardlink copy failed, using regular copy..."
+        cp -a "$BUNDLED_APP_DIR" "$APP_DIR"
+    fi
+
+    # Create install marker
+    {
+        echo "version=bundled-$(date +%Y%m%d)"
+        echo "timestamp=$(date -Iseconds)"
+        echo "source=docker-image"
+    } > "$INSTALL_MARKER"
+
+    log_info "Bundled installation complete!"
+    return 0
+}
+
+# === Installation (git clone + build, legacy/custom repo fallback) ===
 install_openclaw() {
     log_info "=== Installing OpenClaw ==="
     log_info "Repository: ${OPENCLAW_REPO}"
@@ -326,16 +356,31 @@ if [ ! -f "$INSTALL_MARKER" ] || ! verify_installation; then
     # First install or corrupted installation
     log_info "No valid installation found, performing initial install..."
 
-    if ! install_openclaw; then
-        log_error "Initial installation failed!"
-
-        # Try rollback if backup exists (from previous corrupted install)
-        if rollback_openclaw; then
-            log_warn "Rolled back to backup version"
-        else
-            log_error "No backup available, cannot start"
-            log_error "Please check network connectivity and try restarting the addon"
-            exit 1
+    if [ -d "$BUNDLED_APP_DIR/dist" ]; then
+        # Prefer the pre-built bundled app (fast, no network/build needed)
+        if ! install_from_bundled; then
+            log_error "Bundled installation failed, falling back to git clone..."
+            if ! install_openclaw; then
+                log_error "Initial installation failed!"
+                if rollback_openclaw; then
+                    log_warn "Rolled back to backup version"
+                else
+                    log_error "No backup available, cannot start"
+                    exit 1
+                fi
+            fi
+        fi
+    else
+        # No bundled app (custom image?) — fall back to git clone + build
+        if ! install_openclaw; then
+            log_error "Initial installation failed!"
+            if rollback_openclaw; then
+                log_warn "Rolled back to backup version"
+            else
+                log_error "No backup available, cannot start"
+                log_error "Please check network connectivity and try restarting the addon"
+                exit 1
+            fi
         fi
     fi
 else
@@ -343,6 +388,9 @@ else
     log_info "Found existing installation at ${APP_DIR}"
 
     case "$UPDATE_MODE" in
+        bundled)
+            log_info "Using bundled version from Docker image (no runtime updates)"
+            ;;
         disabled)
             log_info "Update checks disabled"
             ;;

@@ -1,7 +1,7 @@
 name: OpenClaw Gateway
-version: "3.0.3"
+version: "3.1.0"
 slug: clawdbot-gateway
-description: Self-updating WhatsApp gateway with AI agent capabilities
+description: Pre-built WhatsApp gateway with AI agent capabilities
 url: https://github.com/openclaw/openclaw
 
 # Bootstrap image - openclaw is installed/updated at runtime from git
@@ -47,7 +47,7 @@ options:
   # Self-update settings
   openclaw_repo: "https://github.com/openclaw/openclaw.git"
   openclaw_version: "main"
-  update_mode: "auto"
+  update_mode: "bundled"
   pin_version: false
 
 schema:
@@ -61,7 +61,7 @@ schema:
   # Self-update settings
   openclaw_repo: url?
   openclaw_version: str?
-  update_mode: list(disabled|check|auto)?
+  update_mode: list(bundled|disabled|check|auto)?
   pin_version: bool?
 
 environment:
