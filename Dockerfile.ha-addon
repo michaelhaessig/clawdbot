@@ -3,6 +3,9 @@
 # Stage 2 copies the built artifacts into the HA runtime image.
 # This avoids building on-device, which exhausts the 28 GB eMMC on HA Green.
 
+# Global ARG so it's available to the second FROM via --build-arg
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
+
 # === Stage 1: Build openclaw ===
 FROM node:22-bookworm AS builder
 WORKDIR /app
@@ -15,7 +18,6 @@ RUN pnpm ui:install && pnpm ui:build
 RUN pnpm prune --prod
 
 # === Stage 2: Runtime image ===
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
 FROM ${BUILD_FROM}
 
 # Install ALL dependencies (runtime + build tools for self-updating)
