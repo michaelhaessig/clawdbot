@@ -2,13 +2,17 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
   extractAssistantText,
+  extractAssistantVisibleText,
   formatReasoningMessage,
+  promoteThinkingTagsToBlocks,
   stripDowngradedToolCallText,
 } from "./pi-embedded-utils.js";
 
 function makeAssistantMessage(
   message: Omit<AssistantMessage, "api" | "provider" | "model" | "usage" | "stopReason"> &
-    Partial<Pick<AssistantMessage, "api" | "provider" | "model" | "usage" | "stopReason">>,
+    Partial<Pick<AssistantMessage, "api" | "provider" | "model" | "usage" | "stopReason">> & {
+      phase?: "commentary" | "final_answer";
+    },
 ): AssistantMessage {
   return {
     api: "responses",
@@ -131,6 +135,20 @@ describe("extractAssistantText", () => {
     expect(result).toBe(
       "Firebase downgraded Chore Champ to the Spark plan; confirm whether billing should be re-enabled.",
     );
+  });
+
+  it("preserves response when errorMessage set from background failure (#13935)", () => {
+    const responseText = "Handle payment required errors in your API.";
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      errorMessage: "insufficient credits for embedding model",
+      stopReason: "stop",
+      content: [{ type: "text", text: responseText }],
+      timestamp: Date.now(),
+    });
+
+    const result = extractAssistantText(msg);
+    expect(result).toBe(responseText);
   });
 
   it("strips Minimax tool invocations with extra attributes", () => {
@@ -447,6 +465,11 @@ File contents here`,
         expected: "The actual answer.",
       },
       {
+        name: "antml namespaced thinking tag",
+        text: "<antml:thinking>This shows Robin Waslander DMing maintainers o...</antml:thinking>Actual reply.",
+        expected: "Actual reply.",
+      },
+      {
         name: "final wrapper",
         text: "<final>\nAnswer\n</final>",
         expected: "Answer",
@@ -546,6 +569,111 @@ describe("stripDowngradedToolCallText", () => {
     for (const testCase of cases) {
       expect(stripDowngradedToolCallText(testCase.text), testCase.name).toBe(testCase.expected);
     }
+  });
+});
+
+describe("extractAssistantVisibleText", () => {
+  it("prefers non-empty final_answer text over commentary", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Working...",
+          textSignature: JSON.stringify({ v: 1, id: "item_commentary", phase: "commentary" }),
+        },
+        {
+          type: "text",
+          text: "Done.",
+          textSignature: JSON.stringify({ v: 1, id: "item_final", phase: "final_answer" }),
+        },
+      ],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantVisibleText(msg)).toBe("Done.");
+  });
+
+  it("does not fall back to commentary when final_answer is empty", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "Working...",
+          textSignature: JSON.stringify({ v: 1, id: "item_commentary", phase: "commentary" }),
+        },
+        {
+          type: "text",
+          text: "   ",
+          textSignature: JSON.stringify({ v: 1, id: "item_final", phase: "final_answer" }),
+        },
+      ],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantVisibleText(msg)).toBe("");
+  });
+
+  it("falls back to legacy unphased text when phased text is absent", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Legacy answer" }],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantVisibleText(msg)).toBe("Legacy answer");
+  });
+
+  it("does not pull unphased legacy text into final_answer extraction when phased blocks are present", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      phase: "final_answer",
+      content: [
+        { type: "text", text: "Legacy." },
+        {
+          type: "text",
+          text: "Done.",
+          textSignature: JSON.stringify({ v: 1, id: "item_final", phase: "final_answer" }),
+        },
+      ],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantVisibleText(msg)).toBe("Done.");
+  });
+});
+
+describe("promoteThinkingTagsToBlocks", () => {
+  it("does not crash on malformed null content entries", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [null as never, { type: "text", text: "<thinking>hello</thinking>ok" }],
+      timestamp: Date.now(),
+    });
+    expect(() => promoteThinkingTagsToBlocks(msg)).not.toThrow();
+    const types = msg.content.map((b: { type?: string }) => b?.type);
+    expect(types).toContain("thinking");
+    expect(types).toContain("text");
+  });
+
+  it("does not crash on undefined content entries", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [undefined as never, { type: "text", text: "no tags here" }],
+      timestamp: Date.now(),
+    });
+    expect(() => promoteThinkingTagsToBlocks(msg)).not.toThrow();
+  });
+
+  it("passes through well-formed content unchanged when no thinking tags", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "hello world" }],
+      timestamp: Date.now(),
+    });
+    promoteThinkingTagsToBlocks(msg);
+    expect(msg.content).toEqual([{ type: "text", text: "hello world" }]);
   });
 });
 
