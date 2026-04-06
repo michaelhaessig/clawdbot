@@ -126,10 +126,10 @@ COPY clawdbot-gateway/tools/ /opt/addon-tools/
 RUN /opt/build-tools.sh
 
 # Copy pre-built openclaw app from builder stage
+# dist/ includes control-ui (vite builds to dist/control-ui/)
 COPY --from=builder /app/dist /opt/openclaw-app/dist
 COPY --from=builder /app/node_modules /opt/openclaw-app/node_modules
 COPY --from=builder /app/package.json /opt/openclaw-app/package.json
-COPY --from=builder /app/ui/dist /opt/openclaw-app/ui/dist
 
 ENV NODE_ENV=production
 ENV CLAWDBOT_APP_DIR=/config/clawdbot-app
