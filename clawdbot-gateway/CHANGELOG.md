@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.1
+
+- Bundled mode now auto-updates when the Docker image ships a newer version (compares package.json versions)
+
 ## 3.1.0
 
 **Pre-build openclaw in Docker image to prevent disk exhaustion on constrained devices (HA Green 28 GB eMMC)**
