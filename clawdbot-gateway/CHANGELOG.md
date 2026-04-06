@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3
+
+- Fix bundled extensions failing at runtime: copy extension `src/` dirs into `dist/extensions/` so jiti can resolve `.ts` specifiers (e.g. mattermost's `./src/channel.js`)
+
 ## 3.1.2
 
 - Fix bundled install creating nested directory (`openclaw-app/openclaw-app/`) when target dir already exists

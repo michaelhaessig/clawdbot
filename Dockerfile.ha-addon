@@ -130,6 +130,18 @@ RUN /opt/build-tools.sh
 COPY --from=builder /app/dist /opt/openclaw-app/dist
 COPY --from=builder /app/node_modules /opt/openclaw-app/node_modules
 COPY --from=builder /app/package.json /opt/openclaw-app/package.json
+# Extension source needed: some bundled extensions (e.g. mattermost) have
+# specifiers like ./src/channel.js that jiti resolves from .ts at runtime.
+# These resolve relative to dist/extensions/<name>/, so copy source there.
+COPY --from=builder /app/extensions /opt/openclaw-app/dist/extensions-src
+RUN cd /opt/openclaw-app/dist/extensions && \
+    for ext in */; do \
+        ext_name="${ext%/}"; \
+        if [ -d "/opt/openclaw-app/dist/extensions-src/${ext_name}/src" ]; then \
+            cp -a "/opt/openclaw-app/dist/extensions-src/${ext_name}/src" "${ext_name}/src"; \
+        fi; \
+    done && \
+    rm -rf /opt/openclaw-app/dist/extensions-src
 
 ENV NODE_ENV=production
 ENV CLAWDBOT_APP_DIR=/config/clawdbot-app
