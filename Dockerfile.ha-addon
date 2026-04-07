@@ -130,6 +130,8 @@ RUN /opt/build-tools.sh
 COPY --from=builder /app/dist /opt/openclaw-app/dist
 COPY --from=builder /app/node_modules /opt/openclaw-app/node_modules
 COPY --from=builder /app/package.json /opt/openclaw-app/package.json
+# Workspace templates needed at runtime for agent workspace scaffolding
+COPY --from=builder /app/docs/reference/templates /opt/openclaw-app/docs/reference/templates
 # Extension source needed: some bundled extensions (e.g. mattermost) have
 # specifiers like ./src/channel.js that jiti resolves from .ts at runtime.
 # These resolve relative to dist/extensions/<name>/, so copy source there.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.4
+
+- Fix missing workspace templates (`docs/reference/templates/`) in bundled image causing telegram dispatch errors
+
 ## 3.1.3
 
 - Fix bundled extensions failing at runtime: copy extension `src/` dirs into `dist/extensions/` so jiti can resolve `.ts` specifiers (e.g. mattermost's `./src/channel.js`)
