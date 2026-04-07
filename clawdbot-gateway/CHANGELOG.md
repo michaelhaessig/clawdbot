@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.5
+
+- Fix bundled update detection: use a build-time stamp file instead of `package.json` version (upstream version stays the same across addon rebuilds)
+
 ## 3.1.4
 
 - Fix missing workspace templates (`docs/reference/templates/`) in bundled image causing telegram dispatch errors

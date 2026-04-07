@@ -392,11 +392,11 @@ else
 
     case "$UPDATE_MODE" in
         bundled)
-            # Check if the Docker image ships a newer version than what's installed
-            bundled_ver=$(jq -r '.version // empty' "$BUNDLED_APP_DIR/package.json" 2>/dev/null || true)
-            installed_ver=$(jq -r '.version // empty' "$APP_DIR/package.json" 2>/dev/null || true)
-            if [ -n "$bundled_ver" ] && [ "$bundled_ver" != "$installed_ver" ]; then
-                log_info "Bundled version ($bundled_ver) differs from installed ($installed_ver), updating..."
+            # Check if the Docker image ships a different build than what's installed
+            bundled_stamp=$(cat "$BUNDLED_APP_DIR/.bundled-stamp" 2>/dev/null || true)
+            installed_stamp=$(cat "$APP_DIR/.bundled-stamp" 2>/dev/null || true)
+            if [ -n "$bundled_stamp" ] && [ "$bundled_stamp" != "$installed_stamp" ]; then
+                log_info "Bundled build ($bundled_stamp) differs from installed (${installed_stamp:-none}), updating..."
                 rm -rf "$BACKUP_DIR"
                 mv "$APP_DIR" "$BACKUP_DIR"
                 if install_from_bundled; then

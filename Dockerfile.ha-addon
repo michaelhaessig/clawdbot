@@ -20,6 +20,9 @@ RUN test -f dist/index.js || { echo "ERROR: dist/index.js not produced by build"
 RUN pnpm ui:install && pnpm ui:build
 # Remove dev deps to shrink the final image
 RUN pnpm prune --prod
+# Stamp file for detecting bundled version changes across addon releases
+# (upstream package.json version may stay the same across addon rebuilds)
+RUN echo "addon-build-$(date -u +%Y%m%dT%H%M%SZ)" > .bundled-stamp
 
 # === Stage 2: Runtime image ===
 FROM ${BUILD_FROM}
@@ -130,6 +133,7 @@ RUN /opt/build-tools.sh
 COPY --from=builder /app/dist /opt/openclaw-app/dist
 COPY --from=builder /app/node_modules /opt/openclaw-app/node_modules
 COPY --from=builder /app/package.json /opt/openclaw-app/package.json
+COPY --from=builder /app/.bundled-stamp /opt/openclaw-app/.bundled-stamp
 # Workspace templates needed at runtime for agent workspace scaffolding
 COPY --from=builder /app/docs/reference/templates /opt/openclaw-app/docs/reference/templates
 # Extension source needed: some bundled extensions (e.g. mattermost) have
