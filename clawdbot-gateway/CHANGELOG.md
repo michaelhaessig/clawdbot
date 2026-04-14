@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.6
+
+- Sync upstream to `0381852c26` (2026-04-14)
+
 ## 3.1.5
 
 - Fix bundled update detection: use a build-time stamp file instead of `package.json` version (upstream version stays the same across addon rebuilds)
