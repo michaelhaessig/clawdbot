@@ -3,6 +3,7 @@
 ## 3.1.6
 
 - Sync upstream to `0381852c26` (2026-04-14)
+- Fix UI build: drop redundant `pnpm ui:install` (scripts/ui.js now self-installs devDeps, and the extra invocation was pruning packages that never got re-added before `vite build`)
 
 ## 3.1.5
 
