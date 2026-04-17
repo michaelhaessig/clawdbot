@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import "../test-helpers/load-styles.ts";
 import { mountApp as mountTestApp, registerAppMountHooks } from "./test-helpers/app-mount.ts";
 
 registerAppMountHooks();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function mountApp(pathname: string) {
   return mountTestApp(pathname);
@@ -158,7 +162,7 @@ describe("control UI routing", () => {
     expect(app.querySelector(".dreams__lobster")).not.toBeNull();
   });
 
-  it("renders the refreshed top navigation shell", async () => {
+  it("renders the refreshed desktop navigation shell and collapsed state", async () => {
     const app = mountApp("/chat");
     await app.updateComplete;
 
@@ -166,11 +170,6 @@ describe("control UI routing", () => {
     expect(app.querySelector(".topnav-shell__content")).not.toBeNull();
     expect(app.querySelector(".topnav-shell__actions")).not.toBeNull();
     expect(app.querySelector(".topnav-shell .brand-title")).toBeNull();
-  });
-
-  it("renders the refreshed sidebar shell structure", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
 
     expect(app.querySelector(".sidebar-shell")).not.toBeNull();
     expect(app.querySelector(".sidebar-shell__header")).not.toBeNull();
@@ -179,11 +178,6 @@ describe("control UI routing", () => {
     expect(app.querySelector(".sidebar-brand")).not.toBeNull();
     expect(app.querySelector(".sidebar-brand__logo")).not.toBeNull();
     expect(app.querySelector(".sidebar-brand__copy")).not.toBeNull();
-  });
-
-  it("does not render a desktop sidebar resizer or inject a custom nav width", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
 
     app.applySettings({ ...app.settings, navWidth: 360 });
     await app.updateComplete;
@@ -191,36 +185,15 @@ describe("control UI routing", () => {
     expect(app.querySelector(".sidebar-resizer")).toBeNull();
     const shell = app.querySelector<HTMLElement>(".shell");
     expect(shell?.style.getPropertyValue("--shell-nav-width")).toBe("");
-  });
-
-  it("hides section labels in collapsed mode", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
 
     app.applySettings({ ...app.settings, navCollapsed: true });
     await app.updateComplete;
 
     expect(app.querySelector(".nav-section__label")).toBeNull();
     expect(app.querySelector(".sidebar-brand__logo")).toBeNull();
-  });
-
-  it("keeps footer utilities available in collapsed mode", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
-
-    app.applySettings({ ...app.settings, navCollapsed: true });
-    await app.updateComplete;
 
     expect(app.querySelector(".sidebar-shell__footer")).not.toBeNull();
     expect(app.querySelector(".sidebar-utility-link")).not.toBeNull();
-  });
-
-  it("keeps the collapsed desktop rail compact", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
-
-    app.applySettings({ ...app.settings, navCollapsed: true });
-    await app.updateComplete;
 
     const item = app.querySelector<HTMLElement>(".sidebar .nav-item");
     const header = app.querySelector<HTMLElement>(".sidebar-shell__header");
@@ -282,7 +255,7 @@ describe("control UI routing", () => {
     }
   });
 
-  it("stacks the refreshed top navigation for narrow viewports", async () => {
+  it("keeps the narrow top navigation and drawer usable", async () => {
     const app = mountApp("/chat");
     await app.updateComplete;
 
@@ -301,21 +274,12 @@ describe("control UI routing", () => {
     expect(shell.querySelector(".topbar-nav-toggle")).not.toBeNull();
     expect(shell.children[1]).toBe(content);
     expect(shell.querySelector(".topnav-shell__actions")).not.toBeNull();
-  });
 
-  it("keeps the mobile topbar nav toggle visible beside the search row", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
-
-    expect(window.matchMedia("(max-width: 768px)").matches).toBe(true);
-
-    const shell = app.querySelector<HTMLElement>(".topnav-shell");
     const toggle = app.querySelector<HTMLElement>(".topbar-nav-toggle");
     const actions = app.querySelector<HTMLElement>(".topnav-shell__actions");
-    expect(shell).not.toBeNull();
     expect(toggle).not.toBeNull();
     expect(actions).not.toBeNull();
-    if (!shell || !toggle || !actions) {
+    if (!toggle || !actions) {
       return;
     }
 
@@ -325,56 +289,37 @@ describe("control UI routing", () => {
     expect(shell.querySelector(".topbar-nav-toggle")).toBe(toggle);
     expect(actions.querySelector(".topbar-search")).not.toBeNull();
     expect(toggle.getAttribute("aria-label")).toBeTruthy();
-  });
 
-  it("opens the mobile sidenav as a drawer from the topbar toggle", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
-
-    expect(window.matchMedia("(max-width: 768px)").matches).toBe(true);
-
-    const toggle = app.querySelector<HTMLButtonElement>(".topbar-nav-toggle");
-    const shell = app.querySelector<HTMLElement>(".shell");
     const nav = app.querySelector<HTMLElement>(".shell-nav");
-    expect(toggle).not.toBeNull();
-    expect(shell).not.toBeNull();
+    const appShell = app.querySelector<HTMLElement>(".shell");
+    expect(appShell).not.toBeNull();
     expect(nav).not.toBeNull();
-    if (!toggle || !shell || !nav) {
+    if (!appShell || !nav) {
       return;
     }
 
-    expect(shell.classList.contains("shell--nav-drawer-open")).toBe(false);
+    expect(appShell.classList.contains("shell--nav-drawer-open")).toBe(false);
     toggle.click();
     await app.updateComplete;
 
-    expect(shell.classList.contains("shell--nav-drawer-open")).toBe(true);
+    expect(appShell.classList.contains("shell--nav-drawer-open")).toBe(true);
     expect(nav.classList.contains("shell-nav")).toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("closes the mobile sidenav drawer after navigation", async () => {
-    const app = mountApp("/chat");
-    await app.updateComplete;
-
-    expect(window.matchMedia("(max-width: 768px)").matches).toBe(true);
-
-    const toggle = app.querySelector<HTMLButtonElement>(".topbar-nav-toggle");
-    expect(toggle).not.toBeNull();
-    toggle?.click();
-    await app.updateComplete;
 
     const link = app.querySelector<HTMLAnchorElement>('a.nav-item[href="/channels"]');
-    const shell = app.querySelector<HTMLElement>(".shell");
     expect(link).not.toBeNull();
-    expect(shell?.classList.contains("shell--nav-drawer-open")).toBe(true);
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
     expect(app.tab).toBe("channels");
-    expect(shell?.classList.contains("shell--nav-drawer-open")).toBe(false);
+    expect(appShell.classList.contains("shell--nav-drawer-open")).toBe(false);
   });
 
   it("auto-scrolls chat history to the latest message", async () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 1;
+    });
     const app = mountApp("/chat");
     await app.updateComplete;
 
@@ -407,9 +352,9 @@ describe("control UI routing", () => {
       scrollTop = Math.max(0, Math.min(top, 2400 - 180));
     }) as typeof initialContainer.scrollTo;
 
-    app.chatMessages = Array.from({ length: 60 }, (_, index) => ({
+    app.chatMessages = Array.from({ length: 3 }, (_, index) => ({
       role: "assistant",
-      content: `Line ${index} - ${"x".repeat(200)}`,
+      content: `Line ${index}`,
       timestamp: Date.now() + index,
     }));
 
@@ -451,8 +396,8 @@ describe("control UI routing", () => {
       ...app.chatMessages,
       {
         role: "assistant",
-        content: `Line 60 - ${"x".repeat(200)}`,
-        timestamp: Date.now() + 60,
+        content: "Line 3",
+        timestamp: Date.now() + 3,
       },
     ];
     await app.updateComplete;

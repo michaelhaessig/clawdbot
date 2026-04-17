@@ -17,6 +17,9 @@ describe("qa scenario catalog", () => {
     expect(pack.agent.identityMarkdown).toContain("Dev C-3PO");
     expect(pack.kickoffTask).toContain("Lobster Invaders");
     expect(listQaScenarioMarkdownPaths().length).toBe(pack.scenarios.length);
+    expect(listQaScenarioMarkdownPaths()).toContain(
+      "qa/scenarios/media/image-generation-roundtrip.md",
+    );
     expect(pack.scenarios.some((scenario) => scenario.id === "image-generation-roundtrip")).toBe(
       true,
     );
@@ -112,10 +115,34 @@ describe("qa scenario catalog", () => {
       (candidate) => candidate.id === "codex-harness-no-meta-leak",
     );
 
-    expect(scenario?.sourcePath).toBe("qa/scenarios/codex-harness-no-meta-leak.md");
+    expect(scenario?.sourcePath).toBe("qa/scenarios/models/codex-harness-no-meta-leak.md");
     expect(scenario?.execution.flow?.steps.map((step) => step.name)).toContain(
       "keeps codex coordination chatter out of the visible reply",
     );
+  });
+
+  it("includes the seeded mock-only broken-turn scenarios in the markdown pack", () => {
+    const scenarioIds = [
+      "reasoning-only-recovery-replay-safe-read",
+      "reasoning-only-no-auto-retry-after-write",
+      "empty-response-recovery-replay-safe-read",
+      "empty-response-retry-budget-exhausted",
+    ];
+
+    for (const scenarioId of scenarioIds) {
+      const scenario = readQaScenarioById(scenarioId);
+      const config = readQaScenarioExecutionConfig(scenarioId) as
+        | {
+            requiredProvider?: string;
+            prompt?: string;
+          }
+        | undefined;
+
+      expect(scenario.sourcePath).toBe(`qa/scenarios/runtime/${scenarioId}.md`);
+      expect(config?.requiredProvider).toBe("mock-openai");
+      expect(config?.prompt).toContain("check");
+      expect(scenario.execution.flow?.steps.length).toBeGreaterThan(0);
+    }
   });
 
   it("keeps mock-only image debug assertions guarded in live-frontier runs", () => {
