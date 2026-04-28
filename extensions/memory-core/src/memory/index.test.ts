@@ -12,6 +12,7 @@ import {
 import "./test-runtime-mocks.js";
 import type { MemoryIndexManager } from "./index.js";
 import { closeAllMemorySearchManagers, getMemorySearchManager } from "./index.js";
+import { EMBEDDING_PROBE_CACHE_TTL_MS } from "./manager.js";
 import {
   DEFAULT_LOCAL_MODEL,
   registerBuiltInMemoryEmbeddingProviders,
@@ -284,6 +285,26 @@ describe("memory index", () => {
     }
   }
 
+  async function getFtsSessionManager(params: {
+    stateDirName: string;
+    storeFileName: string;
+  }): Promise<MemoryIndexManager | null> {
+    forceNoProvider = true;
+    vi.stubEnv("OPENCLAW_STATE_DIR", path.join(workspaceDir, params.stateDirName));
+    const cfg = createCfg({
+      storePath: path.join(workspaceDir, params.storeFileName),
+      sources: ["memory", "sessions"],
+      sessionMemory: true,
+      minScore: 0,
+      hybrid: { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+    });
+    const result = await getMemorySearchManager({ cfg, agentId: "main" });
+    const manager = requireManager(result);
+    managersForCleanup.add(manager);
+    resetManagerForTest(manager);
+    return manager.status().fts?.available ? manager : null;
+  }
+
   it.skip("indexes memory files and searches", async () => {
     const cfg = createCfg({
       storePath: indexMainPath,
@@ -364,6 +385,42 @@ describe("memory index", () => {
     expect(status.vector?.available).toBe(available);
   });
 
+  it("caches embedding probe readiness across transient status managers", async () => {
+    const cfg = createCfg({ storePath: path.join(workspaceDir, "index-probe-cache.sqlite") });
+    const first = requireManager(
+      await getMemorySearchManager({ cfg, agentId: "main", purpose: "status" }),
+    );
+    managersForCleanup.add(first);
+
+    await expect(first.probeEmbeddingAvailability()).resolves.toEqual({ ok: true });
+    expect(embedBatchCalls).toBe(1);
+    await first.close();
+
+    const second = requireManager(
+      await getMemorySearchManager({ cfg, agentId: "main", purpose: "status" }),
+    );
+    managersForCleanup.add(second);
+
+    expect(second.getCachedEmbeddingAvailability?.()).toEqual(
+      expect.objectContaining({
+        ok: true,
+        checked: true,
+        cached: true,
+        checkedAtMs: expect.any(Number),
+        cacheExpiresAtMs: expect.any(Number),
+      }),
+    );
+    await expect(second.probeEmbeddingAvailability()).resolves.toEqual(
+      expect.objectContaining({ ok: true, cached: true }),
+    );
+    expect(embedBatchCalls).toBe(1);
+
+    const cached = second.getCachedEmbeddingAvailability?.();
+    expect((cached?.cacheExpiresAtMs ?? 0) - (cached?.checkedAtMs ?? 0)).toBe(
+      EMBEDDING_PROBE_CACHE_TTL_MS,
+    );
+  });
+
   it("builds FTS index and returns search results when no embedding provider is available", async () => {
     forceNoProvider = true;
 
@@ -399,22 +456,12 @@ describe("memory index", () => {
   });
 
   it("prefers exact session transcript hits in FTS-only mode", async () => {
-    forceNoProvider = true;
-    const stateDir = path.join(workspaceDir, ".state-session-ranking");
-    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
     try {
-      const cfg = createCfg({
-        storePath: path.join(workspaceDir, "index-fts-session-ranking.sqlite"),
-        sources: ["memory", "sessions"],
-        sessionMemory: true,
-        minScore: 0,
-        hybrid: { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+      const manager = await getFtsSessionManager({
+        stateDirName: ".state-session-ranking",
+        storeFileName: "index-fts-session-ranking.sqlite",
       });
-      const result = await getMemorySearchManager({ cfg, agentId: "main" });
-      const manager = requireManager(result);
-      managersForCleanup.add(manager);
-      resetManagerForTest(manager);
-      if (!manager.status().fts?.available) {
+      if (!manager) {
         return;
       }
 
@@ -469,22 +516,12 @@ describe("memory index", () => {
   });
 
   it("bootstraps an empty index on first search so session transcript hits are available", async () => {
-    forceNoProvider = true;
-    const stateDir = path.join(workspaceDir, ".state-session-bootstrap");
-    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
     try {
-      const cfg = createCfg({
-        storePath: path.join(workspaceDir, "index-fts-session-bootstrap.sqlite"),
-        sources: ["memory", "sessions"],
-        sessionMemory: true,
-        minScore: 0,
-        hybrid: { enabled: true, vectorWeight: 0.7, textWeight: 0.3 },
+      const manager = await getFtsSessionManager({
+        stateDirName: ".state-session-bootstrap",
+        storeFileName: "index-fts-session-bootstrap.sqlite",
       });
-      const result = await getMemorySearchManager({ cfg, agentId: "main" });
-      const manager = requireManager(result);
-      managersForCleanup.add(manager);
-      resetManagerForTest(manager);
-      if (!manager.status().fts?.available) {
+      if (!manager) {
         return;
       }
 

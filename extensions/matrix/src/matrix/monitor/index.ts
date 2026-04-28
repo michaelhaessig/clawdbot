@@ -34,7 +34,7 @@ import {
 } from "../sync-state.js";
 import { createMatrixThreadBindingManager } from "../thread-bindings.js";
 import { registerMatrixAutoJoin } from "./auto-join.js";
-import { resolveMatrixMonitorConfig } from "./config.js";
+import { resolveMatrixMonitorConfig, type MatrixResolvedAllowlistEntry } from "./config.js";
 import { createDirectRoomTracker } from "./direct.js";
 import { registerMatrixMonitorEvents } from "./events.js";
 import { createMatrixRoomMessageHandler } from "./handler.js";
@@ -71,7 +71,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     throw new Error("Matrix provider requires Node (bun runtime not supported)");
   }
   const core = getMatrixRuntime();
-  let cfg = core.config.loadConfig() as CoreConfig;
+  let cfg = core.config.current() as CoreConfig;
   if (cfg.channels?.["matrix"]?.enabled === false) {
     return;
   }
@@ -112,6 +112,8 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
   const accountAllowBots = accountConfig.allowBots;
   let allowFrom: string[] = (accountConfig.dm?.allowFrom ?? []).map(String);
   let groupAllowFrom: string[] = (accountConfig.groupAllowFrom ?? []).map(String);
+  let allowFromResolvedEntries: MatrixResolvedAllowlistEntry[] = [];
+  let groupAllowFromResolvedEntries: MatrixResolvedAllowlistEntry[] = [];
   let roomsConfig = accountConfig.groups ?? accountConfig.rooms;
   let needsRoomAliasesForConfig = false;
   const configuredBotUserIds = resolveConfiguredMatrixBotUserIds({
@@ -119,7 +121,13 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     accountId: effectiveAccountId,
   });
 
-  ({ allowFrom, groupAllowFrom, roomsConfig } = await resolveMatrixMonitorConfig({
+  ({
+    allowFrom,
+    allowFromResolvedEntries,
+    groupAllowFrom,
+    groupAllowFromResolvedEntries,
+    roomsConfig,
+  } = await resolveMatrixMonitorConfig({
     cfg,
     accountId: effectiveAccountId,
     allowFrom,
@@ -320,7 +328,9 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       logger,
       logVerboseMessage,
       allowFrom,
+      allowFromResolvedEntries,
       groupAllowFrom,
+      groupAllowFromResolvedEntries,
       roomsConfig,
       accountAllowBots,
       configuredBotUserIds,
@@ -346,6 +356,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       needsRoomAliasesForConfig,
     });
     threadBindingManager = await createMatrixThreadBindingManager({
+      cfg,
       accountId: effectiveAccountId,
       auth,
       client,
@@ -425,8 +436,13 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       accountConfig,
       logger,
       logVerboseMessage,
-      loadConfig: () => core.config.loadConfig() as CoreConfig,
-      writeConfigFile: async (nextCfg) => await core.config.writeConfigFile(nextCfg),
+      getRuntimeConfig: () => core.config.current() as CoreConfig,
+      replaceConfigFile: async (nextCfg) => {
+        await core.config.replaceConfigFile({
+          nextConfig: nextCfg,
+          afterWrite: { mode: "auto" },
+        });
+      },
       loadWebMedia: async (url, maxBytes) => await core.media.loadWebMedia(url, maxBytes),
       env: process.env,
       abortSignal: opts.abortSignal,

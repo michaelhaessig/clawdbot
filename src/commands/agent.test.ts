@@ -19,6 +19,7 @@ import {
 } from "../infra/agent-events.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { agentCommand, agentCommandFromIngress } from "./agent.js";
+import { createThrowingTestRuntime } from "./test-runtime-config-helpers.js";
 
 const configIoMocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
@@ -26,6 +27,7 @@ const configIoMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../config/io.js", () => ({
+  getRuntimeConfig: configIoMocks.loadConfig,
   loadConfig: configIoMocks.loadConfig,
   readConfigFileSnapshotForWrite: configIoMocks.readConfigFileSnapshotForWrite,
 }));
@@ -117,6 +119,9 @@ vi.mock("../agents/command/attempt-execution.runtime.js", () => {
         agentDir: params.agentDir,
         allowTransientCooldownProbe: params.allowTransientCooldownProbe,
         cleanupBundleMcpOnRunEnd: opts.cleanupBundleMcpOnRunEnd,
+        modelRun: opts.modelRun,
+        promptMode: opts.promptMode,
+        disableTools: opts.modelRun === true,
         onAgentEvent: params.onAgentEvent,
       } as never);
     }),
@@ -177,7 +182,7 @@ vi.mock("../config/sessions/transcript-resolve.runtime.js", () => {
     return lastSlash >= 0 ? filePath.slice(0, lastSlash) : ".";
   };
   const joinPath = (...parts: string[]): string => {
-    const separator = parts.find((part) => part.includes("\\")) ? "\\" : "/";
+    const separator = parts.some((part) => part.includes("\\")) ? "\\" : "/";
     return parts
       .map((part, index) =>
         index === 0 ? part.replace(/[\\/]+$/u, "") : part.replace(/^[\\/]+|[\\/]+$/gu, ""),
@@ -223,13 +228,7 @@ vi.mock("../config/sessions/transcript-resolve.runtime.js", () => {
   };
 });
 
-const runtime: RuntimeEnv = {
-  log: vi.fn(),
-  error: vi.fn(),
-  exit: vi.fn(() => {
-    throw new Error("exit");
-  }),
-};
+const runtime = createThrowingTestRuntime();
 
 async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
   return withTempHomeBase(fn, { prefix: "openclaw-agent-", skipSessionCleanup: true });
@@ -382,6 +381,61 @@ describe("agentCommand", () => {
       expect(parsed.payloads[0].text).toBe("json-reply");
       expect(parsed.payloads[0].mediaUrl).toBe("http://x.test/a.jpg");
       expect(parsed.meta.durationMs).toBe(42);
+    });
+  });
+
+  it("does not load the full model catalog for trusted explicit overrides without an allowlist", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, { models: {} });
+
+      await agentCommand(
+        {
+          message: "ping",
+          to: "+1222",
+          model: "openrouter/auto",
+        },
+        runtime,
+      );
+
+      expect(loadModelCatalog).not.toHaveBeenCalled();
+      expectLastRunProviderModel("openrouter", "openrouter/auto");
+      expect(modelSelectionModule.resolveThinkingDefault).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "openrouter",
+          model: "auto",
+          catalog: undefined,
+        }),
+      );
+    });
+  });
+
+  it("uses no-tools plain prompt mode for one-shot model runs", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, { models: {} });
+
+      await agentCommand(
+        {
+          message: "Reply with exactly OPENCLAW-MODEL-OK",
+          agentId: "main",
+          model: "openrouter/auto",
+          modelRun: true,
+          promptMode: "none",
+        },
+        runtime,
+      );
+
+      const callArgs = getLastEmbeddedCall();
+      expect(callArgs).toEqual(
+        expect.objectContaining({
+          provider: "openrouter",
+          model: "openrouter/auto",
+          modelRun: true,
+          promptMode: "none",
+          disableTools: true,
+        }),
+      );
     });
   });
 
