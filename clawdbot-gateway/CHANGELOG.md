@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.8
+
+- Sync upstream to `v2026.4.26` / `be8c24633a` (2026-04-28)
+
 ## 3.1.7
 
 - Sync upstream to `474b08bfbd` (2026-04-17)
