@@ -3,12 +3,6 @@ import path from "node:path";
 import { openVerifiedFileSync } from "../../infra/safe-open-sync.js";
 import { parseFrontmatter, resolveSkillInvocationPolicy } from "./frontmatter.js";
 import { createSyntheticSourceInfo, type Skill } from "./skill-contract.js";
-import type { ParsedSkillFrontmatter } from "./types.js";
-
-type LoadedLocalSkill = {
-  skill: Skill;
-  frontmatter: ParsedSkillFrontmatter;
-};
 
 function isPathWithinRoot(rootRealPath: string, candidatePath: string): boolean {
   const relative = path.relative(rootRealPath, candidatePath);
@@ -46,7 +40,7 @@ function loadSingleSkillDirectory(params: {
   source: string;
   rootRealPath: string;
   maxBytes?: number;
-}): LoadedLocalSkill | null {
+}): Skill | null {
   const skillFilePath = path.join(params.skillDir, "SKILL.md");
   const raw = readSkillFileSync({
     rootRealPath: params.rootRealPath,
@@ -75,21 +69,18 @@ function loadSingleSkillDirectory(params: {
   const baseDir = path.resolve(params.skillDir);
 
   return {
-    skill: {
-      name,
-      description,
-      filePath,
-      baseDir,
+    name,
+    description,
+    filePath,
+    baseDir,
+    source: params.source,
+    sourceInfo: createSyntheticSourceInfo(filePath, {
       source: params.source,
-      sourceInfo: createSyntheticSourceInfo(filePath, {
-        source: params.source,
-        baseDir,
-        scope: "project",
-        origin: "top-level",
-      }),
-      disableModelInvocation: invocation.disableModelInvocation,
-    },
-    frontmatter,
+      baseDir,
+      scope: "project",
+      origin: "top-level",
+    }),
+    disableModelInvocation: invocation.disableModelInvocation,
   };
 }
 
@@ -110,14 +101,13 @@ function listCandidateSkillDirs(dir: string): string[] {
 
 export function loadSkillsFromDirSafe(params: { dir: string; source: string; maxBytes?: number }): {
   skills: Skill[];
-  frontmatterByFilePath: ReadonlyMap<string, ParsedSkillFrontmatter>;
 } {
   const rootDir = path.resolve(params.dir);
   let rootRealPath: string;
   try {
     rootRealPath = fs.realpathSync(rootDir);
   } catch {
-    return { skills: [], frontmatterByFilePath: new Map() };
+    return { skills: [] };
   }
 
   const rootSkill = loadSingleSkillDirectory({
@@ -127,13 +117,10 @@ export function loadSkillsFromDirSafe(params: { dir: string; source: string; max
     maxBytes: params.maxBytes,
   });
   if (rootSkill) {
-    return {
-      skills: [rootSkill.skill],
-      frontmatterByFilePath: new Map([[rootSkill.skill.filePath, rootSkill.frontmatter]]),
-    };
+    return { skills: [rootSkill] };
   }
 
-  const loadedSkills = listCandidateSkillDirs(rootDir)
+  const skills = listCandidateSkillDirs(rootDir)
     .map((skillDir) =>
       loadSingleSkillDirectory({
         skillDir,
@@ -142,16 +129,9 @@ export function loadSkillsFromDirSafe(params: { dir: string; source: string; max
         maxBytes: params.maxBytes,
       }),
     )
-    .filter((skill): skill is LoadedLocalSkill => skill !== null);
-  const frontmatterByFilePath = new Map<string, ParsedSkillFrontmatter>();
-  for (const loaded of loadedSkills) {
-    frontmatterByFilePath.set(loaded.skill.filePath, loaded.frontmatter);
-  }
+    .filter((skill): skill is Skill => skill !== null);
 
-  return {
-    skills: loadedSkills.map((loaded) => loaded.skill),
-    frontmatterByFilePath,
-  };
+  return { skills };
 }
 
 export function readSkillFrontmatterSafe(params: {

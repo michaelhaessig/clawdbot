@@ -27,10 +27,10 @@ function getDeclaredCommandJsonMode(command: Command): JsonMode | null {
 
 function commandSelectedJsonFlag(command: Command, argv: string[]): boolean {
   const commandWithGlobals = command as Command & {
-    optsWithGlobals?: () => Record<string, unknown>;
+    optsWithGlobals?: <T extends Record<string, unknown>>() => T;
   };
   if (typeof commandWithGlobals.optsWithGlobals === "function") {
-    const resolved = commandWithGlobals.optsWithGlobals().json;
+    const resolved = commandWithGlobals.optsWithGlobals<Record<string, unknown>>().json;
     if (resolved === true) {
       return true;
     }

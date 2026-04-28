@@ -124,6 +124,8 @@ export async function runMemoryEmbeddingRetryLoop<T>(params: {
   }
 }
 
-export function buildTextEmbeddingInputs(chunks: MemoryEmbeddingChunk[]): MemoryEmbeddingInput[] {
+export function buildTextEmbeddingInputs<T extends MemoryEmbeddingChunk>(
+  chunks: T[],
+): MemoryEmbeddingInput[] {
   return chunks.map((chunk) => chunk.embeddingInput ?? { text: chunk.text });
 }

@@ -8,7 +8,6 @@ import {
   type PluginLoadOptions,
 } from "./loader.js";
 import { hasExplicitPluginIdScope } from "./plugin-scope.js";
-import { resolveProviderConfigApiOwnerHint } from "./provider-config-owner.js";
 import {
   resolveActivatableProviderOwnerPluginIds,
   resolveDiscoverableProviderOwnerPluginIds,
@@ -49,33 +48,6 @@ function resolveExplicitProviderOwnerPluginIds(params: {
       });
       if (plannedPluginIds.length > 0) {
         return plannedPluginIds;
-      }
-      const apiOwnerHint = resolveProviderConfigApiOwnerHint({
-        provider,
-        config: params.config,
-      });
-      if (apiOwnerHint) {
-        const apiOwnerPluginIds = resolveManifestActivationPluginIds({
-          trigger: {
-            kind: "provider",
-            provider: apiOwnerHint,
-          },
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-          env: params.env,
-        });
-        if (apiOwnerPluginIds.length > 0) {
-          return apiOwnerPluginIds;
-        }
-        const legacyApiOwnerPluginIds = resolveOwningPluginIdsForProvider({
-          provider: apiOwnerHint,
-          config: params.config,
-          workspaceDir: params.workspaceDir,
-          env: params.env,
-        });
-        if (legacyApiOwnerPluginIds?.length) {
-          return legacyApiOwnerPluginIds;
-        }
       }
       // Keep legacy provider/CLI-backend ownership working until every owner is
       // expressible through activation descriptors.
@@ -223,7 +195,7 @@ function resolveRuntimeProviderPluginLoadState(
     env: base.env,
     workspaceDir: base.workspaceDir,
     onlyPluginIds: runtimeRequestedPluginIds,
-    applyAutoEnable: params.applyAutoEnable ?? true,
+    applyAutoEnable: true,
     compatMode: {
       allowlist: params.bundledProviderAllowlistCompat,
       enablement: "allowlist",
@@ -259,9 +231,8 @@ function resolveRuntimeProviderPluginLoadState(
     {
       onlyPluginIds: providerPluginIds,
       pluginSdkResolution: params.pluginSdkResolution,
-      cache: params.cache ?? true,
+      cache: params.cache ?? false,
       activate: params.activate ?? false,
-      installBundledRuntimeDeps: params.installBundledRuntimeDeps,
     },
   );
   return { loadOptions };
@@ -293,8 +264,6 @@ export function resolvePluginProviders(params: {
   modelRefs?: readonly string[];
   activate?: boolean;
   cache?: boolean;
-  applyAutoEnable?: boolean;
-  installBundledRuntimeDeps?: boolean;
   pluginSdkResolution?: PluginLoadOptions["pluginSdkResolution"];
   mode?: "runtime" | "setup";
   includeUntrustedWorkspacePlugins?: boolean;
@@ -306,9 +275,10 @@ export function resolvePluginProviders(params: {
       return [];
     }
     const registry = loadOpenClawPlugins(loadState.loadOptions);
-    return registry.providers.map((entry) =>
-      Object.assign({}, entry.provider, { pluginId: entry.pluginId }),
-    );
+    return registry.providers.map((entry) => ({
+      ...entry.provider,
+      pluginId: entry.pluginId,
+    }));
   }
   const loadState = resolveRuntimeProviderPluginLoadState(params, base);
   const registry = resolveRuntimePluginRegistry(loadState.loadOptions);
@@ -316,7 +286,8 @@ export function resolvePluginProviders(params: {
     return [];
   }
 
-  return registry.providers.map((entry) =>
-    Object.assign({}, entry.provider, { pluginId: entry.pluginId }),
-  );
+  return registry.providers.map((entry) => ({
+    ...entry.provider,
+    pluginId: entry.pluginId,
+  }));
 }

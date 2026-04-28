@@ -43,7 +43,6 @@ import {
   type SessionBindingService,
 } from "../../../infra/outbound/session-binding-service.js";
 import { normalizeOptionalString } from "../../../shared/string-coerce.js";
-import type { ReplyPayload } from "../../types.js";
 import type { CommandHandlerResult, HandleCommandsParams } from "../commands-types.js";
 import {
   resolveAcpCommandAccountId,
@@ -78,19 +77,20 @@ function resolveAcpBindingLabelNoun(params: {
   return params.conversationId === params.threadId ? "thread" : "conversation";
 }
 
-async function resolveBoundReplyPayload(params: {
+async function resolveBoundReplyChannelData(params: {
   binding: SessionBindingRecord;
   placement: "current" | "child";
-}): Promise<Pick<ReplyPayload, "channelData" | "delivery" | "presentation"> | undefined> {
+}): Promise<Record<string, unknown> | undefined> {
   const channelId = normalizeChannelId(params.binding.conversation.channel);
   if (!channelId) {
     return undefined;
   }
-  const buildPayload = getChannelPlugin(channelId)?.conversationBindings?.buildBoundReplyPayload;
-  if (!buildPayload) {
+  const buildChannelData =
+    getChannelPlugin(channelId)?.conversationBindings?.buildBoundReplyChannelData;
+  if (!buildChannelData) {
     return undefined;
   }
-  const resolved = await buildPayload({
+  const resolved = await buildChannelData({
     operation: "acp-spawn",
     placement: params.placement,
     conversation: params.binding.conversation,
@@ -621,16 +621,16 @@ export async function handleAcpSpawnAction(
     } else {
       parts.push(`Created ${placementLabel} ${boundConversationId} and bound it to ${sessionKey}.`);
     }
-    const boundReplyPayload = await resolveBoundReplyPayload({
+    const channelData = await resolveBoundReplyChannelData({
       binding,
       placement: bindingPlacement,
     });
-    if (boundReplyPayload) {
+    if (channelData) {
       return {
         shouldContinue: false,
         reply: {
           text: parts.join(" "),
-          ...boundReplyPayload,
+          channelData,
         },
       };
     }

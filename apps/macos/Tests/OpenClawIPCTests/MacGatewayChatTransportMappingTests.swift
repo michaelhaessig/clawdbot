@@ -23,7 +23,7 @@ struct MacGatewayChatTransportMappingTests {
             features: [:],
             snapshot: snapshot,
             canvashosturl: nil,
-            auth: [:],
+            auth: nil,
             policy: [:])
 
         let mapped = MacGatewayChatTransport.mapPushToTransportEvent(.snapshot(hello))

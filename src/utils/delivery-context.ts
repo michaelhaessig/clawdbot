@@ -10,40 +10,30 @@ export {
 } from "./delivery-context.shared.js";
 export type { DeliveryContext, DeliveryContextSessionSource } from "./delivery-context.types.js";
 
-type ConversationTargetParams = {
+export function formatConversationTarget(params: {
   channel?: string;
   conversationId?: string | number;
   parentConversationId?: string | number;
-};
-
-function normalizeConversationId(value: string | number | undefined): string | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? String(Math.trunc(value))
-    : typeof value === "string"
-      ? normalizeOptionalString(value)
-      : undefined;
-}
-
-function normalizeConversationTargetParams(params: ConversationTargetParams): {
-  channel?: string;
-  conversationId?: string;
-  parentConversationId?: string;
-} {
+}): string | undefined {
   const channel =
     typeof params.channel === "string"
       ? (normalizeMessageChannel(params.channel) ?? params.channel.trim())
       : undefined;
-  const conversationId = normalizeConversationId(params.conversationId);
-  const parentConversationId = normalizeConversationId(params.parentConversationId);
-  return { channel, conversationId, parentConversationId };
-}
-
-export function formatConversationTarget(params: ConversationTargetParams): string | undefined {
-  const { channel, conversationId, parentConversationId } =
-    normalizeConversationTargetParams(params);
+  const conversationId =
+    typeof params.conversationId === "number" && Number.isFinite(params.conversationId)
+      ? String(Math.trunc(params.conversationId))
+      : typeof params.conversationId === "string"
+        ? normalizeOptionalString(params.conversationId)
+        : undefined;
   if (!channel || !conversationId) {
     return undefined;
   }
+  const parentConversationId =
+    typeof params.parentConversationId === "number" && Number.isFinite(params.parentConversationId)
+      ? String(Math.trunc(params.parentConversationId))
+      : typeof params.parentConversationId === "string"
+        ? normalizeOptionalString(params.parentConversationId)
+        : undefined;
   const pluginTarget = normalizeChannelId(channel)
     ? getChannelPlugin(normalizeChannelId(channel)!)?.messaging?.resolveDeliveryTarget?.({
         conversationId,
@@ -61,8 +51,38 @@ export function resolveConversationDeliveryTarget(params: {
   conversationId?: string | number;
   parentConversationId?: string | number;
 }): { to?: string; threadId?: string } {
-  const { channel, conversationId, parentConversationId } =
-    normalizeConversationTargetParams(params);
+  const channel =
+    typeof params.channel === "string"
+      ? (normalizeMessageChannel(params.channel) ?? params.channel.trim())
+      : undefined;
+  const conversationId =
+    typeof params.conversationId === "number" && Number.isFinite(params.conversationId)
+      ? String(Math.trunc(params.conversationId))
+      : typeof params.conversationId === "string"
+        ? normalizeOptionalString(params.conversationId)
+        : undefined;
+  const parentConversationId =
+    typeof params.parentConversationId === "number" && Number.isFinite(params.parentConversationId)
+      ? String(Math.trunc(params.parentConversationId))
+      : typeof params.parentConversationId === "string"
+        ? normalizeOptionalString(params.parentConversationId)
+        : undefined;
+  const isThreadChild =
+    conversationId && parentConversationId && parentConversationId !== conversationId;
+  if (channel && isThreadChild) {
+    if (channel === "matrix") {
+      return {
+        to: `room:${parentConversationId}`,
+        threadId: conversationId,
+      };
+    }
+    if (channel === "slack" || channel === "mattermost" || channel === "telegram") {
+      return {
+        to: `channel:${parentConversationId}`,
+        threadId: conversationId,
+      };
+    }
+  }
   const pluginTarget =
     channel && conversationId
       ? getChannelPlugin(

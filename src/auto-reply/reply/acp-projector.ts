@@ -279,7 +279,7 @@ export function createAcpReplyProjector(params: {
     if (!(settings.deliveryMode === "final_only" && force)) {
       return;
     }
-    for (const entry of pendingToolDeliveries.splice(0)) {
+    for (const entry of pendingToolDeliveries.splice(0, pendingToolDeliveries.length)) {
       await params.deliver("tool", entry.payload, entry.meta);
     }
   };

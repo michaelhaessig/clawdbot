@@ -30,11 +30,10 @@ function createApi(params: {
         resolveStateDir: () => params.stateDir,
       },
       config: {
-        current: () => params.getConfig(),
-        replaceConfigFile: ({ nextConfig }: { nextConfig: unknown }) =>
-          params.writeConfig(nextConfig as Record<string, unknown>),
+        loadConfig: () => params.getConfig(),
+        writeConfigFile: (next: Record<string, unknown>) => params.writeConfig(next),
       },
-    } as unknown as OpenClawPluginApi["runtime"],
+    } as OpenClawPluginApi["runtime"],
     registerCommand: params.registerCommand,
   });
 }

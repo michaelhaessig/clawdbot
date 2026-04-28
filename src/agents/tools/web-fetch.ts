@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { SsrFBlockedError, type LookupFn } from "../../infra/net/ssrf.js";
 import { logDebug } from "../../logger.js";
@@ -10,18 +10,20 @@ import {
   normalizeOptionalString,
 } from "../../shared/string-coerce.js";
 import { isRecord } from "../../utils.js";
-import { extractReadableContent } from "../../web-fetch/content-extractors.runtime.js";
+import { resolveWebFetchDefinition } from "../../web-fetch/runtime.js";
 import { resolveWebProviderConfig } from "../../web/provider-runtime-shared.js";
-import { stringEnum } from "../schema/string-enum.js";
+import { stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
 import {
   extractBasicHtmlContent,
+  extractReadableContent,
   htmlToMarkdown,
   markdownToText,
   truncateText,
   type ExtractMode,
 } from "./web-fetch-utils.js";
+import { fetchWithWebToolsNetworkGuard } from "./web-guarded-fetch.js";
 import {
   CacheEntry,
   DEFAULT_CACHE_TTL_MINUTES,
@@ -34,7 +36,7 @@ import {
   writeCache,
 } from "./web-shared.js";
 
-export { extractReadableContent } from "../../web-fetch/content-extractors.runtime.js";
+export { extractReadableContent } from "./web-fetch-utils.js";
 
 const EXTRACT_MODES = ["markdown", "text"] as const;
 
@@ -71,35 +73,9 @@ type WebFetchConfig = NonNullable<OpenClawConfig["tools"]>["web"] extends infer 
     ? Fetch
     : undefined
   : undefined;
-type ResolveWebFetchDefinition =
-  (typeof import("../../web-fetch/runtime.js"))["resolveWebFetchDefinition"];
-type WebFetchProviderFallback = ReturnType<ResolveWebFetchDefinition>;
-type WebFetchRuntimeModule = Pick<
-  typeof import("../../web-fetch/runtime.js"),
-  "resolveWebFetchDefinition"
->;
-type WebGuardedFetchModule = Pick<
-  typeof import("./web-guarded-fetch.js"),
-  "fetchWithWebToolsNetworkGuard"
->;
-
-let webFetchRuntimePromise: Promise<WebFetchRuntimeModule> | null = null;
-let webGuardedFetchPromise: Promise<WebGuardedFetchModule> | null = null;
-
-async function loadWebFetchRuntime(): Promise<WebFetchRuntimeModule> {
-  webFetchRuntimePromise ??= import("../../web-fetch/runtime.js");
-  return await webFetchRuntimePromise;
-}
-
-async function loadWebGuardedFetch(): Promise<
-  WebGuardedFetchModule["fetchWithWebToolsNetworkGuard"]
-> {
-  webGuardedFetchPromise ??= import("./web-guarded-fetch.js");
-  return (await webGuardedFetchPromise).fetchWithWebToolsNetworkGuard;
-}
 
 function resolveFetchConfig(cfg?: OpenClawConfig): WebFetchConfig {
-  return resolveWebProviderConfig(cfg, "fetch") as NonNullable<WebFetchConfig> | undefined;
+  return resolveWebProviderConfig<"fetch", NonNullable<WebFetchConfig>>(cfg, "fetch");
 }
 
 function resolveFetchEnabled(params: { fetch?: WebFetchConfig; sandboxed?: boolean }): boolean {
@@ -271,12 +247,11 @@ type WebFetchRuntimeParams = {
   cacheTtlMs: number;
   userAgent: string;
   readabilityEnabled: boolean;
-  config?: OpenClawConfig;
   ssrfPolicy?: {
     allowRfc2544BenchmarkRange?: boolean;
   };
   lookupFn?: LookupFn;
-  resolveProviderFallback: () => Promise<WebFetchProviderFallback>;
+  resolveProviderFallback: () => ReturnType<typeof resolveWebFetchDefinition>;
 };
 
 function normalizeProviderFinalUrl(value: unknown): string | undefined {
@@ -366,7 +341,7 @@ async function maybeFetchProviderWebFetchPayload(
     tookMs: number;
   },
 ): Promise<Record<string, unknown> | null> {
-  const providerFallback = await params.resolveProviderFallback();
+  const providerFallback = params.resolveProviderFallback();
   if (!providerFallback) {
     return null;
   }
@@ -412,7 +387,6 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
   let release: (() => Promise<void>) | null = null;
   let finalUrl = params.url;
   try {
-    const fetchWithWebToolsNetworkGuard = await loadWebGuardedFetch();
     const result = await fetchWithWebToolsNetworkGuard({
       url: params.url,
       maxRedirects: params.maxRedirects,
@@ -499,12 +473,11 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
           html: body,
           url: finalUrl,
           extractMode: params.extractMode,
-          config: params.config,
         });
         if (readable?.text) {
           text = readable.text;
           title = readable.title;
-          extractor = readable.extractor;
+          extractor = "readability";
         } else {
           let payload: Record<string, unknown> | null = null;
           try {
@@ -530,7 +503,7 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
             extractor = "raw-html";
           } else {
             const providerLabel =
-              (await params.resolveProviderFallback())?.provider.label ?? "provider fallback";
+              params.resolveProviderFallback()?.provider.label ?? "provider fallback";
             throw new Error(
               `Web fetch extraction failed: Readability, ${providerLabel}, and basic HTML cleanup returned no content.`,
             );
@@ -610,10 +583,9 @@ export function createWebFetchTool(options?: {
     DEFAULT_FETCH_USER_AGENT;
   const maxResponseBytes = resolveFetchMaxResponseBytes(fetch);
   let providerFallbackResolved = false;
-  let providerFallbackCache: WebFetchProviderFallback;
-  const resolveProviderFallback = async () => {
+  let providerFallbackCache: ReturnType<typeof resolveWebFetchDefinition>;
+  const resolveProviderFallback = () => {
     if (!providerFallbackResolved) {
-      const { resolveWebFetchDefinition } = await loadWebFetchRuntime();
       providerFallbackCache = resolveWebFetchDefinition({
         config: options?.config,
         sandboxed: options?.sandboxed,
@@ -650,7 +622,6 @@ export function createWebFetchTool(options?: {
         cacheTtlMs: resolveCacheTtlMs(fetch?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES),
         userAgent,
         readabilityEnabled,
-        config: options?.config,
         ssrfPolicy: fetch?.ssrfPolicy,
         lookupFn: options?.lookupFn,
         resolveProviderFallback,

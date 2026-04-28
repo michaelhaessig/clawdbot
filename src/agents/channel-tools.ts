@@ -17,19 +17,6 @@ type ChannelAgentToolMeta = {
   channelId: string;
 };
 
-type ChannelMessageActionDiscoveryParams = {
-  cfg?: OpenClawConfig;
-  currentChannelId?: string | null;
-  currentThreadTs?: string | null;
-  currentMessageId?: string | number | null;
-  accountId?: string | null;
-  sessionKey?: string | null;
-  sessionId?: string | null;
-  agentId?: string | null;
-  requesterSenderId?: string | null;
-  senderIsOwner?: boolean;
-};
-
 const channelAgentToolMeta = new WeakMap<ChannelAgentTool, ChannelAgentToolMeta>();
 
 export function getChannelAgentToolMeta(tool: ChannelAgentTool): ChannelAgentToolMeta | undefined {
@@ -47,11 +34,19 @@ export function copyChannelAgentToolMeta(source: ChannelAgentTool, target: Chann
  * Get the list of supported message actions for a specific channel.
  * Returns an empty array if channel is not found or has no actions configured.
  */
-export function listChannelSupportedActions(
-  params: ChannelMessageActionDiscoveryParams & {
-    channel?: string;
-  },
-): ChannelMessageActionName[] {
+export function listChannelSupportedActions(params: {
+  cfg?: OpenClawConfig;
+  channel?: string;
+  currentChannelId?: string | null;
+  currentThreadTs?: string | null;
+  currentMessageId?: string | number | null;
+  accountId?: string | null;
+  sessionKey?: string | null;
+  sessionId?: string | null;
+  agentId?: string | null;
+  requesterSenderId?: string | null;
+  senderIsOwner?: boolean;
+}): ChannelMessageActionName[] {
   const channelId = resolveMessageActionDiscoveryChannelId(params.channel);
   if (!channelId) {
     return [];
@@ -71,9 +66,18 @@ export function listChannelSupportedActions(
 /**
  * Get the list of all supported message actions across all configured channels.
  */
-export function listAllChannelSupportedActions(
-  params: ChannelMessageActionDiscoveryParams,
-): ChannelMessageActionName[] {
+export function listAllChannelSupportedActions(params: {
+  cfg?: OpenClawConfig;
+  currentChannelId?: string | null;
+  currentThreadTs?: string | null;
+  currentMessageId?: string | number | null;
+  accountId?: string | null;
+  sessionKey?: string | null;
+  sessionId?: string | null;
+  agentId?: string | null;
+  requesterSenderId?: string | null;
+  senderIsOwner?: boolean;
+}): ChannelMessageActionName[] {
   const actions = new Set<ChannelMessageActionName>();
   for (const plugin of listChannelPlugins()) {
     const channelActions = resolveMessageActionDiscoveryForPlugin({

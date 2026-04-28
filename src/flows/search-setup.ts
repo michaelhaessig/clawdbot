@@ -128,8 +128,15 @@ function providerIsReady(
 }
 
 function rawKeyValue(config: OpenClawConfig, provider: SearchProvider): unknown {
+  const search = config.tools?.web?.search;
   const entry = resolveSearchProviderEntry(config, provider);
-  return entry?.getConfiguredCredentialValue?.(config);
+  const configuredValue = entry?.getConfiguredCredentialValue?.(config);
+  return (
+    configuredValue ??
+    (entry?.id === "brave"
+      ? entry.getCredentialValue(search as Record<string, unknown> | undefined)
+      : undefined)
+  );
 }
 
 export function resolveExistingKey(
@@ -383,7 +390,6 @@ export async function runSearchSetupFlow(
       },
     ],
     initialValue: defaultProvider,
-    searchable: true,
   });
 
   if (choice === "__skip__") {

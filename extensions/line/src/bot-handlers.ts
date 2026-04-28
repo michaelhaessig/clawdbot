@@ -6,7 +6,12 @@ import {
 } from "openclaw/plugin-sdk/channel-inbound";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import { hasControlCommand, resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import {
+  resolveAllowlistProviderRuntimeGroupPolicy,
+  resolveDefaultGroupPolicy,
+  warnMissingProviderGroupPolicyFallbackOnce,
+} from "openclaw/plugin-sdk/config-runtime";
 import {
   readChannelAllowFromStore,
   resolvePairingIdLabel,
@@ -23,11 +28,6 @@ import {
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import { danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import {
-  resolveAllowlistProviderRuntimeGroupPolicy,
-  resolveDefaultGroupPolicy,
-  warnMissingProviderGroupPolicyFallbackOnce,
-} from "openclaw/plugin-sdk/runtime-group-policy";
 import {
   firstDefined,
   isSenderAllowed,
@@ -209,7 +209,6 @@ async function sendLinePairingReply(params: {
       if (replyToken) {
         try {
           await replyMessageLine(replyToken, [{ type: "text", text }], {
-            cfg: context.cfg,
             accountId: context.account.accountId,
             channelAccessToken: context.account.channelAccessToken,
           });
@@ -220,7 +219,6 @@ async function sendLinePairingReply(params: {
       }
       try {
         await pushMessageLine(`line:${senderId}`, text, {
-          cfg: context.cfg,
           accountId: context.account.accountId,
           channelAccessToken: context.account.channelAccessToken,
         });
@@ -281,7 +279,7 @@ async function shouldProcessLineEvent(
       logVerbose(`Blocked line group ${groupId ?? roomId ?? "unknown"} (group disabled)`);
       return denied;
     }
-    if (groupAllowOverride !== undefined) {
+    if (typeof groupAllowOverride !== "undefined") {
       if (!senderId) {
         logVerbose("Blocked line group message (group allowFrom override, no sender ID)");
         return denied;

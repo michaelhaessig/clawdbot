@@ -23,9 +23,6 @@ const acpCoreProtectedSources = [
 const channelCoreProtectedSources = [
   path.join(repoRoot, "src", "channels", "thread-bindings-policy.ts"),
   path.join(repoRoot, "src", "channels", "thread-bindings-messages.ts"),
-  path.join(repoRoot, "src", "sessions", "send-policy.ts"),
-  path.join(repoRoot, "src", "sessions", "session-chat-type-shared.ts"),
-  path.join(repoRoot, "src", "utils", "delivery-context.ts"),
 ];
 const acpUserFacingTextSources = [
   path.join(repoRoot, "src", "auto-reply", "reply", "commands-acp"),
@@ -44,18 +41,11 @@ const channelIds = [
   "imessage",
   "irc",
   "line",
-  "mattermost",
   "matrix",
   "msteams",
-  "nextcloud-talk",
-  "nostr",
-  "qqbot",
   "signal",
   "slack",
-  "synology-chat",
   "telegram",
-  "tlon",
-  "twitch",
   "web",
   "whatsapp",
   "zalo",

@@ -55,7 +55,6 @@ function createDeps(overrides?: Partial<QaScenarioRuntimeDeps>): QaScenarioRunti
     waitForAgentRun: fn,
     listCronJobs: fn,
     waitForCronRunCompletion: fn,
-    findManagedDreamingCronJob: fn,
     readDoctorMemoryStatus: fn,
     forceMemoryIndex: fn,
     findSkill: fn,
@@ -154,20 +153,20 @@ describe("createQaScenarioRuntimeApi", () => {
     expect(api.getTransportSnapshot()).toEqual(state.getSnapshot());
     expect(api.imageUnderstandingPngBase64).toBe("png-small");
 
-    const inbound = api.injectInboundMessage({
+    const inbound = await api.injectInboundMessage({
       accountId: "qa-channel",
       conversation: { id: "qa-operator", kind: "direct" },
       senderId: "qa-operator",
       text: "hello",
     });
-    const outbound = api.injectOutboundMessage({
+    const outbound = await api.injectOutboundMessage({
       accountId: "qa-channel",
       to: "dm:qa-operator",
       text: "hi",
     });
     expect(inbound.id).toBeTruthy();
     expect(outbound.id).toBeTruthy();
-    api.readTransportMessage({ accountId: "qa-channel", messageId: outbound.id });
+    await api.readTransportMessage({ accountId: "qa-channel", messageId: outbound.id });
     await api.reset();
     await api.resetBus();
     await api.resetTransport();

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const completeSimple = vi.hoisted(() => vi.fn());
-const getRuntimeAuthForModel = vi.hoisted(() => vi.fn());
+const getApiKeyForModel = vi.hoisted(() => vi.fn());
 const requireApiKey = vi.hoisted(() => vi.fn());
 const resolveDefaultModelForAgent = vi.hoisted(() => vi.fn());
 const resolveModelAsync = vi.hoisted(() => vi.fn());
@@ -16,7 +16,10 @@ vi.mock("@mariozechner/pi-ai", async () => {
   };
 });
 
-vi.mock("../../agents/model-auth.js", () => ({ requireApiKey }));
+vi.mock("../../agents/model-auth.js", () => ({
+  getApiKeyForModel,
+  requireApiKey,
+}));
 
 vi.mock("../../agents/model-selection.js", () => ({
   resolveDefaultModelForAgent,
@@ -30,16 +33,12 @@ vi.mock("../../agents/simple-completion-transport.js", () => ({
   prepareModelForSimpleCompletion,
 }));
 
-vi.mock("../../plugins/runtime/runtime-model-auth.runtime.js", () => ({
-  getRuntimeAuthForModel,
-}));
-
 import { generateConversationLabel } from "./conversation-label-generator.js";
 
 describe("generateConversationLabel", () => {
   beforeEach(() => {
     completeSimple.mockReset();
-    getRuntimeAuthForModel.mockReset();
+    getApiKeyForModel.mockReset();
     requireApiKey.mockReset();
     resolveDefaultModelForAgent.mockReset();
     resolveModelAsync.mockReset();
@@ -52,7 +51,7 @@ describe("generateConversationLabel", () => {
       modelRegistry: {},
     });
     prepareModelForSimpleCompletion.mockImplementation(({ model }) => model);
-    getRuntimeAuthForModel.mockResolvedValue({ apiKey: "resolved-key", mode: "api-key" });
+    getApiKeyForModel.mockResolvedValue({ apiKey: "resolved-key", mode: "api-key" });
     requireApiKey.mockReturnValue("resolved-key");
     completeSimple.mockResolvedValue({
       content: [{ type: "text", text: "Topic label" }],
@@ -78,10 +77,10 @@ describe("generateConversationLabel", () => {
       "/tmp/agents/billing/agent",
       {},
     );
-    expect(getRuntimeAuthForModel).toHaveBeenCalledWith({
+    expect(getApiKeyForModel).toHaveBeenCalledWith({
       model: { provider: "openai" },
       cfg: {},
-      workspaceDir: "/tmp/agents/billing/agent",
+      agentDir: "/tmp/agents/billing/agent",
     });
     expect(prepareModelForSimpleCompletion).toHaveBeenCalledWith({
       model: { provider: "openai" },

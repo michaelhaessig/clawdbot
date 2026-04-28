@@ -29,13 +29,11 @@ export type GatewayServiceEnvArgs = {
   env?: GatewayServiceEnv;
 };
 
-export type GatewayServiceEnvironmentValueSource = "inline" | "file" | "inline-and-file";
-
 export type GatewayServiceCommandConfig = {
   programArguments: string[];
   workingDirectory?: string;
   environment?: Record<string, string>;
-  environmentValueSources?: Record<string, GatewayServiceEnvironmentValueSource>;
+  environmentValueSources?: Record<string, "inline" | "file">;
   sourcePath?: string;
 };
 

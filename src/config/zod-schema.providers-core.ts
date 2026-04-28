@@ -2,10 +2,10 @@ import { z } from "zod";
 import { isSafeScpRemoteHost } from "../infra/scp-host.js";
 import { isValidInboundPathRootPattern } from "../media/inbound-path-policy.js";
 import {
-  normalizeCommandDescription,
-  normalizeSlashCommandName,
-  resolveCustomCommands,
-} from "../shared/custom-command-config.js";
+  normalizeTelegramCommandDescription,
+  normalizeTelegramCommandName,
+  resolveTelegramCustomCommands,
+} from "../plugin-sdk/telegram-command-config.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { ToolPolicySchema } from "./zod-schema.agent-runtime.js";
 import {
@@ -82,7 +82,6 @@ const ChannelStreamingBlockSchema = z
 const ChannelStreamingPreviewSchema = z
   .object({
     chunk: BlockStreamingChunkSchema.optional(),
-    toolProgress: z.boolean().optional(),
   })
   .strict();
 const ChannelPreviewStreamingConfigSchema = z
@@ -106,12 +105,6 @@ const SlackCapabilitiesSchema = z.union([
 ]);
 
 const TelegramErrorPolicySchema = z.enum(["always", "once", "silent"]).optional();
-const TelegramCommandNamePattern = /^[a-z0-9_]{1,32}$/;
-const TelegramCustomCommandConfig = {
-  label: "Telegram",
-  pattern: TelegramCommandNamePattern,
-  patternDescription: "use a-z, 0-9, underscore; max 32 chars",
-} as const;
 export const TelegramTopicSchema = z
   .object({
     requireMention: z.boolean().optional(),
@@ -177,8 +170,8 @@ export const TelegramDirectSchema = z
 
 const TelegramCustomCommandSchema = z
   .object({
-    command: z.string().overwrite(normalizeSlashCommandName),
-    description: z.string().overwrite(normalizeCommandDescription),
+    command: z.string().overwrite(normalizeTelegramCommandName),
+    description: z.string().overwrite(normalizeTelegramCommandDescription),
   })
   .strict();
 
@@ -189,11 +182,10 @@ const validateTelegramCustomCommands = (
   if (!value.customCommands || value.customCommands.length === 0) {
     return;
   }
-  const { issues } = resolveCustomCommands({
+  const { issues } = resolveTelegramCustomCommands({
     commands: value.customCommands,
     checkReserved: false,
     checkDuplicates: false,
-    config: TelegramCustomCommandConfig,
   });
   for (const issue of issues) {
     ctx.addIssue({
@@ -241,7 +233,6 @@ export const TelegramAccountSchemaBase = z
     streaming: ChannelPreviewStreamingConfigSchema.optional(),
     mediaMaxMb: z.number().positive().optional(),
     timeoutSeconds: z.number().int().positive().optional(),
-    pollingStallThresholdMs: z.number().int().min(30_000).max(600_000).optional(),
     retry: RetryConfigSchema,
     network: z
       .object({
@@ -439,12 +430,6 @@ export const DiscordDmSchema = z
   })
   .strict();
 
-export const DiscordThreadSchema = z
-  .object({
-    inheritParent: z.boolean().optional(),
-  })
-  .strict();
-
 export const DiscordGuildChannelSchema = z
   .object({
     requireMention: z.boolean().optional(),
@@ -509,7 +494,6 @@ const DiscordVoiceAutoJoinSchema = z
 const DiscordVoiceSchema = z
   .object({
     enabled: z.boolean().optional(),
-    model: z.string().min(1).optional(),
     autoJoin: z.array(DiscordVoiceAutoJoinSchema).optional(),
     daveEncryption: z.boolean().optional(),
     decryptionFailureTolerance: z.number().int().min(0).optional(),
@@ -565,7 +549,6 @@ export const DiscordAccountSchema = z
       .strict()
       .optional(),
     replyToMode: ReplyToModeSchema.optional(),
-    thread: DiscordThreadSchema.optional(),
     // Aliases for channels.discord.dm.policy / channels.discord.dm.allowFrom. Prefer these for
     // inheritance in multi-account setups (shallow merge works; nested dm object doesn't).
     dmPolicy: DmPolicySchema.optional(),
@@ -1451,7 +1434,6 @@ export const BlueBubblesAccountSchemaBase = z
     dmHistoryLimit: z.number().int().min(0).optional(),
     dms: z.record(z.string(), DmConfigSchema.optional()).optional(),
     textChunkLimit: z.number().int().positive().optional(),
-    sendTimeoutMs: z.number().int().positive().optional(),
     chunkMode: z.enum(["length", "newline"]).optional(),
     mediaMaxMb: z.number().int().positive().optional(),
     mediaLocalRoots: z.array(z.string()).optional(),
@@ -1469,7 +1451,6 @@ export const BlueBubblesAccountSchemaBase = z
     heartbeat: ChannelHeartbeatVisibilitySchema,
     healthMonitor: ChannelHealthMonitorSchema,
     responsePrefix: z.string().optional(),
-    coalesceSameSenderDms: z.boolean().optional(),
   })
   .strict();
 

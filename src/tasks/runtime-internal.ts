@@ -8,7 +8,6 @@ export {
   findLatestTaskForFlowId,
   findLatestTaskForRelatedSessionKey,
   findTaskByRunId,
-  finalizeTaskRunByRunId,
   getTaskById,
   getTaskRegistrySnapshot,
   getTaskRegistrySummary,

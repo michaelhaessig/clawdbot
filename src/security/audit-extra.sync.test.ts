@@ -1,14 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
   collectAttackSurfaceSummaryFindings,
   collectSmallModelRiskFindings,
 } from "./audit-extra.summary.js";
 import { safeEqualSecret } from "./secret-equal.js";
-
-vi.mock("../plugins/web-search-credential-presence.js", () => ({
-  hasConfiguredWebSearchCredential: () => false,
-}));
 
 describe("collectAttackSurfaceSummaryFindings", () => {
   it.each([
@@ -27,9 +23,9 @@ describe("collectAttackSurfaceSummaryFindings", () => {
       expectedDetail: ["hooks.webhooks: enabled", "hooks.internal: enabled"],
     },
     {
-      name: "reports internal hooks as disabled until configured",
+      name: "reports internal hooks as enabled by default and webhooks as disabled when neither is configured",
       cfg: {} satisfies OpenClawConfig,
-      expectedDetail: ["hooks.webhooks: disabled", "hooks.internal: disabled"],
+      expectedDetail: ["hooks.webhooks: disabled", "hooks.internal: enabled"],
     },
     {
       name: "reports internal hooks as disabled when explicitly set to false",

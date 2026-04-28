@@ -2,7 +2,7 @@
 summary: "CLI reference for `openclaw sessions` (list stored sessions + usage)"
 read_when:
   - You want to list stored sessions and see recent activity
-title: "Sessions"
+title: "sessions"
 ---
 
 # `openclaw sessions`
@@ -110,9 +110,4 @@ openclaw sessions cleanup --json
 
 Related:
 
-- Session config: [Configuration reference](/gateway/config-agents#session)
-
-## Related
-
-- [CLI reference](/cli)
-- [Session management](/concepts/session)
+- Session config: [Configuration reference](/gateway/configuration-reference#session)

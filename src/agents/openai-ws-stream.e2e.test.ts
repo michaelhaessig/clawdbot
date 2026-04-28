@@ -11,7 +11,7 @@
  * Run manually with a valid OPENAI_API_KEY:
  *   OPENCLAW_LIVE_TEST=1 pnpm test:e2e -- src/agents/openai-ws-stream.e2e.test.ts
  *
- * This now runs only in the keyed live/release lanes.
+ * Skipped in CI — no API key available and we avoid billable external calls.
  */
 
 import type {
@@ -20,7 +20,6 @@ import type {
   AssistantMessageEventStream,
   Context,
 } from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isLiveTestEnabled } from "./live-test-helpers.js";
 import type { OutputItem, ResponseObject } from "./openai-ws-connection.js";
@@ -109,10 +108,8 @@ async function runWebsocketToolFollowupTurn(params: {
     await collectEvents(
       params.streamFn(model, secondContext, {
         transport: "websocket",
-        maxTokens: 16,
-        reasoningEffort: "none",
-        textVerbosity: "low",
-      } as unknown as StreamFnParams[2]),
+        maxTokens: 128,
+      }),
     ),
   );
 }
@@ -128,35 +125,8 @@ async function collectEvents(stream: StreamReturn): Promise<AssistantMessageEven
 
 function expectDone(events: AssistantMessageEvent[]): AssistantMessage {
   const done = events.find((event) => event.type === "done")?.message;
-  if (!done) {
-    throw new MissingDoneEventError(events);
-  }
-  return done;
-}
-
-class MissingDoneEventError extends Error {
-  constructor(events: AssistantMessageEvent[]) {
-    super(
-      `OpenAI WebSocket stream ended without a done event; event types: ${events.map((event) => event.type).join(", ") || "<none>"}`,
-    );
-    this.name = "MissingDoneEventError";
-  }
-}
-
-function isTransientWebSocketLiveError(error: unknown): boolean {
-  if (error instanceof MissingDoneEventError) {
-    return true;
-  }
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("websocket closed") ||
-    message.includes("websocket stream ended") ||
-    message.includes("timeout") ||
-    message.includes("aborted")
-  );
+  expect(done).toBeDefined();
+  return done!;
 }
 
 function assistantText(message: AssistantMessage): string {
@@ -302,9 +272,7 @@ describe("OpenAI WebSocket e2e", () => {
         streamFn(model, firstContext, {
           transport: "websocket",
           toolChoice: "required",
-          maxTokens: 16,
-          reasoningEffort: "none",
-          textVerbosity: "low",
+          maxTokens: 128,
         } as unknown as StreamFnParams[2]),
       );
       const firstDone = expectDone(firstEvents);
@@ -324,97 +292,82 @@ describe("OpenAI WebSocket e2e", () => {
 
       expect(assistantText(secondDone)).toMatch(/TOOL_OK/);
     },
-    // Live CI can spend more than a minute waiting for a stable follow-up turn
-    // when websocket reuse and tool callbacks contend with other provider lanes.
-    120_000,
+    60_000,
   );
 
   testFn(
     "surfaces replay-safe reasoning metadata on websocket tool turns",
     async () => {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const sid = freshSession(`tool-reasoning-${attempt}`);
-          const completedResponses: ResponseObject[] = [];
-          openAIWsStreamModule.__testing.setDepsForTest({
-            createManager: (options) => {
-              const manager = new openAIWsConnectionModule.OpenAIWebSocketManager(options);
-              manager.onMessage((event) => {
-                if (event.type === "response.completed") {
-                  completedResponses.push(event.response);
-                }
-              });
-              return manager;
-            },
+      const sid = freshSession("tool-reasoning");
+      const completedResponses: ResponseObject[] = [];
+      openAIWsStreamModule.__testing.setDepsForTest({
+        createManager: (options) => {
+          const manager = new openAIWsConnectionModule.OpenAIWebSocketManager(options);
+          manager.onMessage((event) => {
+            if (event.type === "response.completed") {
+              completedResponses.push(event.response);
+            }
           });
-          const streamFn = openAIWsStreamModule.createOpenAIWebSocketStreamFn(API_KEY!, sid);
-          const firstContext = makeToolContext(
-            "Think carefully, call the tool `noop` with {} first, then after the tool result reply with exactly TOOL_OK.",
-          );
-          const firstDone = expectDone(
-            await collectEvents(
-              streamFn(model, firstContext, {
-                transport: "websocket",
-                toolChoice: "required",
-                reasoningEffort: "high",
-                reasoningSummary: "detailed",
-                maxTokens: 256,
-              } as unknown as StreamFnParams[2]),
-            ),
-          );
+          return manager;
+        },
+      });
+      const streamFn = openAIWsStreamModule.createOpenAIWebSocketStreamFn(API_KEY!, sid);
+      const firstContext = makeToolContext(
+        "Think carefully, call the tool `noop` with {} first, then after the tool result reply with exactly TOOL_OK.",
+      );
+      const firstDone = expectDone(
+        await collectEvents(
+          streamFn(model, firstContext, {
+            transport: "websocket",
+            toolChoice: "required",
+            reasoningEffort: "high",
+            reasoningSummary: "detailed",
+            maxTokens: 256,
+          } as unknown as StreamFnParams[2]),
+        ),
+      );
 
-          const firstResponse = completedResponses[0];
-          expect(firstResponse).toBeDefined();
+      const firstResponse = completedResponses[0];
+      expect(firstResponse).toBeDefined();
 
-          const rawReasoningItems = (firstResponse?.output ?? []).filter(
-            (item): item is Extract<OutputItem, { type: "reasoning" | `reasoning.${string}` }> =>
-              item.type === "reasoning" || item.type.startsWith("reasoning."),
-          );
-          const replayableReasoningItems = rawReasoningItems.filter(
-            (item) => extractReasoningText(item).length > 0,
-          );
-          const thinkingBlocks = extractThinkingBlocks(firstDone);
-          expect(thinkingBlocks).toHaveLength(replayableReasoningItems.length);
-          expect(thinkingBlocks.map((block) => block.thinking)).toEqual(
-            replayableReasoningItems.map((item) => extractReasoningText(item)),
-          );
-          expect(
-            thinkingBlocks.map((block) => parseReasoningSignature(block.thinkingSignature)),
-          ).toEqual(replayableReasoningItems.map((item) => toExpectedReasoningSignature(item)));
+      const rawReasoningItems = (firstResponse?.output ?? []).filter(
+        (item): item is Extract<OutputItem, { type: "reasoning" | `reasoning.${string}` }> =>
+          item.type === "reasoning" || item.type.startsWith("reasoning."),
+      );
+      const replayableReasoningItems = rawReasoningItems.filter(
+        (item) => extractReasoningText(item).length > 0,
+      );
+      const thinkingBlocks = extractThinkingBlocks(firstDone);
+      expect(thinkingBlocks).toHaveLength(replayableReasoningItems.length);
+      expect(thinkingBlocks.map((block) => block.thinking)).toEqual(
+        replayableReasoningItems.map((item) => extractReasoningText(item)),
+      );
+      expect(
+        thinkingBlocks.map((block) => parseReasoningSignature(block.thinkingSignature)),
+      ).toEqual(replayableReasoningItems.map((item) => toExpectedReasoningSignature(item)));
 
-          const rawToolCall = firstResponse?.output.find(
-            (item): item is Extract<OutputItem, { type: "function_call" }> =>
-              item.type === "function_call",
-          );
-          expect(rawToolCall).toBeDefined();
-          const toolCall = extractToolCall(firstDone);
-          expect(toolCall?.name).toBe(rawToolCall?.name);
-          expect(toolCall?.id).toBe(
-            rawToolCall ? `${rawToolCall.call_id}|${rawToolCall.id}` : undefined,
-          );
+      const rawToolCall = firstResponse?.output.find(
+        (item): item is Extract<OutputItem, { type: "function_call" }> =>
+          item.type === "function_call",
+      );
+      expect(rawToolCall).toBeDefined();
+      const toolCall = extractToolCall(firstDone);
+      expect(toolCall?.name).toBe(rawToolCall?.name);
+      expect(toolCall?.id).toBe(
+        rawToolCall ? `${rawToolCall.call_id}|${rawToolCall.id}` : undefined,
+      );
 
-          const secondDone = await runWebsocketToolFollowupTurn({
-            streamFn,
-            context: firstContext,
-            firstDone,
-            toolCallId: toolCall!.id,
-            output: "TOOL_OK",
-          });
+      const secondDone = await runWebsocketToolFollowupTurn({
+        streamFn,
+        context: firstContext,
+        firstDone,
+        toolCallId: toolCall!.id,
+        output: "TOOL_OK",
+      });
 
-          expect(assistantText(secondDone)).toMatch(/TOOL_OK/);
-          return;
-        } catch (error) {
-          lastError = error;
-          openAIWsStreamModule.__testing.setDepsForTest();
-          if (!isTransientWebSocketLiveError(error) || attempt === 1) {
-            throw error;
-          }
-        }
-      }
-      throw lastError;
+      expect(assistantText(secondDone)).toMatch(/TOOL_OK/);
     },
-    120_000,
+    60_000,
   );
 
   testFn(
@@ -423,12 +376,10 @@ describe("OpenAI WebSocket e2e", () => {
       const sid = freshSession("warmup");
       const streamFn = openAIWsStreamModule.createOpenAIWebSocketStreamFn(API_KEY!, sid);
       const events = await collectEvents(
-        streamFn(model, makeContext("Reply with exactly the single word warmed."), {
+        streamFn(model, makeContext("Reply with the word warmed."), {
           transport: "websocket",
           openaiWsWarmup: true,
-          maxTokens: 8,
-          reasoningEffort: "none",
-          textVerbosity: "low",
+          maxTokens: 32,
         } as unknown as StreamFnParams[2]),
       );
 
@@ -440,10 +391,7 @@ describe("OpenAI WebSocket e2e", () => {
         expect(assistantText(done).toLowerCase()).toContain("warmed");
       }
     },
-    // This transport check does not need expensive reasoning. Keep the timeout
-    // generous for CI jitter, but force a minimal response shape so the first
-    // websocket request stays bounded.
-    720_000,
+    45_000,
   );
 
   testFn(
@@ -464,56 +412,15 @@ describe("OpenAI WebSocket e2e", () => {
   );
 
   testFn(
-    "falls back to HTTP gracefully when websocket connect fails",
+    "falls back to HTTP gracefully with invalid API key",
     async () => {
       const sid = freshSession("fallback");
-      openAIWsStreamModule.__testing.setDepsForTest({
-        createHttpFallbackStreamFn: () =>
-          (() => {
-            const stream = createAssistantMessageEventStream();
-            queueMicrotask(() => {
-              stream.push({
-                type: "done",
-                reason: "stop",
-                message: {
-                  role: "assistant",
-                  content: [{ type: "text", text: "FALLBACK_OK" }],
-                  stopReason: "stop",
-                  api: "openai-responses",
-                  provider: "openai",
-                  model: "gpt-5.4",
-                  usage: {
-                    input: 0,
-                    output: 0,
-                    cacheRead: 0,
-                    cacheWrite: 0,
-                    totalTokens: 0,
-                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-                  },
-                  timestamp: Date.now(),
-                },
-              });
-              stream.end();
-            });
-            return stream;
-          }) as never,
-      });
-      const streamFn = openAIWsStreamModule.createOpenAIWebSocketStreamFn(API_KEY!, sid, {
-        managerOptions: {
-          url: "ws://127.0.0.1:1",
-          maxRetries: 0,
-          backoffDelaysMs: [0],
-        },
-      });
-      const stream = streamFn(model, makeContext("Reply with exactly FALLBACK_OK."), {
-        maxTokens: 8,
-        reasoningEffort: "none",
-        textVerbosity: "low",
-      } as unknown as StreamFnParams[2]);
+      const streamFn = openAIWsStreamModule.createOpenAIWebSocketStreamFn("sk-invalid-key", sid);
+      const stream = streamFn(model, makeContext("Hello"), {});
       const events = await collectEvents(stream);
 
-      const done = expectDone(events);
-      expect(assistantText(done)).toContain("FALLBACK_OK");
+      const hasTerminal = events.some((e) => e.type === "done" || e.type === "error");
+      expect(hasTerminal).toBe(true);
     },
     45_000,
   );

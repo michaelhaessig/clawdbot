@@ -1,7 +1,6 @@
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.js";
 import { findCodeRegions, isInsideCode } from "./code-regions.js";
 import { stripModelSpecialTokens } from "./model-special-tokens.js";
-import { stripPlainTextToolCallBlocks } from "./plain-text-tool-call-blocks.js";
 import {
   stripReasoningTagsFromText,
   type ReasoningTagMode,
@@ -587,7 +586,6 @@ function applyAssistantVisibleTextStagePipeline(
     cleaned = stripModelSpecialTokens(cleaned);
     cleaned = stripRelevantMemoriesTags(cleaned);
     cleaned = stripToolCallXmlTags(cleaned);
-    cleaned = stripPlainTextToolCallBlocks(cleaned);
     if (!options.preserveDowngradedToolText) {
       cleaned = stripDowngradedToolCallText(cleaned);
     }

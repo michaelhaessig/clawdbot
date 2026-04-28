@@ -1,6 +1,5 @@
 import {
   buildChannelOutboundSessionRoute,
-  buildThreadAwareOutboundSessionRoute,
   createChatChannelPlugin,
 } from "openclaw/plugin-sdk/channel-core";
 import { getChatChannelMeta } from "openclaw/plugin-sdk/channel-plugin-common";
@@ -67,17 +66,9 @@ export const qaChannelPlugin: ChannelPlugin<ResolvedQaChannelAccount> = createCh
           /^((dm|channel):|thread:[^/]+\/)/i.test(raw.trim()) || raw.trim().length > 0,
         hint: "<dm:user|channel:room|thread:room/thread>",
       },
-      resolveOutboundSessionRoute: ({
-        cfg,
-        agentId,
-        accountId,
-        target,
-        replyToId,
-        threadId,
-        currentSessionKey,
-      }) => {
+      resolveOutboundSessionRoute: ({ cfg, agentId, accountId, target, threadId }) => {
         const parsed = parseQaTarget(target);
-        const baseRoute = buildChannelOutboundSessionRoute({
+        return buildChannelOutboundSessionRoute({
           cfg,
           agentId,
           channel: CHANNEL_ID,
@@ -89,14 +80,7 @@ export const qaChannelPlugin: ChannelPlugin<ResolvedQaChannelAccount> = createCh
           chatType: parsed.chatType,
           from: `qa-channel:${accountId ?? DEFAULT_ACCOUNT_ID}`,
           to: buildQaTarget(parsed),
-        });
-        return buildThreadAwareOutboundSessionRoute({
-          route: baseRoute,
-          replyToId,
-          threadId: threadId ?? (target.trim().startsWith("thread:") ? undefined : parsed.threadId),
-          currentSessionKey,
-          canRecoverCurrentThread: ({ route }) =>
-            route.chatType !== "direct" || (cfg.session?.dmScope ?? "main") !== "main",
+          threadId: threadId ?? parsed.threadId,
         });
       },
     },

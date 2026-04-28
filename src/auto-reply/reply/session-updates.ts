@@ -93,12 +93,6 @@ function emitCompactionSessionLifecycleHooks(params: {
   }
 }
 
-function resolvePositiveTokenCount(value: number | undefined): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : undefined;
-}
-
 export async function ensureSkillSnapshot(params: {
   sessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
@@ -225,8 +219,6 @@ export async function incrementCompactionCount(params: {
   tokensAfter?: number;
   /** Session id after compaction, when the runtime rotated transcripts. */
   newSessionId?: string;
-  /** Session file after compaction, when the runtime rotated transcripts. */
-  newSessionFile?: string;
 }): Promise<number | undefined> {
   const {
     sessionEntry,
@@ -238,7 +230,6 @@ export async function incrementCompactionCount(params: {
     amount = 1,
     tokensAfter,
     newSessionId,
-    newSessionFile,
   } = params;
   if (!sessionStore || !sessionKey) {
     return undefined;
@@ -254,28 +245,18 @@ export async function incrementCompactionCount(params: {
     compactionCount: nextCount,
     updatedAt: now,
   };
-  const explicitNewSessionFile = normalizeOptionalString(newSessionFile);
-  const sessionIdChanged = Boolean(newSessionId && newSessionId !== entry.sessionId);
-  const sessionFileChanged = Boolean(
-    explicitNewSessionFile && explicitNewSessionFile !== entry.sessionFile,
-  );
-  if (sessionIdChanged && newSessionId) {
+  if (newSessionId && newSessionId !== entry.sessionId) {
     updates.sessionId = newSessionId;
-    updates.sessionFile =
-      explicitNewSessionFile ??
-      resolveCompactionSessionFile({
-        entry,
-        sessionKey,
-        storePath,
-        newSessionId,
-      });
-  } else if (sessionFileChanged && explicitNewSessionFile) {
-    updates.sessionFile = explicitNewSessionFile;
+    updates.sessionFile = resolveCompactionSessionFile({
+      entry,
+      sessionKey,
+      storePath,
+      newSessionId,
+    });
   }
   // If tokensAfter is provided, update the cached token counts to reflect post-compaction state
-  const tokensAfterCompaction = resolvePositiveTokenCount(tokensAfter);
-  if (tokensAfterCompaction !== undefined) {
-    updates.totalTokens = tokensAfterCompaction;
+  if (tokensAfter != null && tokensAfter > 0) {
+    updates.totalTokens = tokensAfter;
     updates.totalTokensFresh = true;
     // Clear input/output breakdown since we only have the total estimate after compaction
     updates.inputTokens = undefined;
@@ -295,7 +276,7 @@ export async function incrementCompactionCount(params: {
       };
     });
   }
-  if ((sessionIdChanged || sessionFileChanged) && cfg) {
+  if (newSessionId && newSessionId !== entry.sessionId && cfg) {
     emitCompactionSessionLifecycleHooks({
       cfg,
       sessionKey,

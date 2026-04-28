@@ -85,7 +85,11 @@ const ACP_MUTATING_ACTIONS = new Set<AcpAction>([
   "reset-options",
 ]);
 
-export const handleAcpCommand: CommandHandler = async (params, _allowTextCommands) => {
+export const handleAcpCommand: CommandHandler = async (params, allowTextCommands) => {
+  if (!allowTextCommands) {
+    return null;
+  }
+
   const normalized = params.command.commandBodyNormalized;
   if (!normalized.startsWith(COMMAND)) {
     return null;

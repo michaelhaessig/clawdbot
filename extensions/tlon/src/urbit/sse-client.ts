@@ -78,18 +78,6 @@ export class UrbitSSEClient {
     this.fetchImpl = options.fetchImpl;
   }
 
-  private channelRequestContext() {
-    return {
-      baseUrl: this.url,
-      cookie: this.cookie,
-      ship: this.ship,
-      channelId: this.channelId,
-      ssrfPolicy: this.ssrfPolicy,
-      lookupFn: this.lookupFn,
-      fetchImpl: this.fetchImpl,
-    };
-  }
-
   async subscribe(params: {
     app: string;
     path: string;
@@ -145,10 +133,21 @@ export class UrbitSSEClient {
   }
 
   async connect() {
-    await ensureUrbitChannelOpen(this.channelRequestContext(), {
-      createBody: this.subscriptions,
-      createAuditContext: "tlon-urbit-channel-create",
-    });
+    await ensureUrbitChannelOpen(
+      {
+        baseUrl: this.url,
+        cookie: this.cookie,
+        ship: this.ship,
+        channelId: this.channelId,
+        ssrfPolicy: this.ssrfPolicy,
+        lookupFn: this.lookupFn,
+        fetchImpl: this.fetchImpl,
+      },
+      {
+        createBody: this.subscriptions,
+        createAuditContext: "tlon-urbit-channel-create",
+      },
+    );
 
     await this.openStream();
     this.isConnected = true;
@@ -222,8 +221,8 @@ export class UrbitSSEClient {
         buffer += chunk.toString();
         let eventEnd;
         while ((eventEnd = buffer.indexOf("\n\n")) !== -1) {
-          const eventData = buffer.slice(0, eventEnd);
-          buffer = buffer.slice(eventEnd + 2);
+          const eventData = buffer.substring(0, eventEnd);
+          buffer = buffer.substring(eventEnd + 2);
           this.processEvent(eventData);
         }
       }
@@ -249,10 +248,10 @@ export class UrbitSSEClient {
 
     for (const line of lines) {
       if (line.startsWith("id: ")) {
-        eventId = Number.parseInt(line.slice(4), 10);
+        eventId = parseInt(line.substring(4), 10);
       }
       if (line.startsWith("data: ")) {
-        data = line.slice(6);
+        data = line.substring(6);
       }
     }
 
@@ -261,7 +260,7 @@ export class UrbitSSEClient {
     }
 
     // Track event ID and send ack if needed
-    if (eventId !== null && !Number.isNaN(eventId)) {
+    if (eventId !== null && !isNaN(eventId)) {
       if (eventId > this.lastHeardEventId) {
         this.lastHeardEventId = eventId;
         if (eventId - this.lastAcknowledgedEventId > this.ackThreshold) {
@@ -306,10 +305,18 @@ export class UrbitSSEClient {
   }
 
   async poke(params: { app: string; mark: string; json: unknown }) {
-    return await pokeUrbitChannel(this.channelRequestContext(), {
-      ...params,
-      auditContext: "tlon-urbit-poke",
-    });
+    return await pokeUrbitChannel(
+      {
+        baseUrl: this.url,
+        cookie: this.cookie,
+        ship: this.ship,
+        channelId: this.channelId,
+        ssrfPolicy: this.ssrfPolicy,
+        lookupFn: this.lookupFn,
+        fetchImpl: this.fetchImpl,
+      },
+      { ...params, auditContext: "tlon-urbit-poke" },
+    );
   }
 
   async scry(path: string) {
@@ -376,7 +383,7 @@ export class UrbitSSEClient {
 
     this.reconnectAttempts += 1;
     const delay = Math.min(
-      this.reconnectDelay * 2 ** (this.reconnectAttempts - 1),
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
       this.maxReconnectDelay,
     );
 

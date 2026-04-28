@@ -3,10 +3,10 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import {
-  forumTestPlugin,
   runDrySend,
-  workspaceConfig,
-  workspaceTestPlugin,
+  slackConfig,
+  slackTestPlugin,
+  telegramTestPlugin,
 } from "./message-action-runner.test-helpers.js";
 
 describe("runMessageAction send validation", () => {
@@ -14,14 +14,14 @@ describe("runMessageAction send validation", () => {
     setActivePluginRegistry(
       createTestRegistry([
         {
-          pluginId: "workspace",
+          pluginId: "slack",
           source: "test",
-          plugin: workspaceTestPlugin,
+          plugin: slackTestPlugin,
         },
         {
-          pluginId: "forum",
+          pluginId: "telegram",
           source: "test",
-          plugin: forumTestPlugin,
+          plugin: telegramTestPlugin,
         },
       ]),
     );
@@ -34,9 +34,9 @@ describe("runMessageAction send validation", () => {
   it("requires message when no media hint is provided", async () => {
     await expect(
       runDrySend({
-        cfg: workspaceConfig,
+        cfg: slackConfig,
         actionParams: {
-          channel: "workspace",
+          channel: "slack",
           target: "#C12345678",
         },
         toolContext: { currentChannelId: "C12345678" },
@@ -44,19 +44,19 @@ describe("runMessageAction send validation", () => {
     ).rejects.toThrow(/message required/i);
   });
 
-  it("allows send when only presentation payloads are provided", async () => {
+  it("allows send when only shared interactive payloads are provided", async () => {
     const result = await runDrySend({
       cfg: {
         channels: {
-          forum: {
-            botToken: "forum-test",
+          telegram: {
+            botToken: "telegram-test",
           },
         },
       } as OpenClawConfig,
       actionParams: {
-        channel: "forum",
+        channel: "telegram",
         target: "123456",
-        presentation: {
+        interactive: {
           blocks: [
             {
               type: "buttons",
@@ -70,13 +70,13 @@ describe("runMessageAction send validation", () => {
     expect(result.kind).toBe("send");
   });
 
-  it("allows send when only generic presentation blocks are provided", async () => {
+  it("allows send when only Slack blocks are provided", async () => {
     const result = await runDrySend({
-      cfg: workspaceConfig,
+      cfg: slackConfig,
       actionParams: {
-        channel: "workspace",
+        channel: "slack",
         target: "#C12345678",
-        presentation: { blocks: [{ type: "divider" }] },
+        blocks: [{ type: "divider" }],
       },
       toolContext: { currentChannelId: "C12345678" },
     });
@@ -88,7 +88,7 @@ describe("runMessageAction send validation", () => {
     {
       name: "structured poll params",
       actionParams: {
-        channel: "workspace",
+        channel: "slack",
         target: "#C12345678",
         message: "hi",
         pollQuestion: "Ready?",
@@ -98,7 +98,7 @@ describe("runMessageAction send validation", () => {
     {
       name: "string-encoded poll params",
       actionParams: {
-        channel: "workspace",
+        channel: "slack",
         target: "#C12345678",
         message: "hi",
         pollDurationSeconds: "60",
@@ -108,7 +108,7 @@ describe("runMessageAction send validation", () => {
     {
       name: "snake_case poll params",
       actionParams: {
-        channel: "workspace",
+        channel: "slack",
         target: "#C12345678",
         message: "hi",
         poll_question: "Ready?",
@@ -119,7 +119,7 @@ describe("runMessageAction send validation", () => {
     {
       name: "negative poll duration params",
       actionParams: {
-        channel: "workspace",
+        channel: "slack",
         target: "#C12345678",
         message: "hi",
         pollDurationSeconds: -5,
@@ -128,7 +128,7 @@ describe("runMessageAction send validation", () => {
   ])("rejects send actions that include $name", async ({ actionParams }) => {
     await expect(
       runDrySend({
-        cfg: workspaceConfig,
+        cfg: slackConfig,
         actionParams,
         toolContext: { currentChannelId: "C12345678" },
       }),

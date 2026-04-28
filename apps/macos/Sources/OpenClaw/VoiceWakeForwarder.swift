@@ -38,7 +38,6 @@ enum VoiceWakeForwarder {
         var deliver: Bool = true
         var to: String?
         var channel: GatewayAgentChannel = .webchat
-        var voiceWakeTrigger: String?
     }
 
     @discardableResult
@@ -54,8 +53,7 @@ enum VoiceWakeForwarder {
             thinking: options.thinking,
             deliver: deliver,
             to: options.to,
-            channel: options.channel,
-            voiceWakeTrigger: options.voiceWakeTrigger))
+            channel: options.channel))
 
         if result.ok {
             self.logger.info("voice wake forward ok")

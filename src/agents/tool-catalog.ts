@@ -318,10 +318,10 @@ const CORE_TOOL_PROFILES: Record<ToolProfileId, ToolProfilePolicy> = {
     allow: listCoreToolIdsForProfile("minimal"),
   },
   coding: {
-    allow: [...listCoreToolIdsForProfile("coding"), "bundle-mcp"],
+    allow: listCoreToolIdsForProfile("coding"),
   },
   messaging: {
-    allow: [...listCoreToolIdsForProfile("messaging"), "bundle-mcp"],
+    allow: listCoreToolIdsForProfile("messaging"),
   },
   full: {},
 };

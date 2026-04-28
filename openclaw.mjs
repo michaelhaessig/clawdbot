@@ -128,18 +128,13 @@ const buildMissingEntryErrorMessage = async () => {
 const isBareRootHelpInvocation = (argv) =>
   argv.length === 3 && (argv[2] === "--help" || argv[2] === "-h");
 
-const isBrowserHelpInvocation = (argv) =>
-  argv.length === 4 && argv[2] === "browser" && (argv[3] === "--help" || argv[3] === "-h");
-
-const isHelpFastPathDisabled = () =>
-  process.env.OPENCLAW_DISABLE_CLI_STARTUP_HELP_FAST_PATH === "1";
-
-const loadPrecomputedHelpText = (key) => {
+const loadPrecomputedRootHelpText = () => {
   try {
     const raw = readFileSync(new URL("./dist/cli-startup-metadata.json", import.meta.url), "utf8");
     const parsed = JSON.parse(raw);
-    const value = parsed?.[key];
-    return typeof value === "string" && value.length > 0 ? value : null;
+    return typeof parsed?.rootHelpText === "string" && parsed.rootHelpText.length > 0
+      ? parsed.rootHelpText
+      : null;
   } catch {
     return null;
   }
@@ -149,7 +144,7 @@ const tryOutputBareRootHelp = async () => {
   if (!isBareRootHelpInvocation(process.argv)) {
     return false;
   }
-  const precomputed = loadPrecomputedHelpText("rootHelpText");
+  const precomputed = loadPrecomputedRootHelpText();
   if (precomputed) {
     process.stdout.write(precomputed);
     return true;
@@ -171,21 +166,7 @@ const tryOutputBareRootHelp = async () => {
   return false;
 };
 
-const tryOutputBrowserHelp = () => {
-  if (!isBrowserHelpInvocation(process.argv)) {
-    return false;
-  }
-  const precomputed = loadPrecomputedHelpText("browserHelpText");
-  if (!precomputed) {
-    return false;
-  }
-  process.stdout.write(precomputed);
-  return true;
-};
-
-if (!isHelpFastPathDisabled() && (await tryOutputBareRootHelp())) {
-  // OK
-} else if (!isHelpFastPathDisabled() && tryOutputBrowserHelp()) {
+if (await tryOutputBareRootHelp()) {
   // OK
 } else {
   await installProcessWarningFilter();

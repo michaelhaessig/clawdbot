@@ -48,9 +48,9 @@ function listConfigWriteTargetScopes<TChannelId extends string>(
   return [target.scope];
 }
 
-function resolveChannelConfig(
+function resolveChannelConfig<TChannelId extends string>(
   cfg: ConfigWritePolicyConfig,
-  channelId?: string | null,
+  channelId?: TChannelId | null,
 ): ChannelConfigWithAccounts | undefined {
   if (!channelId) {
     return undefined;
@@ -65,9 +65,9 @@ function resolveChannelAccountConfig(
   return resolveAccountEntry(channelConfig.accounts, normalizeAccountId(accountId));
 }
 
-export function resolveChannelConfigWritesShared(params: {
+export function resolveChannelConfigWritesShared<TChannelId extends string>(params: {
   cfg: ConfigWritePolicyConfig;
-  channelId?: string | null;
+  channelId?: TChannelId | null;
   accountId?: string | null;
 }): boolean {
   const channelConfig = resolveChannelConfig(params.cfg, params.channelId);

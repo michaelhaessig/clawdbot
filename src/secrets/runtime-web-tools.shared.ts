@@ -84,38 +84,6 @@ export type RuntimeWebProviderSelectionParams<
   }) => Promise<void>;
 };
 
-function pushInactiveProviderCredentialWarnings<
-  TProvider extends { id: string; requiresCredential?: boolean },
-  TToolConfig extends Record<string, unknown> | undefined,
-  TSource extends string,
-  TMetadata extends RuntimeWebProviderMetadataBase<TSource>,
->(params: {
-  selection: RuntimeWebProviderSelectionParams<TProvider, TToolConfig, TSource, TMetadata>;
-  skipProviderId?: string;
-  details: string;
-}): void {
-  for (const provider of params.selection.providers) {
-    if (provider.id === params.skipProviderId) {
-      continue;
-    }
-    const value = params.selection.readConfiguredCredential({
-      provider,
-      config: params.selection.sourceConfig,
-      toolConfig: params.selection.toolConfig,
-    });
-    if (!params.selection.hasConfiguredSecretRef(value, params.selection.defaults)) {
-      continue;
-    }
-    for (const path of params.selection.inactivePathsForProvider(provider)) {
-      pushInactiveSurfaceWarning({
-        context: params.selection.context,
-        path,
-        details: params.details,
-      });
-    }
-  }
-}
-
 export function ensureObject(
   target: Record<string, unknown>,
   key: string,
@@ -129,9 +97,9 @@ export function ensureObject(
   return next;
 }
 
-export function normalizeKnownProvider(
+export function normalizeKnownProvider<TProvider extends { id: string }>(
   value: unknown,
-  providers: Array<{ id: string }>,
+  providers: TProvider[],
 ): string | undefined {
   const normalized = normalizeOptionalLowercaseString(value);
   if (!normalized) {
@@ -462,23 +430,66 @@ export async function resolveRuntimeWebProviderSelection<
   }
 
   if (params.enabled && !params.configuredProvider && params.metadata.selectedProvider) {
-    pushInactiveProviderCredentialWarnings({
-      selection: params,
-      skipProviderId: params.metadata.selectedProvider,
-      details: `${params.scopePath} auto-detected provider is "${params.metadata.selectedProvider}".`,
-    });
+    for (const provider of params.providers) {
+      if (provider.id === params.metadata.selectedProvider) {
+        continue;
+      }
+      const value = params.readConfiguredCredential({
+        provider,
+        config: params.sourceConfig,
+        toolConfig: params.toolConfig,
+      });
+      if (!params.hasConfiguredSecretRef(value, params.defaults)) {
+        continue;
+      }
+      for (const path of params.inactivePathsForProvider(provider)) {
+        pushInactiveSurfaceWarning({
+          context: params.context,
+          path,
+          details: `${params.scopePath} auto-detected provider is "${params.metadata.selectedProvider}".`,
+        });
+      }
+    }
   } else if (params.toolConfig && !params.enabled) {
-    pushInactiveProviderCredentialWarnings({
-      selection: params,
-      details: `${params.scopePath} is disabled.`,
-    });
+    for (const provider of params.providers) {
+      const value = params.readConfiguredCredential({
+        provider,
+        config: params.sourceConfig,
+        toolConfig: params.toolConfig,
+      });
+      if (!params.hasConfiguredSecretRef(value, params.defaults)) {
+        continue;
+      }
+      for (const path of params.inactivePathsForProvider(provider)) {
+        pushInactiveSurfaceWarning({
+          context: params.context,
+          path,
+          details: `${params.scopePath} is disabled.`,
+        });
+      }
+    }
   }
 
   if (params.enabled && params.toolConfig && params.configuredProvider) {
-    pushInactiveProviderCredentialWarnings({
-      selection: params,
-      skipProviderId: params.configuredProvider,
-      details: `${params.scopePath}.provider is "${params.configuredProvider}".`,
-    });
+    for (const provider of params.providers) {
+      if (provider.id === params.configuredProvider) {
+        continue;
+      }
+      const value = params.readConfiguredCredential({
+        provider,
+        config: params.sourceConfig,
+        toolConfig: params.toolConfig,
+      });
+      if (!params.hasConfiguredSecretRef(value, params.defaults)) {
+        continue;
+      }
+      for (const path of params.inactivePathsForProvider(provider)) {
+        pushInactiveSurfaceWarning({
+          context: params.context,
+          path,
+          details: `${params.scopePath}.provider is "${params.configuredProvider}".`,
+        });
+      }
+    }
   }
 }

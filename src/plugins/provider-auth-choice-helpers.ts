@@ -46,55 +46,26 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-// Guard config patches against prototype-pollution payloads if a patch ever
-// arrives from a JSON-parsed source that preserves these keys.
-const BLOCKED_MERGE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
-
-function sanitizeConfigPatchValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeConfigPatchValue(entry));
-  }
-  if (!isPlainRecord(value)) {
-    return value;
-  }
-
-  const next: Record<string, unknown> = {};
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (BLOCKED_MERGE_KEYS.has(key)) {
-      continue;
-    }
-    next[key] = sanitizeConfigPatchValue(nestedValue);
-  }
-  return next;
-}
-
 export function mergeConfigPatch<T>(base: T, patch: unknown): T {
   if (!isPlainRecord(base) || !isPlainRecord(patch)) {
-    return sanitizeConfigPatchValue(patch) as T;
+    return patch as T;
   }
 
   const next: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(patch)) {
-    if (BLOCKED_MERGE_KEYS.has(key)) {
-      continue;
-    }
     const existing = next[key];
     if (isPlainRecord(existing) && isPlainRecord(value)) {
       next[key] = mergeConfigPatch(existing, value);
     } else {
-      next[key] = sanitizeConfigPatchValue(value);
+      next[key] = value;
     }
   }
   return next as T;
 }
 
-export function applyProviderAuthConfigPatch(
-  cfg: OpenClawConfig,
-  patch: unknown,
-  options?: { replaceDefaultModels?: boolean },
-): OpenClawConfig {
+export function applyProviderAuthConfigPatch(cfg: OpenClawConfig, patch: unknown): OpenClawConfig {
   const merged = mergeConfigPatch(cfg, patch);
-  if (!options?.replaceDefaultModels || !isPlainRecord(patch)) {
+  if (!isPlainRecord(patch)) {
     return merged;
   }
 
@@ -110,8 +81,8 @@ export function applyProviderAuthConfigPatch(
       ...merged.agents,
       defaults: {
         ...merged.agents?.defaults,
-        // Opt-in replacement for migrations that rename/remove model keys.
-        models: sanitizeConfigPatchValue(patchModels) as NonNullable<
+        // Provider auth migrations can intentionally replace the exact allowlist.
+        models: patchModels as NonNullable<
           NonNullable<OpenClawConfig["agents"]>["defaults"]
         >["models"],
       },
@@ -119,21 +90,11 @@ export function applyProviderAuthConfigPatch(
   };
 }
 
-export function applyDefaultModel(
-  cfg: OpenClawConfig,
-  model: string,
-  opts?: { preserveExistingPrimary?: boolean },
-): OpenClawConfig {
+export function applyDefaultModel(cfg: OpenClawConfig, model: string): OpenClawConfig {
   const models = { ...cfg.agents?.defaults?.models };
   models[model] = models[model] ?? {};
 
   const existingModel = cfg.agents?.defaults?.model;
-  const existingPrimary =
-    typeof existingModel === "string"
-      ? existingModel
-      : existingModel && typeof existingModel === "object"
-        ? (existingModel as { primary?: string }).primary
-        : undefined;
   return {
     ...cfg,
     agents: {
@@ -145,7 +106,7 @@ export function applyDefaultModel(
           ...(existingModel && typeof existingModel === "object" && "fallbacks" in existingModel
             ? { fallbacks: (existingModel as { fallbacks?: string[] }).fallbacks }
             : undefined),
-          primary: opts?.preserveExistingPrimary === true ? (existingPrimary ?? model) : model,
+          primary: model,
         },
       },
     },

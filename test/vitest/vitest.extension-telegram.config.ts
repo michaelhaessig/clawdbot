@@ -17,7 +17,6 @@ export function createExtensionTelegramVitestConfig(
     {
       dir: "extensions",
       env,
-      fileParallelism: false,
       name: "extension-telegram",
       passWithNoTests: true,
       setupFiles: ["test/setup.extensions.ts"],

@@ -147,11 +147,6 @@ describe("lmstudio plugin", () => {
                 contextTokens: 8192,
                 reasoning: true,
                 input: ["text", "image"],
-                compat: {
-                  supportsReasoningEffort: true,
-                  supportedReasoningEfforts: ["off", "on"],
-                  reasoningEffortMap: { off: "off", high: "on" },
-                },
               },
               {
                 id: "phi-4",
@@ -178,12 +173,7 @@ describe("lmstudio plugin", () => {
         provider: "lmstudio",
         id: "qwen3-8b-instruct",
         name: "Qwen 3 8B Instruct",
-        compat: {
-          supportsUsageInStreaming: true,
-          supportsReasoningEffort: true,
-          supportedReasoningEfforts: ["off", "on"],
-          reasoningEffortMap: { off: "off", high: "on" },
-        },
+        compat: { supportsUsageInStreaming: true },
         contextWindow: 32768,
         contextTokens: 8192,
         reasoning: true,

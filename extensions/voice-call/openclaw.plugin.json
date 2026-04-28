@@ -7,7 +7,6 @@
       "TELNYX_PUBLIC_KEY",
       "TWILIO_ACCOUNT_SID",
       "TWILIO_AUTH_TOKEN",
-      "TWILIO_FROM_NUMBER",
       "PLIVO_AUTH_ID",
       "PLIVO_AUTH_TOKEN",
       "NGROK_AUTHTOKEN",
@@ -203,7 +202,7 @@
             "type": "string"
           },
           "authToken": {
-            "type": ["string", "object"]
+            "type": "string"
           }
         }
       },
@@ -402,10 +401,6 @@
           "instructions": {
             "type": "string"
           },
-          "toolPolicy": {
-            "type": "string",
-            "enum": ["safe-read-only", "owner", "none"]
-          },
           "tools": {
             "type": "array",
             "items": {
@@ -521,7 +516,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "apiKey": {
-                    "type": ["string", "object"]
+                    "type": "string"
                   },
                   "baseUrl": {
                     "type": "string"
@@ -547,7 +542,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "apiKey": {
-                    "type": ["string", "object"]
+                    "type": "string"
                   },
                   "baseUrl": {
                     "type": "string"
@@ -682,7 +677,7 @@
               "type": "object",
               "properties": {
                 "apiKey": {
-                  "type": ["string", "object"]
+                  "type": "string"
                 }
               },
               "additionalProperties": true
@@ -718,12 +713,6 @@
     }
   },
   "configContracts": {
-    "compatibilityMigrationPaths": ["plugins.entries.voice-call.config"],
-    "secretInputs": {
-      "paths": [
-        { "path": "twilio.authToken", "expected": "string" },
-        { "path": "tts.providers.*.apiKey", "expected": "string" }
-      ]
-    }
+    "compatibilityMigrationPaths": ["plugins.entries.voice-call.config"]
   }
 }

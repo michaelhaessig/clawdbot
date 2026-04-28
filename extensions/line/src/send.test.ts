@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   pushMessageMock,
@@ -6,12 +6,11 @@ const {
   showLoadingAnimationMock,
   getProfileMock,
   MessagingApiClientMock,
-  requireRuntimeConfigMock,
+  loadConfigMock,
   resolveLineAccountMock,
   resolveLineChannelAccessTokenMock,
   recordChannelActivityMock,
   logVerboseMock,
-  resolvePinnedHostnameWithPolicyMock,
 } = vi.hoisted(() => {
   const pushMessageMock = vi.fn();
   const replyMessageMock = vi.fn();
@@ -25,24 +24,22 @@ const {
       getProfile: getProfileMock,
     };
   });
-  const requireRuntimeConfigMock = vi.fn((cfg: unknown) => cfg ?? {});
+  const loadConfigMock = vi.fn(() => ({}));
   const resolveLineAccountMock = vi.fn(() => ({ accountId: "default" }));
   const resolveLineChannelAccessTokenMock = vi.fn(() => "line-token");
   const recordChannelActivityMock = vi.fn();
   const logVerboseMock = vi.fn();
-  const resolvePinnedHostnameWithPolicyMock = vi.fn();
   return {
     pushMessageMock,
     replyMessageMock,
     showLoadingAnimationMock,
     getProfileMock,
     MessagingApiClientMock,
-    requireRuntimeConfigMock,
+    loadConfigMock,
     resolveLineAccountMock,
     resolveLineChannelAccessTokenMock,
     recordChannelActivityMock,
     logVerboseMock,
-    resolvePinnedHostnameWithPolicyMock,
   };
 });
 
@@ -50,8 +47,8 @@ vi.mock("@line/bot-sdk", () => ({
   messagingApi: { MessagingApiClient: MessagingApiClientMock },
 }));
 
-vi.mock("openclaw/plugin-sdk/plugin-config-runtime", () => ({
-  requireRuntimeConfig: requireRuntimeConfigMock,
+vi.mock("openclaw/plugin-sdk/config-runtime", () => ({
+  loadConfig: loadConfigMock,
 }));
 
 vi.mock("./accounts.js", () => ({
@@ -76,39 +73,21 @@ vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  resolvePinnedHostnameWithPolicy: resolvePinnedHostnameWithPolicyMock,
-}));
-
 let sendModule: typeof import("./send.js");
 
-const LINE_TEST_CFG = {
-  channels: {
-    line: {
-      accounts: {
-        default: {},
-      },
-    },
-  },
-};
-
 describe("LINE send helpers", () => {
-  beforeAll(async () => {
-    sendModule = await import("./send.js");
-  });
-
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     pushMessageMock.mockReset();
     replyMessageMock.mockReset();
     showLoadingAnimationMock.mockReset();
     getProfileMock.mockReset();
     MessagingApiClientMock.mockReset();
-    requireRuntimeConfigMock.mockClear();
+    loadConfigMock.mockReset();
     resolveLineAccountMock.mockReset();
     resolveLineChannelAccessTokenMock.mockReset();
     recordChannelActivityMock.mockReset();
     logVerboseMock.mockReset();
-    resolvePinnedHostnameWithPolicyMock.mockReset();
 
     MessagingApiClientMock.mockImplementation(function () {
       return {
@@ -118,16 +97,13 @@ describe("LINE send helpers", () => {
         getProfile: getProfileMock,
       };
     });
-    requireRuntimeConfigMock.mockImplementation((cfg: unknown) => cfg ?? LINE_TEST_CFG);
+    loadConfigMock.mockReturnValue({});
     resolveLineAccountMock.mockReturnValue({ accountId: "default" });
     resolveLineChannelAccessTokenMock.mockReturnValue("line-token");
-    resolvePinnedHostnameWithPolicyMock.mockResolvedValue({
-      hostname: "example.com",
-      addresses: ["93.184.216.34"],
-    });
     pushMessageMock.mockResolvedValue({});
     replyMessageMock.mockResolvedValue({});
     showLoadingAnimationMock.mockResolvedValue({});
+    sendModule = await import("./send.js");
   });
 
   afterEach(() => {
@@ -146,7 +122,7 @@ describe("LINE send helpers", () => {
       "line:user:U123",
       "https://example.com/original.jpg",
       undefined,
-      { cfg: LINE_TEST_CFG, verbose: true },
+      { verbose: true },
     );
 
     expect(pushMessageMock).toHaveBeenCalledWith({
@@ -170,7 +146,6 @@ describe("LINE send helpers", () => {
 
   it("replies when reply token is provided", async () => {
     const result = await sendModule.sendMessageLine("line:group:C1", "Hello", {
-      cfg: LINE_TEST_CFG,
       replyToken: "reply-token",
       mediaUrl: "https://example.com/media.jpg",
       verbose: true,
@@ -198,7 +173,6 @@ describe("LINE send helpers", () => {
 
   it("sends video with explicit image preview URL", async () => {
     await sendModule.sendMessageLine("line:user:U100", "Video", {
-      cfg: LINE_TEST_CFG,
       mediaUrl: "https://example.com/video.mp4",
       mediaKind: "video",
       previewImageUrl: "https://example.com/preview.jpg",
@@ -225,31 +199,14 @@ describe("LINE send helpers", () => {
   it("throws when video preview URL is missing", async () => {
     await expect(
       sendModule.sendMessageLine("line:user:U200", "Video", {
-        cfg: LINE_TEST_CFG,
         mediaUrl: "https://example.com/video.mp4",
         mediaKind: "video",
       }),
     ).rejects.toThrow(/require previewimageurl/i);
   });
 
-  it("blocks private-network media URLs before calling LINE", async () => {
-    resolvePinnedHostnameWithPolicyMock.mockRejectedValueOnce(
-      new Error("SSRF blocked private network target"),
-    );
-
-    await expect(
-      sendModule.sendMessageLine("line:user:U200", "Image", {
-        cfg: LINE_TEST_CFG,
-        mediaUrl: "https://127.0.0.1/image.jpg",
-      }),
-    ).rejects.toThrow(/private network/i);
-
-    expect(pushMessageMock).not.toHaveBeenCalled();
-  });
-
   it("omits trackingId for non-user destinations", async () => {
     await sendModule.sendMessageLine("line:group:C100", "Video", {
-      cfg: LINE_TEST_CFG,
       mediaUrl: "https://example.com/video.mp4",
       mediaKind: "video",
       previewImageUrl: "https://example.com/preview.jpg",
@@ -273,7 +230,7 @@ describe("LINE send helpers", () => {
   });
 
   it("throws when push messages are empty", async () => {
-    await expect(sendModule.pushMessagesLine("U123", [], { cfg: LINE_TEST_CFG })).rejects.toThrow(
+    await expect(sendModule.pushMessagesLine("U123", [])).rejects.toThrow(
       "Message must be non-empty for LINE sends",
     );
   });
@@ -290,9 +247,7 @@ describe("LINE send helpers", () => {
     pushMessageMock.mockRejectedValueOnce(err);
 
     await expect(
-      sendModule.pushMessagesLine("U999", [{ type: "text", text: "hello" }], {
-        cfg: LINE_TEST_CFG,
-      }),
+      sendModule.pushMessagesLine("U999", [{ type: "text", text: "hello" }]),
     ).rejects.toThrow("LINE push failed");
 
     expect(logVerboseMock).toHaveBeenCalledWith(
@@ -306,8 +261,8 @@ describe("LINE send helpers", () => {
       pictureUrl: "https://example.com/peter.jpg",
     });
 
-    const first = await sendModule.getUserProfile("U-cache", { cfg: LINE_TEST_CFG });
-    const second = await sendModule.getUserProfile("U-cache", { cfg: LINE_TEST_CFG });
+    const first = await sendModule.getUserProfile("U-cache");
+    const second = await sendModule.getUserProfile("U-cache");
 
     expect(first).toEqual({
       displayName: "Peter",
@@ -320,9 +275,7 @@ describe("LINE send helpers", () => {
   it("continues when loading animation is unsupported", async () => {
     showLoadingAnimationMock.mockRejectedValueOnce(new Error("unsupported"));
 
-    await expect(
-      sendModule.showLoadingAnimation("line:room:R1", { cfg: LINE_TEST_CFG }),
-    ).resolves.toBeUndefined();
+    await expect(sendModule.showLoadingAnimation("line:room:R1")).resolves.toBeUndefined();
 
     expect(logVerboseMock).toHaveBeenCalledWith(
       expect.stringContaining("line: loading animation failed (non-fatal)"),
@@ -334,7 +287,6 @@ describe("LINE send helpers", () => {
       "U-quick",
       "Pick one",
       Array.from({ length: 20 }, (_, index) => `Choice ${index + 1}`),
-      { cfg: LINE_TEST_CFG },
     );
 
     expect(pushMessageMock).toHaveBeenCalledTimes(1);

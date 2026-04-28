@@ -115,21 +115,16 @@ describe("runBlueBubblesCatchup", () => {
 
     let fetchCount = 0;
     let processCount = 0;
-    let releaseFetch: (() => void) | undefined;
-    let fetchStartedResolve: (() => void) | undefined;
-    const fetchStarted = new Promise<void>((resolve) => {
-      fetchStartedResolve = resolve;
-    });
+    let resolveFetch: (() => void) | null = null;
 
     const call1 = runBlueBubblesCatchup(makeTarget(), {
       now: () => now,
       fetchMessages: async () => {
         fetchCount++;
-        fetchStartedResolve?.();
         // Block until we fire the second call, so we can verify it
         // coalesces rather than starting a new run.
         await new Promise<void>((resolve) => {
-          releaseFetch = resolve;
+          resolveFetch = resolve;
         });
         return {
           resolved: true,
@@ -141,9 +136,8 @@ describe("runBlueBubblesCatchup", () => {
       },
     });
 
-    // Wait for call1 to enter fetchMessages, then fire call2. A fixed
-    // sleep is load-sensitive and can leave call1 permanently blocked.
-    await fetchStarted;
+    // Wait a tick for call1 to enter fetchMessages, then fire call2.
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
     const call2 = runBlueBubblesCatchup(makeTarget(), {
       now: () => now,
       fetchMessages: async () => {
@@ -155,7 +149,7 @@ describe("runBlueBubblesCatchup", () => {
       },
     });
 
-    releaseFetch?.();
+    resolveFetch!();
     const [r1, r2] = await Promise.all([call1, call2]);
 
     expect(fetchCount).toBe(1); // second call coalesced, didn't re-fetch

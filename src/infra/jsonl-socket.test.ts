@@ -20,11 +20,6 @@ async function listenOnSocket(server: net.Server, socketPath: string): Promise<b
   }
 }
 
-function acceptDoneValue(msg: unknown): number | null | undefined {
-  const value = msg as { type?: string; value?: number };
-  return value.type === "done" ? (value.value ?? null) : undefined;
-}
-
 describe.runIf(process.platform !== "win32")("requestJsonlSocket", () => {
   it("ignores malformed and non-accepted lines until one is accepted", async () => {
     await withTempDir({ prefix: "openclaw-jsonl-socket-" }, async (dir) => {
@@ -47,7 +42,10 @@ describe.runIf(process.platform !== "win32")("requestJsonlSocket", () => {
             socketPath,
             requestLine: '{"hello":"world"}',
             timeoutMs: 500,
-            accept: acceptDoneValue,
+            accept: (msg) => {
+              const value = msg as { type?: string; value?: number };
+              return value.type === "done" ? (value.value ?? null) : undefined;
+            },
           }),
         ).resolves.toBe(42);
       } finally {
@@ -81,7 +79,10 @@ describe.runIf(process.platform !== "win32")("requestJsonlSocket", () => {
             socketPath,
             requestLine: '{"hello":"world"}',
             timeoutMs: 500,
-            accept: acceptDoneValue,
+            accept: (msg) => {
+              const value = msg as { type?: string; value?: number };
+              return value.type === "done" ? (value.value ?? null) : undefined;
+            },
           }),
         ).resolves.toBe(7);
         expect(receivedBuffer).toBe('{"hello":"world"}\n');

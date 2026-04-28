@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { importFreshModule } from "../../../test/helpers/import-fresh.js";
 import type { ClawdbotConfig } from "../runtime-api.js";
 
 const createFeishuClientMock = vi.hoisted(() => vi.fn());
@@ -8,15 +7,13 @@ vi.mock("./client.js", () => ({
   createFeishuClient: createFeishuClientMock,
 }));
 
+const freshDirectoryModulePath = "./directory.js?directory-test";
 const {
   listFeishuDirectoryGroups,
   listFeishuDirectoryGroupsLive,
   listFeishuDirectoryPeers,
   listFeishuDirectoryPeersLive,
-} = await importFreshModule<typeof import("./directory.js")>(
-  import.meta.url,
-  "./directory.js?directory-test",
-);
+} = await import(freshDirectoryModulePath);
 
 function makeStaticCfg(): ClawdbotConfig {
   return {

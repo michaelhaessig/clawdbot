@@ -69,14 +69,6 @@ vi.mock("./targets.js", () => ({
   resolveSessionDeliveryTarget: mocks.resolveSessionDeliveryTarget,
 }));
 
-vi.mock("../../utils/message-channel.js", () => ({
-  INTERNAL_MESSAGE_CHANNEL: "webchat",
-  isDeliverableMessageChannel: (channel: string) => ["directchat", "workspace"].includes(channel),
-  isGatewayMessageChannel: (channel: string) =>
-    ["directchat", "workspace", "webchat"].includes(channel),
-  normalizeMessageChannel: (value: string) => value.trim().toLowerCase(),
-}));
-
 import type { OpenClawConfig } from "../../config/config.js";
 let resolveAgentDeliveryPlan: typeof import("./agent-delivery.js").resolveAgentDeliveryPlan;
 let resolveAgentOutboundTarget: typeof import("./agent-delivery.js").resolveAgentOutboundTarget;
@@ -101,7 +93,7 @@ describe("agent delivery helpers", () => {
         sessionEntry: {
           sessionId: "s1",
           updatedAt: 1,
-          deliveryContext: { channel: "directchat", to: "+1555", accountId: "work" },
+          deliveryContext: { channel: "whatsapp", to: "+1555", accountId: "work" },
         },
         requestedChannel: "last",
         explicitTo: undefined,
@@ -109,7 +101,7 @@ describe("agent delivery helpers", () => {
         wantsDelivery: true,
       },
       expected: {
-        resolvedChannel: "directchat",
+        resolvedChannel: "whatsapp",
         resolvedTo: "+1555",
         resolvedAccountId: "work",
         deliveryTargetMode: "implicit",
@@ -133,17 +125,17 @@ describe("agent delivery helpers", () => {
         sessionEntry: {
           sessionId: "s4",
           updatedAt: 4,
-          deliveryContext: { channel: "workspace", to: "U_WRONG", accountId: "wrong" },
+          deliveryContext: { channel: "slack", to: "U_WRONG", accountId: "wrong" },
         },
         requestedChannel: "last",
-        turnSourceChannel: "directchat",
+        turnSourceChannel: "whatsapp",
         turnSourceTo: "+17775550123",
         turnSourceAccountId: "work",
         accountId: undefined,
         wantsDelivery: true,
       },
       expected: {
-        resolvedChannel: "directchat",
+        resolvedChannel: "whatsapp",
         resolvedTo: "+17775550123",
         resolvedAccountId: "work",
       },
@@ -153,15 +145,15 @@ describe("agent delivery helpers", () => {
         sessionEntry: {
           sessionId: "s5",
           updatedAt: 5,
-          deliveryContext: { channel: "workspace", to: "U_WRONG" },
+          deliveryContext: { channel: "slack", to: "U_WRONG" },
         },
         requestedChannel: "last",
-        turnSourceChannel: "directchat",
+        turnSourceChannel: "whatsapp",
         accountId: undefined,
         wantsDelivery: true,
       },
       expected: {
-        resolvedChannel: "directchat",
+        resolvedChannel: "whatsapp",
         resolvedTo: undefined,
       },
     },
@@ -175,7 +167,7 @@ describe("agent delivery helpers", () => {
       sessionEntry: {
         sessionId: "s2",
         updatedAt: 2,
-        deliveryContext: { channel: "directchat" },
+        deliveryContext: { channel: "whatsapp" },
       },
       requestedChannel: "last",
       explicitTo: undefined,
@@ -199,7 +191,7 @@ describe("agent delivery helpers", () => {
       sessionEntry: {
         sessionId: "s3",
         updatedAt: 3,
-        deliveryContext: { channel: "directchat", to: "+1555" },
+        deliveryContext: { channel: "whatsapp", to: "+1555" },
       },
       requestedChannel: "last",
       explicitTo: "+1555",

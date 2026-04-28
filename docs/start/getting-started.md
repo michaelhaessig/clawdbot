@@ -3,8 +3,10 @@ summary: "Get OpenClaw installed and run your first chat in minutes."
 read_when:
   - First time setup from zero
   - You want the fastest path to a working chat
-title: "Getting started"
+title: "Getting Started"
 ---
+
+# Getting Started
 
 Install OpenClaw, run onboarding, and chat with your AI assistant — all in
 about 5 minutes. By the end you will have a running Gateway, configured auth,
@@ -144,9 +146,3 @@ openclaw dashboard
 
 Full reference: [Environment variables](/help/environment).
 </Accordion>
-
-## Related
-
-- [Install overview](/install)
-- [Channels overview](/channels)
-- [Setup](/start/setup)

@@ -1,7 +1,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { vi } from "vitest";
 import { formatEnvelopeTimestamp } from "../../../test/helpers/envelope-timestamp.js";
 import type { MockBaileysSocket } from "../../../test/mocks/baileys.js";
@@ -9,7 +9,6 @@ import { createMockBaileys } from "../../../test/mocks/baileys.js";
 
 // Use globalThis to store the mock config so it survives vi.mock hoisting
 const CONFIG_KEY = Symbol.for("openclaw:testConfigMock");
-const SOURCE_CONFIG_KEY = Symbol.for("openclaw:testSourceConfigMock");
 const DEFAULT_CONFIG = {
   channels: {
     whatsapp: {
@@ -27,22 +26,13 @@ const DEFAULT_CONFIG = {
 if (!(globalThis as Record<symbol, unknown>)[CONFIG_KEY]) {
   (globalThis as Record<symbol, unknown>)[CONFIG_KEY] = () => DEFAULT_CONFIG;
 }
-if (!(globalThis as Record<symbol, unknown>)[SOURCE_CONFIG_KEY]) {
-  (globalThis as Record<symbol, unknown>)[SOURCE_CONFIG_KEY] = () => loadConfigMock();
-}
 
 export function setLoadConfigMock(fn: unknown) {
   (globalThis as Record<symbol, unknown>)[CONFIG_KEY] = typeof fn === "function" ? fn : () => fn;
 }
 
-export function setRuntimeConfigSourceSnapshotMock(fn: unknown) {
-  (globalThis as Record<symbol, unknown>)[SOURCE_CONFIG_KEY] =
-    typeof fn === "function" ? fn : () => fn;
-}
-
 export function resetLoadConfigMock() {
   (globalThis as Record<symbol, unknown>)[CONFIG_KEY] = () => DEFAULT_CONFIG;
-  (globalThis as Record<symbol, unknown>)[SOURCE_CONFIG_KEY] = () => loadConfigMock();
 }
 
 function resolveStorePathFallback(store?: string, opts?: { agentId?: string }) {
@@ -66,14 +56,6 @@ function loadConfigMock() {
     return getter();
   }
   return DEFAULT_CONFIG;
-}
-
-function loadRuntimeConfigSourceSnapshotMock() {
-  const getter = (globalThis as Record<symbol, unknown>)[SOURCE_CONFIG_KEY];
-  if (typeof getter === "function") {
-    return getter();
-  }
-  return loadConfigMock();
 }
 
 async function updateLastRouteMock(params: {
@@ -221,39 +203,6 @@ function formatInboundEnvelopeMock(params: TestInboundEnvelopeParams) {
     parts.push(timestamp);
   }
   return `[${parts.join(" ")}] ${body}`;
-}
-
-function createChannelReplyPipelineMock() {
-  return {
-    onModelSelected: undefined,
-    responsePrefix: undefined,
-  };
-}
-
-function normalizePhoneLikeToE164(value: string) {
-  const digits = value.replace(/\D+/g, "");
-  return digits ? `+${digits}` : null;
-}
-
-function resolveIdentityNamePrefixMock(
-  cfg: { messages?: { responsePrefix?: string } },
-  _agentId: string,
-) {
-  return cfg.messages?.responsePrefix;
-}
-
-function resolveSendableOutboundReplyPartsMock(payload: Record<string, unknown>) {
-  return {
-    text: typeof payload.text === "string" ? payload.text : "",
-    hasMedia:
-      typeof payload.mediaUrl === "string" ||
-      typeof payload.mediaPath === "string" ||
-      typeof payload.fileUrl === "string",
-  };
-}
-
-function toLocationContextMock(location: unknown) {
-  return { Location: location };
 }
 
 function createBufferedDispatchReplyMock() {
@@ -405,8 +354,6 @@ function resolveChannelGroupRequireMentionMock(params: {
 }
 
 vi.mock("./auto-reply/config.runtime.js", () => ({
-  getRuntimeConfig: loadConfigMock,
-  getRuntimeConfigSourceSnapshot: loadRuntimeConfigSourceSnapshotMock,
   loadConfig: loadConfigMock,
   updateLastRoute: updateLastRouteMock,
   loadSessionStore: loadSessionStoreMock,
@@ -439,20 +386,33 @@ vi.mock("./inbound/runtime-api.js", () => ({
 }));
 
 vi.mock("./auto-reply/monitor/inbound-dispatch.runtime.js", () => ({
-  createChannelReplyPipeline: createChannelReplyPipelineMock,
+  createChannelReplyPipeline: () => ({
+    onModelSelected: undefined,
+    responsePrefix: undefined,
+  }),
   dispatchReplyWithBufferedBlockDispatcher: createBufferedDispatchReplyMock(),
   finalizeInboundContext: <T>(ctx: T) => ctx,
   getAgentScopedMediaLocalRoots: () => [] as string[],
-  jidToE164: normalizePhoneLikeToE164,
+  jidToE164: (jid: string) => {
+    const digits = jid.replace(/\D+/g, "");
+    return digits ? `+${digits}` : null;
+  },
   logVerbose: (_msg: string) => undefined,
   resolveChunkMode: () => undefined,
-  resolveIdentityNamePrefix: resolveIdentityNamePrefixMock,
+  resolveIdentityNamePrefix: (cfg: { messages?: { responsePrefix?: string } }, _agentId: string) =>
+    cfg.messages?.responsePrefix,
   resolveInboundLastRouteSessionKey: (params: { sessionKey: string }) => params.sessionKey,
   resolveMarkdownTableMode: () => undefined,
-  resolveSendableOutboundReplyParts: resolveSendableOutboundReplyPartsMock,
+  resolveSendableOutboundReplyParts: (payload: Record<string, unknown>) => ({
+    text: typeof payload.text === "string" ? payload.text : "",
+    hasMedia:
+      typeof payload.mediaUrl === "string" ||
+      typeof payload.mediaPath === "string" ||
+      typeof payload.fileUrl === "string",
+  }),
   resolveTextChunkLimit: () => 64_000,
   shouldLogVerbose: () => false,
-  toLocationContext: toLocationContextMock,
+  toLocationContext: (location: unknown) => ({ Location: location }),
 }));
 
 vi.mock("./auto-reply/monitor/runtime-api.js", () => ({
@@ -468,19 +428,29 @@ vi.mock("./auto-reply/monitor/runtime-api.js", () => ({
       ? `Chat messages since your last reply:\n${rendered}\n\n${params.currentMessage}`
       : params.currentMessage;
   },
-  createChannelReplyPipeline: createChannelReplyPipelineMock,
+  createChannelReplyPipeline: () => ({
+    onModelSelected: undefined,
+    responsePrefix: undefined,
+  }),
   dispatchReplyWithBufferedBlockDispatcher: createBufferedDispatchReplyMock(),
   finalizeInboundContext: <T>(ctx: T) => ctx,
   formatInboundEnvelope: formatInboundEnvelopeMock,
   getAgentScopedMediaLocalRoots: () => [] as string[],
-  jidToE164: normalizePhoneLikeToE164,
+  jidToE164: (jid: string) => {
+    const digits = jid.replace(/\D+/g, "");
+    return digits ? `+${digits}` : null;
+  },
   logVerbose: (_msg: string) => undefined,
-  normalizeE164: normalizePhoneLikeToE164,
+  normalizeE164: (value: string) => {
+    const digits = value.replace(/\D+/g, "");
+    return digits ? `+${digits}` : null;
+  },
   readStoreAllowFromForDmPolicy: async () => [] as string[],
   recordSessionMetaFromInbound: async () => undefined,
   resolveChannelContextVisibilityMode: resolveChannelContextVisibilityModeMock,
   resolveChunkMode: () => undefined,
-  resolveIdentityNamePrefix: resolveIdentityNamePrefixMock,
+  resolveIdentityNamePrefix: (cfg: { messages?: { responsePrefix?: string } }, _agentId: string) =>
+    cfg.messages?.responsePrefix,
   resolveInboundLastRouteSessionKey: (params: { sessionKey: string }) => params.sessionKey,
   resolveInboundSessionEnvelopeContext: (params: {
     cfg: { session?: { store?: string } } & Parameters<typeof resolveEnvelopeOptionsMock>[0];
@@ -499,17 +469,26 @@ vi.mock("./auto-reply/monitor/runtime-api.js", () => ({
     return first ? params.normalizeEntry(first) : null;
   },
   resolveDmGroupAccessWithCommandGate: () => ({ commandAuthorized: true }),
-  resolveSendableOutboundReplyParts: resolveSendableOutboundReplyPartsMock,
+  resolveSendableOutboundReplyParts: (payload: Record<string, unknown>) => ({
+    text: typeof payload.text === "string" ? payload.text : "",
+    hasMedia:
+      typeof payload.mediaUrl === "string" ||
+      typeof payload.mediaPath === "string" ||
+      typeof payload.fileUrl === "string",
+  }),
   resolveTextChunkLimit: () => 64_000,
   shouldComputeCommandAuthorized: () => false,
   shouldLogVerbose: () => false,
-  toLocationContext: toLocationContextMock,
+  toLocationContext: (location: unknown) => ({ Location: location }),
 }));
 
 vi.mock("./auto-reply/monitor/group-gating.runtime.js", () => ({
   hasControlCommand: (body: string) => body.trim().startsWith("/"),
   implicitMentionKindWhen: (kind: string, enabled: boolean) => (enabled ? [kind] : []),
-  normalizeE164: normalizePhoneLikeToE164,
+  normalizeE164: (value: string) => {
+    const digits = value.replace(/\D+/g, "");
+    return digits ? `+${digits}` : null;
+  },
   parseActivationCommand: (body: string) => ({
     hasCommand: body.trim().startsWith("/"),
   }),
@@ -611,8 +590,9 @@ vi.mock("./session.runtime.js", () => {
   };
 });
 
-vi.mock("./qr-terminal.js", () => ({
-  renderQrTerminal: vi.fn(async () => "ASCII-QR"),
+vi.mock("qrcode-terminal", () => ({
+  default: { generate: vi.fn() },
+  generate: vi.fn(),
 }));
 
 export const baileys = await import("./session.runtime.js");

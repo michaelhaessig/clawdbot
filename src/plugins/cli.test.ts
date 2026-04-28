@@ -30,7 +30,6 @@ vi.mock("../config/plugin-auto-enable.js", () => ({
 }));
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: (...args: unknown[]) => mocks.loadConfig(...args),
   loadConfig: (...args: unknown[]) => mocks.loadConfig(...args),
   readConfigFileSnapshot: (...args: unknown[]) => mocks.readConfigFileSnapshot(...args),
 }));
@@ -182,21 +181,6 @@ describe("registerPluginCliCommands", () => {
     );
   });
 
-  it("injects gateway-backed node runtime into plugin CLI commands", async () => {
-    await registerPluginCliCommands(createProgram(), {} as OpenClawConfig);
-
-    expect(mocks.loadOpenClawPlugins).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeOptions: {
-          nodes: {
-            list: expect.any(Function),
-            invoke: expect.any(Function),
-          },
-        },
-      }),
-    );
-  });
-
   it("loads plugin CLI commands from the auto-enabled config snapshot", async () => {
     const { rawConfig, autoEnabledConfig } = createAutoEnabledCliFixture();
     mocks.applyPluginAutoEnable.mockReturnValue({
@@ -314,8 +298,6 @@ describe("registerPluginCliCommands", () => {
         autoEnabledReasons: {
           demo: ["demo configured"],
         },
-        activate: false,
-        cache: false,
       }),
     );
     expect(mocks.loadOpenClawPluginCliRegistry).not.toHaveBeenCalled();

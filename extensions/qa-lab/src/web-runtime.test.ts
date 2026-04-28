@@ -18,12 +18,13 @@ const {
 } = vi.hoisted(() => ({
   bodyLocator: {
     waitFor: vi.fn(async () => undefined),
-    textContent: vi.fn(async () => "hello from body"),
+    innerText: vi.fn(async () => "hello from body"),
   },
   browserClose: vi.fn(async () => undefined),
   contextClose: vi.fn(async () => undefined),
   contextNewPage: vi.fn(),
   goto: vi.fn(async () => undefined),
+  innerText: vi.fn(async () => "hello from body"),
   launch: vi.fn(),
   locatorFill: vi.fn(async () => undefined),
   locatorPress: vi.fn(async () => undefined),
@@ -53,7 +54,6 @@ import {
 
 beforeEach(async () => {
   const page = {
-    on: vi.fn(),
     goto,
     title: pageTitle,
     url: pageUrl,

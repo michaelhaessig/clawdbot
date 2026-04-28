@@ -35,23 +35,6 @@ describe("matrix doctor", () => {
     vi.clearAllMocks();
   });
 
-  function normalizeMatrixDmConfig(dm: Record<string, unknown>) {
-    const normalize = matrixDoctor.normalizeCompatibilityConfig;
-    expect(normalize).toBeDefined();
-    if (!normalize) {
-      throw new Error("expected Matrix doctor compatibility normalizer");
-    }
-    return normalize({
-      cfg: {
-        channels: {
-          matrix: {
-            dm,
-          },
-        },
-      } as never,
-    });
-  }
-
   it("formats state and crypto previews", () => {
     expect(
       formatMatrixLegacyStatePreview({
@@ -300,10 +283,24 @@ describe("matrix doctor", () => {
     // so they must not count toward the allowFrom population check — otherwise
     // the migration would emit policy="allowlist" with an effectively empty
     // allowlist, silently blocking all DMs.
-    const result = normalizeMatrixDmConfig({
-      enabled: true,
-      policy: "trusted",
-      allowFrom: ["   ", "\t", ""],
+    const normalize = matrixDoctor.normalizeCompatibilityConfig;
+    expect(normalize).toBeDefined();
+    if (!normalize) {
+      return;
+    }
+
+    const result = normalize({
+      cfg: {
+        channels: {
+          matrix: {
+            dm: {
+              enabled: true,
+              policy: "trusted",
+              allowFrom: ["   ", "\t", ""],
+            },
+          },
+        },
+      } as never,
     });
 
     const matrixDm = (result.config.channels?.matrix as { dm?: { policy?: string } })?.dm;
@@ -316,9 +313,23 @@ describe("matrix doctor", () => {
   });
 
   it("migrates legacy channels.matrix.dm.policy 'trusted' without allowFrom to 'pairing'", () => {
-    const result = normalizeMatrixDmConfig({
-      enabled: true,
-      policy: "trusted",
+    const normalize = matrixDoctor.normalizeCompatibilityConfig;
+    expect(normalize).toBeDefined();
+    if (!normalize) {
+      return;
+    }
+
+    const result = normalize({
+      cfg: {
+        channels: {
+          matrix: {
+            dm: {
+              enabled: true,
+              policy: "trusted",
+            },
+          },
+        },
+      } as never,
     });
 
     const matrixDm = (result.config.channels?.matrix as { dm?: { policy?: string } })?.dm;

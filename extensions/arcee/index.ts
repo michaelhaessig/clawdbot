@@ -5,6 +5,7 @@ import {
   type ProviderCatalogContext,
 } from "openclaw/plugin-sdk/provider-catalog-shared";
 import { OPENAI_COMPATIBLE_REPLAY_HOOKS } from "openclaw/plugin-sdk/provider-model-shared";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/provider-onboard";
 import {
   applyArceeConfig,
   applyArceeOpenRouterConfig,
@@ -14,7 +15,7 @@ import {
 import {
   buildArceeProvider,
   buildArceeOpenRouterProvider,
-  normalizeArceeOpenRouterBaseUrl,
+  isArceeOpenRouterBaseUrl,
   toArceeOpenRouterModelId,
 } from "./provider-catalog.js";
 
@@ -69,6 +70,13 @@ function buildArceeAuthMethods() {
   ];
 }
 
+function readConfiguredArceeCatalogEntries(config: OpenClawConfig | undefined) {
+  return readConfiguredProviderCatalogEntries({
+    config,
+    providerId: PROVIDER_ID,
+  });
+}
+
 async function resolveArceeCatalog(ctx: ProviderCatalogContext) {
   const directKey = ctx.resolveProviderApiKey(PROVIDER_ID).apiKey;
   if (directKey) {
@@ -86,18 +94,12 @@ async function resolveArceeCatalog(ctx: ProviderCatalogContext) {
 function normalizeArceeResolvedModel<T extends { baseUrl?: string; id: string }>(
   model: T,
 ): T | undefined {
-  const normalizedBaseUrl = normalizeArceeOpenRouterBaseUrl(model.baseUrl);
-  if (!normalizedBaseUrl) {
-    return undefined;
-  }
-  const normalizedId = toArceeOpenRouterModelId(model.id);
-  if (normalizedId === model.id && normalizedBaseUrl === model.baseUrl) {
+  if (!isArceeOpenRouterBaseUrl(model.baseUrl)) {
     return undefined;
   }
   return {
     ...model,
-    id: normalizedId,
-    baseUrl: normalizedBaseUrl,
+    id: toArceeOpenRouterModelId(model.id),
   };
 }
 
@@ -115,27 +117,8 @@ export default definePluginEntry({
       catalog: {
         run: resolveArceeCatalog,
       },
-      augmentModelCatalog: ({ config }) =>
-        readConfiguredProviderCatalogEntries({
-          config,
-          providerId: PROVIDER_ID,
-        }),
-      normalizeConfig: ({ providerConfig }) => {
-        const normalizedBaseUrl = normalizeArceeOpenRouterBaseUrl(providerConfig.baseUrl);
-        return normalizedBaseUrl && normalizedBaseUrl !== providerConfig.baseUrl
-          ? { ...providerConfig, baseUrl: normalizedBaseUrl }
-          : undefined;
-      },
+      augmentModelCatalog: ({ config }) => readConfiguredArceeCatalogEntries(config),
       normalizeResolvedModel: ({ model }) => normalizeArceeResolvedModel(model),
-      normalizeTransport: ({ api, baseUrl }) => {
-        const normalizedBaseUrl = normalizeArceeOpenRouterBaseUrl(baseUrl);
-        return normalizedBaseUrl && normalizedBaseUrl !== baseUrl
-          ? {
-              api,
-              baseUrl: normalizedBaseUrl,
-            }
-          : undefined;
-      },
       ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
     });
   },

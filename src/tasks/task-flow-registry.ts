@@ -58,9 +58,12 @@ type FlowRecordPatch = Omit<
   endedAt?: number | null;
 };
 
-type FlowRecordCreateFields = {
+export type CreateFlowRecordParams = {
+  syncMode?: TaskFlowSyncMode;
   ownerKey: string;
   requesterOrigin?: TaskFlowRecord["requesterOrigin"];
+  controllerId?: string | null;
+  revision?: number;
   status?: TaskFlowStatus;
   notifyPolicy?: TaskNotifyPolicy;
   goal: string;
@@ -73,12 +76,6 @@ type FlowRecordCreateFields = {
   createdAt?: number;
   updatedAt?: number;
   endedAt?: number | null;
-};
-
-export type CreateFlowRecordParams = FlowRecordCreateFields & {
-  syncMode?: TaskFlowSyncMode;
-  controllerId?: string | null;
-  revision?: number;
 };
 
 export type TaskFlowUpdateResult =
@@ -352,11 +349,23 @@ export function createFlowRecord(params: CreateFlowRecordParams): TaskFlowRecord
   return writeFlowRecord(record);
 }
 
-export function createManagedTaskFlow(
-  params: FlowRecordCreateFields & {
-    controllerId: string;
-  },
-): TaskFlowRecord {
+export function createManagedTaskFlow(params: {
+  ownerKey: string;
+  controllerId: string;
+  requesterOrigin?: TaskFlowRecord["requesterOrigin"];
+  status?: TaskFlowStatus;
+  notifyPolicy?: TaskNotifyPolicy;
+  goal: string;
+  currentStep?: string | null;
+  blockedTaskId?: string | null;
+  blockedSummary?: string | null;
+  stateJson?: JsonValue | null;
+  waitJson?: JsonValue | null;
+  cancelRequestedAt?: number | null;
+  createdAt?: number;
+  updatedAt?: number;
+  endedAt?: number | null;
+}): TaskFlowRecord {
   return createFlowRecord({
     ...params,
     syncMode: "managed",

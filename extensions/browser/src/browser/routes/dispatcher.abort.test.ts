@@ -6,44 +6,35 @@ let createBrowserRouteDispatcher: typeof import("./dispatcher.js").createBrowser
 describe("browser route dispatcher (abort)", () => {
   beforeAll(async () => {
     vi.doMock("./index.js", () => {
-      const asyncRoute = <Req, Res>(
-        handler: (req: Req, res: Res) => void | Promise<void>,
-      ): ((req: Req, res: Res) => void | Promise<void>) => {
-        return (req, res) => handler(req, res);
-      };
       return {
         registerBrowserRoutes(app: { get: (path: string, handler: unknown) => void }) {
           app.get(
             "/slow",
-            asyncRoute(
-              async (req: { signal?: AbortSignal }, res: { json: (body: unknown) => void }) => {
-                const signal = req.signal;
-                await new Promise<void>((resolve, reject) => {
-                  if (signal?.aborted) {
-                    reject(signal.reason ?? new Error("aborted"));
-                    return;
-                  }
-                  const onAbort = () => reject(signal?.reason ?? new Error("aborted"));
-                  signal?.addEventListener("abort", onAbort, { once: true });
-                  queueMicrotask(() => {
-                    signal?.removeEventListener("abort", onAbort);
-                    resolve();
-                  });
+            async (req: { signal?: AbortSignal }, res: { json: (body: unknown) => void }) => {
+              const signal = req.signal;
+              await new Promise<void>((resolve, reject) => {
+                if (signal?.aborted) {
+                  reject(signal.reason ?? new Error("aborted"));
+                  return;
+                }
+                const onAbort = () => reject(signal?.reason ?? new Error("aborted"));
+                signal?.addEventListener("abort", onAbort, { once: true });
+                queueMicrotask(() => {
+                  signal?.removeEventListener("abort", onAbort);
+                  resolve();
                 });
-                res.json({ ok: true });
-              },
-            ),
+              });
+              res.json({ ok: true });
+            },
           );
           app.get(
             "/echo/:id",
-            asyncRoute(
-              (
-                req: { params?: Record<string, string> },
-                res: { json: (body: unknown) => void },
-              ) => {
-                res.json({ id: req.params?.id ?? null });
-              },
-            ),
+            async (
+              req: { params?: Record<string, string> },
+              res: { json: (body: unknown) => void },
+            ) => {
+              res.json({ id: req.params?.id ?? null });
+            },
           );
         },
       };

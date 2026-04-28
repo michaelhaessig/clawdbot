@@ -39,12 +39,19 @@ export function formatLocationText(location: NormalizedLocation): string {
   const resolved = resolveLocation(location);
   const coords = formatCoords(resolved.latitude, resolved.longitude);
   const accuracy = formatAccuracy(resolved.accuracy);
+  const caption = resolved.caption?.trim();
+  let header = "";
 
   if (resolved.source === "live" || resolved.isLive) {
-    return `🛰 Live location: ${coords}${accuracy}`;
+    header = `🛰 Live location: ${coords}${accuracy}`;
+  } else if (resolved.name || resolved.address) {
+    const label = [resolved.name, resolved.address].filter(Boolean).join(" — ");
+    header = `📍 ${label} (${coords}${accuracy})`;
+  } else {
+    header = `📍 ${coords}${accuracy}`;
   }
 
-  return `📍 ${coords}${accuracy}`;
+  return caption ? `${header}\n${caption}` : header;
 }
 
 export function toLocationContext(location: NormalizedLocation): {
@@ -55,7 +62,6 @@ export function toLocationContext(location: NormalizedLocation): {
   LocationAddress?: string;
   LocationSource: LocationSource;
   LocationIsLive: boolean;
-  LocationCaption?: string;
 } {
   const resolved = resolveLocation(location);
   return {
@@ -66,6 +72,5 @@ export function toLocationContext(location: NormalizedLocation): {
     LocationAddress: resolved.address,
     LocationSource: resolved.source,
     LocationIsLive: resolved.isLive,
-    LocationCaption: resolved.caption,
   };
 }

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
+import { safeEqualSecret } from "openclaw/plugin-sdk/browser-security-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type { TwilioConfig } from "../config.js";
 import { getHeader } from "../http-headers.js";
@@ -15,7 +15,6 @@ import type {
   NormalizedEvent,
   PlayTtsInput,
   ProviderWebhookParseResult,
-  SendDtmfInput,
   StartListeningInput,
   StopListeningInput,
   WebhookContext,
@@ -63,6 +62,7 @@ type StreamSendResult = {
 
 export class TwilioProvider implements VoiceCallProvider {
   readonly name = "twilio" as const;
+  private static readonly TTS_SYNTH_TIMEOUT_MS = 8000;
 
   private readonly accountSid: string;
   private readonly authToken: string;
@@ -317,7 +317,7 @@ export class TwilioProvider implements VoiceCallProvider {
         type: "call.speech",
         transcript: speechResult,
         isFinal: true,
-        confidence: Number.parseFloat(params.get("Confidence") || "0.9"),
+        confidence: parseFloat(params.get("Confidence") || "0.9"),
       };
     }
 
@@ -594,23 +594,6 @@ export class TwilioProvider implements VoiceCallProvider {
     });
   }
 
-  async sendDtmf(input: SendDtmfInput): Promise<void> {
-    const webhookUrl = this.callWebhookUrls.get(input.providerCallId);
-    if (!webhookUrl) {
-      throw new Error("Missing webhook URL for this call (provider state not initialized)");
-    }
-
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Play digits="${escapeXml(input.digits)}" />
-  <Redirect method="POST">${escapeXml(webhookUrl)}</Redirect>
-</Response>`;
-
-    await this.apiRequest(`/Calls/${input.providerCallId}.json`, {
-      Twiml: twiml,
-    });
-  }
-
   /**
    * Play TTS via core TTS and Twilio Media Streams.
    * Generates audio with core TTS, converts to mu-law, and streams via WebSocket.
@@ -671,13 +654,16 @@ export class TwilioProvider implements VoiceCallProvider {
       // Generate audio with core TTS (returns mu-law at 8kHz)
       let muLawAudio: Buffer;
       let synthTimeout: ReturnType<typeof setTimeout> | null = null;
-      const synthTimeoutMs = ttsProvider.synthesisTimeoutMs;
       try {
         const synthPromise = ttsProvider.synthesizeForTelephony(text);
         const timeoutPromise = new Promise<Buffer>((_, reject) => {
           synthTimeout = setTimeout(() => {
-            reject(new Error(`Telephony TTS synthesis timed out after ${synthTimeoutMs}ms`));
-          }, synthTimeoutMs);
+            reject(
+              new Error(
+                `Telephony TTS synthesis timed out after ${TwilioProvider.TTS_SYNTH_TIMEOUT_MS}ms`,
+              ),
+            );
+          }, TwilioProvider.TTS_SYNTH_TIMEOUT_MS);
         });
         muLawAudio = await Promise.race([synthPromise, timeoutPromise]);
       } finally {
@@ -685,10 +671,6 @@ export class TwilioProvider implements VoiceCallProvider {
           clearTimeout(synthTimeout);
         }
         clearInterval(keepAlive);
-      }
-
-      if (muLawAudio.length === 0) {
-        throw new Error("Telephony TTS produced no audio");
       }
 
       let chunkAttempts = 0;

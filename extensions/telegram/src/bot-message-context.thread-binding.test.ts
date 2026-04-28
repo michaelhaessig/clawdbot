@@ -44,27 +44,6 @@ function createBoundRoute(params: { accountId: string; sessionKey: string; agent
   } as const;
 }
 
-function createForumTopicMessage() {
-  return {
-    message_id: 1,
-    chat: { id: -100200300, type: "supergroup", is_forum: true },
-    message_thread_id: 77,
-    date: 1_700_000_000,
-    text: "hello",
-    from: { id: 42, first_name: "Alice" },
-  } as const;
-}
-
-async function buildForumTopicMessageContext(accountId?: string) {
-  return await buildTelegramMessageContextForTest({
-    ...(accountId ? { accountId } : {}),
-    sessionRuntime: threadBindingSessionRuntime,
-    message: createForumTopicMessage(),
-    options: { forceWasMentioned: true },
-    resolveGroupActivation: () => true,
-  });
-}
-
 describe("buildTelegramMessageContext thread binding override", () => {
   beforeEach(() => {
     recordInboundSessionMock.mockClear();
@@ -80,7 +59,19 @@ describe("buildTelegramMessageContext thread binding override", () => {
       }),
     );
 
-    const ctx = await buildForumTopicMessageContext();
+    const ctx = await buildTelegramMessageContextForTest({
+      sessionRuntime: threadBindingSessionRuntime,
+      message: {
+        message_id: 1,
+        chat: { id: -100200300, type: "supergroup", is_forum: true },
+        message_thread_id: 77,
+        date: 1_700_000_000,
+        text: "hello",
+        from: { id: 42, first_name: "Alice" },
+      },
+      options: { forceWasMentioned: true },
+      resolveGroupActivation: () => true,
+    });
 
     expect(resolveTelegramConversationRouteMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -107,7 +98,20 @@ describe("buildTelegramMessageContext thread binding override", () => {
       }),
     );
 
-    const ctx = await buildForumTopicMessageContext("work");
+    const ctx = await buildTelegramMessageContextForTest({
+      accountId: "work",
+      sessionRuntime: threadBindingSessionRuntime,
+      message: {
+        message_id: 1,
+        chat: { id: -100200300, type: "supergroup", is_forum: true },
+        message_thread_id: 77,
+        date: 1_700_000_000,
+        text: "hello",
+        from: { id: 42, first_name: "Alice" },
+      },
+      options: { forceWasMentioned: true },
+      resolveGroupActivation: () => true,
+    });
 
     expect(resolveTelegramConversationRouteMock).toHaveBeenCalledWith(
       expect.objectContaining({

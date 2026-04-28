@@ -13,7 +13,6 @@ vi.mock("../../../globals.js", () => ({
 vi.mock("../../plugin-registry.js", () => ({
   ensurePluginRegistryLoaded: vi.fn(),
 }));
-const { ensurePluginRegistryLoaded } = await import("../../plugin-registry.js");
 
 const hasHooksMock = vi.fn((_hookName: string) => false);
 const runGatewayStopMock = vi.fn(
@@ -96,7 +95,6 @@ describe("runMessageAction", () => {
   it("calls exit(0) after successful message delivery", async () => {
     await runSendAction();
 
-    expect(ensurePluginRegistryLoaded).toHaveBeenCalledOnce();
     expect(exitMock).toHaveBeenCalledOnce();
     expect(exitMock).toHaveBeenCalledWith(0);
   });

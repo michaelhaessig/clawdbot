@@ -3,7 +3,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveAuthProfileOrder } from "../auth-profiles/order.js";
 import { ensureAuthProfileStore, hasAnyAuthProfileStoreSource } from "../auth-profiles/store.js";
 import { isProfileInCooldown } from "../auth-profiles/usage.js";
-import { resolveProviderIdForAuth } from "../provider-auth-aliases.js";
+import { normalizeProviderId } from "../model-selection.js";
 
 let sessionStoreRuntimePromise:
   | Promise<typeof import("../../config/sessions/store.runtime.js")>
@@ -15,7 +15,6 @@ function loadSessionStoreRuntime() {
 }
 
 function isProfileForProvider(params: {
-  cfg: OpenClawConfig;
   provider: string;
   profileId: string;
   store: ReturnType<typeof ensureAuthProfileStore>;
@@ -24,8 +23,7 @@ function isProfileForProvider(params: {
   if (!entry?.provider) {
     return false;
   }
-  const providerKey = resolveProviderIdForAuth(params.provider, { config: params.cfg });
-  return resolveProviderIdForAuth(entry.provider, { config: params.cfg }) === providerKey;
+  return normalizeProviderId(entry.provider) === normalizeProviderId(params.provider);
 }
 
 export async function clearSessionAuthProfileOverride(params: {
@@ -100,7 +98,7 @@ export async function resolveSessionAuthProfileOverride(params: {
     current = undefined;
   }
 
-  if (current && !isProfileForProvider({ cfg, provider, profileId: current, store })) {
+  if (current && !isProfileForProvider({ provider, profileId: current, store })) {
     await clearSessionAuthProfileOverride({ sessionEntry, sessionStore, sessionKey, storePath });
     current = undefined;
   }

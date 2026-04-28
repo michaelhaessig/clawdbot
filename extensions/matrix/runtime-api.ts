@@ -29,12 +29,13 @@ export { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
 export type {
   ChannelDirectoryEntry,
   ChannelMessageActionContext,
-} from "openclaw/plugin-sdk/channel-contract";
-export type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-export { formatZonedTimestamp } from "openclaw/plugin-sdk/core";
-export type { PluginRuntime, RuntimeLogger } from "openclaw/plugin-sdk/plugin-runtime";
-export type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-export type { WizardPrompter } from "openclaw/plugin-sdk/setup";
+  OpenClawConfig,
+  PluginRuntime,
+  RuntimeLogger,
+  RuntimeEnv,
+  WizardPrompter,
+} from "openclaw/plugin-sdk/matrix-runtime-shared";
+export { formatZonedTimestamp } from "openclaw/plugin-sdk/matrix-runtime-shared";
 
 export function chunkTextForOutbound(text: string, limit: number): string[] {
   const chunks: string[] = [];

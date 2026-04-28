@@ -1,5 +1,4 @@
 import { killProcessTree } from "../../kill-tree.js";
-import { prepareOomScoreAdjustedSpawn } from "../../linux-oom-score.js";
 import type { ManagedRunStdin, SpawnProcessAdapter } from "../types.js";
 import { toStringEnv } from "./env.js";
 
@@ -35,13 +34,6 @@ type PtyModule = {
 
 export type PtyAdapter = SpawnProcessAdapter;
 
-let ptyModulePromise: Promise<PtyModule> | null = null;
-
-async function loadPtyModule(): Promise<PtyModule> {
-  ptyModulePromise ??= import("@lydell/node-pty") as Promise<unknown> as Promise<PtyModule>;
-  return ptyModulePromise;
-}
-
 export async function createPtyAdapter(params: {
   shell: string;
   args: string[];
@@ -51,16 +43,14 @@ export async function createPtyAdapter(params: {
   rows?: number;
   name?: string;
 }): Promise<PtyAdapter> {
-  const module = await loadPtyModule();
+  const module = (await import("@lydell/node-pty")) as unknown as PtyModule;
   const spawn = module.spawn ?? module.default?.spawn;
   if (!spawn) {
     throw new Error("PTY support is unavailable (node-pty spawn not found).");
   }
-  const baseEnv = params.env ? toStringEnv(params.env) : undefined;
-  const preparedSpawn = prepareOomScoreAdjustedSpawn(params.shell, params.args, { env: baseEnv });
-  const pty = spawn(preparedSpawn.command, preparedSpawn.args, {
+  const pty = spawn(params.shell, params.args, {
     cwd: params.cwd,
-    env: preparedSpawn.env ? toStringEnv(preparedSpawn.env) : undefined,
+    env: params.env ? toStringEnv(params.env) : undefined,
     name: params.name ?? process.env.TERM ?? "xterm-256color",
     cols: params.cols ?? 120,
     rows: params.rows ?? 30,

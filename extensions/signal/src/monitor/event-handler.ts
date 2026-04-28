@@ -11,13 +11,14 @@ import {
   shouldDebounceTextInbound,
 } from "openclaw/plugin-sdk/channel-inbound";
 import { logInboundDrop } from "openclaw/plugin-sdk/channel-inbound";
-import {
-  resolveChannelGroupPolicy,
-  resolveChannelGroupRequireMention,
-} from "openclaw/plugin-sdk/channel-policy";
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
 import { resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth";
 import { hasControlCommand } from "openclaw/plugin-sdk/command-auth";
+import {
+  resolveChannelGroupPolicy,
+  resolveChannelGroupRequireMention,
+} from "openclaw/plugin-sdk/config-runtime";
+import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/config-runtime";
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import {
   createInternalHookEvent,
@@ -41,7 +42,6 @@ import {
   DM_GROUP_ACCESS_REASON,
   resolvePinnedMainDmOwnerFromAllowlist,
 } from "openclaw/plugin-sdk/security-runtime";
-import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { normalizeE164, normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   formatSignalPairingIdLine,
@@ -284,7 +284,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
             return;
           }
           await sendTypingSignal(ctxPayload.To, {
-            cfg: deps.cfg,
             baseUrl: deps.baseUrl,
             account: deps.account,
             accountId: deps.accountId,
@@ -307,7 +306,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       typingCallbacks,
       deliver: async (payload) => {
         await deps.deliverReplies({
-          cfg: deps.cfg,
           replies: [payload],
           target: ctxPayload.To,
           baseUrl: deps.baseUrl,
@@ -603,7 +601,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         accountId: deps.accountId,
         sendPairingReply: async (text) => {
           await sendMessageSignal(`signal:${senderRecipient}`, text, {
-            cfg: deps.cfg,
             baseUrl: deps.baseUrl,
             account: deps.account,
             maxBytes: deps.mediaMaxBytes,
@@ -834,7 +831,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     if (deps.sendReadReceipts && !deps.readReceiptsViaDaemon && !isGroup && receiptTimestamp) {
       try {
         await sendReadReceiptSignal(`signal:${senderRecipient}`, receiptTimestamp, {
-          cfg: deps.cfg,
           baseUrl: deps.baseUrl,
           account: deps.account,
           accountId: deps.accountId,

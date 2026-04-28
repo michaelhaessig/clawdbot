@@ -5,7 +5,7 @@
  */
 export type OutboundSendDeps = { [channelId: string]: unknown };
 
-export function resolveLegacyOutboundSendDepKeys(channelId: string): string[] {
+function resolveLegacyDepKeysForChannel(channelId: string): string[] {
   const compact = channelId.replace(/[^a-z0-9]+/gi, "");
   if (!compact) {
     return [];
@@ -26,7 +26,6 @@ export type ResolveOutboundSendDepOptions = {
   legacyKeys?: readonly string[];
 };
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Channel-specific dependency lookup returns caller-typed values.
 export function resolveOutboundSendDep<T>(
   deps: OutboundSendDeps | null | undefined,
   channelId: string,
@@ -36,10 +35,7 @@ export function resolveOutboundSendDep<T>(
   if (dynamic !== undefined) {
     return dynamic as T;
   }
-  const legacyKeys = [
-    ...resolveLegacyOutboundSendDepKeys(channelId),
-    ...(options?.legacyKeys ?? []),
-  ];
+  const legacyKeys = [...resolveLegacyDepKeysForChannel(channelId), ...(options?.legacyKeys ?? [])];
   for (const legacyKey of legacyKeys) {
     const legacy = deps?.[legacyKey];
     if (legacy !== undefined) {

@@ -4,11 +4,6 @@
 id: thread-memory-isolation
 title: Thread memory isolation
 surface: memory
-coverage:
-  primary:
-    - memory.thread-isolation
-  secondary:
-    - channels.threads
 objective: Verify a memory-backed answer requested inside a thread stays in-thread and does not leak into the root channel.
 successCriteria:
   - Agent uses memory tools inside the thread.

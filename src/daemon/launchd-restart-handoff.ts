@@ -5,7 +5,6 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
 import { resolveGatewayLaunchAgentLabel } from "./constants.js";
-import { renderPosixRestartLogSetup } from "./restart-logs.js";
 
 export type LaunchdRestartHandoffMode = "kickstart" | "start-after-exit";
 
@@ -21,9 +20,6 @@ export type LaunchdRestartTarget = {
   plistPath: string;
   serviceTarget: string;
 };
-
-const START_AFTER_EXIT_PRINT_RETRY_COUNT = 15;
-const START_AFTER_EXIT_PRINT_RETRY_DELAY_SECONDS = 0.2;
 
 function assertValidLaunchAgentLabel(label: string): string {
   const trimmed = label.trim();
@@ -78,14 +74,9 @@ export function isCurrentProcessLaunchdServiceLabel(
   return Boolean(configuredLabel && configuredLabel === label);
 }
 
-function buildLaunchdRestartScript(
-  mode: LaunchdRestartHandoffMode,
-  env: Record<string, string | undefined>,
-): string {
+function buildLaunchdRestartScript(mode: LaunchdRestartHandoffMode): string {
   const waitForCallerPid = `wait_pid="$4"
 label="$5"
-${renderPosixRestartLogSetup(env)}
-printf '[%s] openclaw restart attempt source=launchd-handoff mode=${mode} target=%s waitPid=%s\\n' "$(date -u +%FT%TZ)" "$service_target" "$wait_pid" >&2
 if [ -n "$wait_pid" ] && [ "$wait_pid" -gt 1 ] 2>/dev/null; then
   while kill -0 "$wait_pid" >/dev/null 2>&1; do
     sleep 0.1
@@ -99,63 +90,28 @@ fi
 domain="$2"
 plist_path="$3"
 ${waitForCallerPid}
-status=0
-launchctl enable "$service_target"
-if launchctl kickstart -k "$service_target"; then
-  status=0
-else
-  status=$?
-  if launchctl bootstrap "$domain" "$plist_path"; then
-    launchctl kickstart -k "$service_target"
-    status=$?
+launchctl enable "$service_target" >/dev/null 2>&1
+if ! launchctl kickstart -k "$service_target" >/dev/null 2>&1; then
+  if launchctl bootstrap "$domain" "$plist_path" >/dev/null 2>&1; then
+    launchctl kickstart -k "$service_target" >/dev/null 2>&1 || true
   fi
 fi
-if [ "$status" -eq 0 ]; then
-  printf '[%s] openclaw restart done source=launchd-handoff mode=${mode}\\n' "$(date -u +%FT%TZ)" >&2
-else
-  printf '[%s] openclaw restart failed source=launchd-handoff mode=${mode} status=%s\\n' "$(date -u +%FT%TZ)" "$status" >&2
-fi
-exit "$status"
 `;
   }
-
-  const verifyLaunchdReload = `print_retry_count="${START_AFTER_EXIT_PRINT_RETRY_COUNT}"
-while [ "$print_retry_count" -gt 0 ]; do
-  if launchctl print "$service_target" >/dev/null 2>&1; then
-    printf '[%s] openclaw restart done source=launchd-handoff mode=${mode} reason=launchd-auto-reload\\n' "$(date -u +%FT%TZ)" >&2
-    exit 0
-  fi
-  print_retry_count=$((print_retry_count - 1))
-  sleep ${START_AFTER_EXIT_PRINT_RETRY_DELAY_SECONDS}
-done
-`;
 
   // Restart is explicit operator intent; undo any previous `launchctl disable`.
   return `service_target="$1"
 domain="$2"
 plist_path="$3"
 ${waitForCallerPid}
-${verifyLaunchdReload}
-status=0
-launchctl enable "$service_target"
-if launchctl bootstrap "$domain" "$plist_path"; then
-  if launchctl start "$label"; then
-    status=0
+launchctl enable "$service_target" >/dev/null 2>&1
+if ! launchctl start "$label" >/dev/null 2>&1; then
+  if launchctl bootstrap "$domain" "$plist_path" >/dev/null 2>&1; then
+    launchctl start "$label" >/dev/null 2>&1 || launchctl kickstart -k "$service_target" >/dev/null 2>&1 || true
   else
-    launchctl kickstart -k "$service_target"
-    status=$?
+    launchctl kickstart -k "$service_target" >/dev/null 2>&1 || true
   fi
-else
-  status=$?
-  launchctl kickstart -k "$service_target"
-  status=$?
 fi
-if [ "$status" -eq 0 ]; then
-  printf '[%s] openclaw restart done source=launchd-handoff mode=${mode}\\n' "$(date -u +%FT%TZ)" >&2
-else
-  printf '[%s] openclaw restart failed source=launchd-handoff mode=${mode} status=%s\\n' "$(date -u +%FT%TZ)" "$status" >&2
-fi
-exit "$status"
 `;
 }
 
@@ -169,13 +125,12 @@ export function scheduleDetachedLaunchdRestartHandoff(params: {
     typeof params.waitForPid === "number" && Number.isFinite(params.waitForPid)
       ? Math.floor(params.waitForPid)
       : 0;
-  const restartEnv = { ...process.env, ...params.env };
   try {
     const child = spawn(
       "/bin/sh",
       [
         "-c",
-        buildLaunchdRestartScript(params.mode, restartEnv),
+        buildLaunchdRestartScript(params.mode),
         "openclaw-launchd-restart-handoff",
         target.serviceTarget,
         target.domain,
@@ -186,7 +141,7 @@ export function scheduleDetachedLaunchdRestartHandoff(params: {
       {
         detached: true,
         stdio: "ignore",
-        env: restartEnv,
+        env: { ...process.env, ...params.env },
       },
     );
     child.unref();

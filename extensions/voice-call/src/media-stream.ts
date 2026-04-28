@@ -233,10 +233,6 @@ export class MediaStreamHandler {
               session = null;
             }
             break;
-
-          case "clear":
-          case "mark":
-            break;
         }
       } catch (error) {
         console.error("[MediaStream] Error processing message:", error);
@@ -561,7 +557,7 @@ export class MediaStreamHandler {
    */
   clearTtsQueue(streamSid: string, _reason = "unspecified"): void {
     const queue = this.getTtsQueue(streamSid);
-    this.resolveQueuedTtsEntries(queue);
+    queue.length = 0;
     this.ttsActiveControllers.get(streamSid)?.abort();
     this.clearAudio(streamSid);
   }
@@ -634,20 +630,12 @@ export class MediaStreamHandler {
   private clearTtsState(streamSid: string): void {
     const queue = this.ttsQueues.get(streamSid);
     if (queue) {
-      this.resolveQueuedTtsEntries(queue);
+      queue.length = 0;
     }
     this.ttsActiveControllers.get(streamSid)?.abort();
     this.ttsActiveControllers.delete(streamSid);
     this.ttsPlaying.delete(streamSid);
     this.ttsQueues.delete(streamSid);
-  }
-
-  private resolveQueuedTtsEntries(queue: TtsQueueEntry[]): void {
-    const pending = queue.splice(0);
-    for (const entry of pending) {
-      entry.controller.abort();
-      entry.resolve();
-    }
   }
 }
 

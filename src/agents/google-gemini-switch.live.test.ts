@@ -1,5 +1,5 @@
 import { completeSimple, getModel } from "@mariozechner/pi-ai";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { describe, expect, it } from "vitest";
 import { isLiveTestEnabled } from "./live-test-helpers.js";
 import { makeZeroUsageSnapshot } from "./usage.js";

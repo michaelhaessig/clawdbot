@@ -14,7 +14,7 @@ export default defineBundledChannelEntry({
     exportName: "channelSecrets",
   },
   runtime: {
-    specifier: "./runtime-setter-api.js",
+    specifier: "./runtime-api.js",
     exportName: "setSlackRuntime",
   },
 });

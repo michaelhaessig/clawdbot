@@ -1,6 +1,5 @@
 import type {
   ChannelId,
-  ChannelMessagingAdapter,
   ChannelOutboundAdapter,
   ChannelPlugin,
 } from "../../../src/channels/plugins/types.js";
@@ -53,7 +52,6 @@ function createHeartbeatChannelPlugin(params: {
   label: string;
   docsPath: string;
   heartbeat?: ChannelPlugin["heartbeat"];
-  messaging?: ChannelMessagingAdapter;
 }): ChannelPlugin {
   return {
     ...createOutboundTestPlugin({
@@ -61,7 +59,6 @@ function createHeartbeatChannelPlugin(params: {
       label: params.label,
       docsPath: params.docsPath,
       outbound: createHeartbeatOutboundAdapter(params.id),
-      ...(params.messaging ? { messaging: params.messaging } : {}),
     }),
     ...(params.heartbeat ? { heartbeat: params.heartbeat } : {}),
   };
@@ -77,9 +74,6 @@ export const heartbeatRunnerTelegramPlugin = createHeartbeatChannelPlugin({
   id: "telegram",
   label: "Telegram",
   docsPath: "/channels/telegram",
-  messaging: {
-    preserveHeartbeatThreadIdForGroupRoute: true,
-  },
 });
 
 export const heartbeatRunnerWhatsAppPlugin = createHeartbeatChannelPlugin({

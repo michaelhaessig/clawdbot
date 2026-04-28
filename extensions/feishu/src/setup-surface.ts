@@ -13,7 +13,15 @@ import {
   type SecretInput,
 } from "openclaw/plugin-sdk/setup";
 import { inspectFeishuCredentials, resolveDefaultFeishuAccountId } from "./accounts.js";
-import type { AppRegistrationResult } from "./app-registration.js";
+import {
+  beginAppRegistration,
+  getAppOwnerOpenId,
+  initAppRegistration,
+  pollAppRegistration,
+  printQrCode,
+  type AppRegistrationResult,
+} from "./app-registration.js";
+import { probeFeishu } from "./probe.js";
 import type { FeishuConfig, FeishuDomain } from "./types.js";
 
 const channel = "feishu" as const;
@@ -246,8 +254,6 @@ function applyNewAppSecurityPolicy(
 // ---------------------------------------------------------------------------
 
 async function runScanToCreate(prompter: WizardPrompter): Promise<AppRegistrationResult | null> {
-  const { beginAppRegistration, initAppRegistration, pollAppRegistration, printQrCode } =
-    await import("./app-registration.js");
   try {
     await initAppRegistration("feishu");
   } catch {
@@ -365,7 +371,6 @@ async function runNewAppFlow(params: {
 
     // Fetch openId via API for manual flow.
     if (appId && appSecretProbeValue) {
-      const { getAppOwnerOpenId } = await import("./app-registration.js");
       scanOpenId = await getAppOwnerOpenId({
         appId,
         appSecret: appSecretProbeValue,
@@ -523,7 +528,6 @@ export const feishuSetupWizard: ChannelSetupWizard = {
       let probeResult = null;
       if (configured && resolvedCredentials) {
         try {
-          const { probeFeishu } = await import("./probe.js");
           probeResult = await probeFeishu(resolvedCredentials);
         } catch {}
       }

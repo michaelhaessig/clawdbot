@@ -31,12 +31,7 @@ const hoisted = vi.hoisted(() => ({
   ),
   loginWeb: vi.fn(async () => {}),
   pathExists: vi.fn(async () => false),
-  readWebAuthState: vi.fn<(authDir: string) => Promise<"linked" | "not-linked" | "unstable">>(
-    async () => "not-linked",
-  ),
-  resolveWhatsAppAuthDir: vi.fn<
-    (params: { cfg: OpenClawConfig; accountId: string }) => { authDir: string }
-  >(() => ({
+  resolveWhatsAppAuthDir: vi.fn(() => ({
     authDir: "/tmp/openclaw-whatsapp-test",
   })),
 }));
@@ -65,22 +60,17 @@ vi.mock("openclaw/plugin-sdk/setup", async () => {
 
 vi.mock("./accounts.js", async () => {
   const actual = await vi.importActual<typeof import("./accounts.js")>("./accounts.js");
-  return Object.assign({}, actual, {
+  return {
+    ...actual,
     resolveWhatsAppAuthDir: hoisted.resolveWhatsAppAuthDir,
-  });
+  };
 });
 
-vi.mock("./auth-store.js", async () => {
-  const actual = await vi.importActual<typeof import("./auth-store.js")>("./auth-store.js");
-  return Object.assign({}, actual, {
-    readWebAuthState: hoisted.readWebAuthState,
-  });
-});
-
-const createRuntime = (): RuntimeEnv =>
-  ({
+function createRuntime(): RuntimeEnv {
+  return {
     error: vi.fn(),
-  }) as unknown as RuntimeEnv;
+  } as unknown as RuntimeEnv;
+}
 
 const whatsappGetStatus = createPluginSetupWizardStatus({
   id: "whatsapp",
@@ -146,8 +136,6 @@ describe("whatsapp setup wizard", () => {
     hoisted.loginWeb.mockReset();
     hoisted.pathExists.mockReset();
     hoisted.pathExists.mockResolvedValue(false);
-    hoisted.readWebAuthState.mockReset();
-    hoisted.readWebAuthState.mockResolvedValue("not-linked");
     hoisted.resolveWhatsAppAuthDir.mockReset();
     hoisted.resolveWhatsAppAuthDir.mockReturnValue({ authDir: "/tmp/openclaw-whatsapp-test" });
   });
@@ -215,11 +203,8 @@ describe("whatsapp setup wizard", () => {
   });
 
   it("uses configured defaultAccount for omitted-account setup status", async () => {
-    hoisted.resolveWhatsAppAuthDir.mockImplementation(({ accountId }: { accountId: string }) => ({
-      authDir: accountId === "work" ? "/tmp/work" : "/tmp/default",
-    }));
-    hoisted.readWebAuthState.mockImplementation(async (authDir: string) =>
-      authDir === "/tmp/work" ? "linked" : "not-linked",
+    hoisted.detectWhatsAppLinked.mockImplementation(
+      async (_cfg: OpenClawConfig, accountId: string) => accountId === "work",
     );
 
     const status = await whatsappGetStatus({
@@ -243,33 +228,11 @@ describe("whatsapp setup wizard", () => {
 
     expect(status.configured).toBe(true);
     expect(status.statusLines).toEqual(["WhatsApp (work): linked"]);
-    expect(hoisted.readWebAuthState).toHaveBeenCalledWith("/tmp/default");
-    expect(hoisted.readWebAuthState).toHaveBeenCalledWith("/tmp/work");
-  });
-
-  it("shows auth stabilizing when auth reads time out", async () => {
-    hoisted.resolveWhatsAppAuthDir.mockReturnValue({ authDir: "/tmp/work" });
-    hoisted.readWebAuthState.mockResolvedValue("unstable");
-
-    const status = await whatsappGetStatus({
-      cfg: {
-        channels: {
-          whatsapp: {
-            accounts: {
-              work: {
-                authDir: "/tmp/work",
-              },
-            },
-          },
-        },
-      } as OpenClawConfig,
-      accountOverrides: {
-        whatsapp: "work",
-      },
-    });
-
-    expect(status.configured).toBe(false);
-    expect(status.statusLines).toEqual(["WhatsApp (work): auth stabilizing"]);
+    expect(hoisted.detectWhatsAppLinked).toHaveBeenCalledWith(
+      expect.any(Object),
+      DEFAULT_ACCOUNT_ID,
+    );
+    expect(hoisted.detectWhatsAppLinked).toHaveBeenCalledWith(expect.any(Object), "work");
   });
 
   it("uses configured defaultAccount for omitted-account finalize writes", async () => {

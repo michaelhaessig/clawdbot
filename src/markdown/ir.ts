@@ -967,11 +967,10 @@ export function markdownToIRWithMeta(
       links: clampLinkSpans(state.links, finalLength),
     },
     hasTables: state.hasTables,
-    tables: state.collectedTables.map((table) =>
-      Object.assign({}, table, {
-        placeholderOffset: Math.min(table.placeholderOffset, finalLength),
-      }),
-    ),
+    tables: state.collectedTables.map((table) => ({
+      ...table,
+      placeholderOffset: Math.min(table.placeholderOffset, finalLength),
+    })),
   };
 }
 

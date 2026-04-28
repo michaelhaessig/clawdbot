@@ -14,12 +14,8 @@ export function shouldSkipPluginCommandRegistration(params: {
   if (params.hasBuiltinPrimary) {
     return true;
   }
-  const invocation = resolveCliArgvInvocation(params.argv);
-  if (params.primary === "help") {
-    return invocation.hasHelpOrVersion && invocation.commandPath.length <= 1;
-  }
   if (!params.primary) {
-    return invocation.hasHelpOrVersion;
+    return resolveCliArgvInvocation(params.argv).hasHelpOrVersion;
   }
   return false;
 }

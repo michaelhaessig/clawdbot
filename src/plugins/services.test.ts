@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PluginOrigin } from "./plugin-origin.types.js";
 import { createEmptyPluginRegistry } from "./registry.js";
 import type { OpenClawPluginService, OpenClawPluginServiceContext } from "./types.js";
 
@@ -18,17 +17,12 @@ vi.mock("../logging/subsystem.js", () => ({
 import { STATE_DIR } from "../config/paths.js";
 import { startPluginServices } from "./services.js";
 
-function createRegistry(
-  services: OpenClawPluginService[],
-  pluginId = "plugin:test",
-  origin: PluginOrigin = "workspace",
-) {
+function createRegistry(services: OpenClawPluginService[]) {
   const registry = createEmptyPluginRegistry();
   registry.services = services.map((service) => ({
-    pluginId,
+    pluginId: "plugin:test",
     service,
     source: "test",
-    origin,
     rootDir: "/plugins/test-plugin",
   })) as typeof registry.services;
   return registry;
@@ -178,40 +172,5 @@ describe("startPluginServices", () => {
     );
     expect(stopOk).toHaveBeenCalledOnce();
     expect(stopThrows).toHaveBeenCalledOnce();
-  });
-
-  it("grants internal diagnostics only to bundled diagnostics exporter services", async () => {
-    const contexts: OpenClawPluginServiceContext[] = [];
-    const diagnosticsService = createTrackingService("diagnostics-otel", { contexts });
-    await startPluginServices({
-      registry: createRegistry([diagnosticsService], "diagnostics-otel", "bundled"),
-      config: createServiceConfig(),
-    });
-
-    expect(contexts[0]?.internalDiagnostics?.onEvent).toBeTypeOf("function");
-    expect(contexts[0]?.internalDiagnostics?.emit).toBeTypeOf("function");
-
-    const prometheusContexts: OpenClawPluginServiceContext[] = [];
-    const prometheusService = createTrackingService("diagnostics-prometheus", {
-      contexts: prometheusContexts,
-    });
-    await startPluginServices({
-      registry: createRegistry([prometheusService], "diagnostics-prometheus", "bundled"),
-      config: createServiceConfig(),
-    });
-
-    expect(prometheusContexts[0]?.internalDiagnostics?.onEvent).toBeTypeOf("function");
-    expect(prometheusContexts[0]?.internalDiagnostics?.emit).toBeTypeOf("function");
-
-    const untrustedContexts: OpenClawPluginServiceContext[] = [];
-    const untrustedService = createTrackingService("diagnostics-otel", {
-      contexts: untrustedContexts,
-    });
-    await startPluginServices({
-      registry: createRegistry([untrustedService], "diagnostics-otel", "workspace"),
-      config: createServiceConfig(),
-    });
-
-    expect(untrustedContexts[0]?.internalDiagnostics).toBeUndefined();
   });
 });

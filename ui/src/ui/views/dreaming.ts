@@ -80,7 +80,10 @@ function formatDiaryChipLabel(date: string): string {
 
 function buildDiaryNavigation(entries: DiaryEntry[]): DiaryEntryNav[] {
   const reversed = [...entries].toReversed();
-  return reversed.map((entry, page) => Object.assign({}, entry, { page }));
+  return reversed.map((entry, page) => ({
+    ...entry,
+    page,
+  }));
 }
 
 type DreamingPhaseInfo = {

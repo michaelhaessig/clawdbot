@@ -1,14 +1,6 @@
 // Manual facade. Keep loader boundary explicit.
-import type { RuntimeEnv } from "../runtime.js";
+type FacadeModule = typeof import("@openclaw/matrix/runtime-api.js");
 import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-loader.js";
-
-type FacadeModule = {
-  ensureMatrixSdkInstalled: (params: {
-    runtime: RuntimeEnv;
-    confirm?: (message: string) => Promise<boolean>;
-  }) => Promise<void>;
-  isMatrixSdkAvailable: () => boolean;
-};
 
 function loadFacadeModule(): FacadeModule {
   return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({

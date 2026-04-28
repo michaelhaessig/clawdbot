@@ -4,10 +4,7 @@ import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { CLAUDE_CLI_PROFILE_ID } from "../agents/auth-profiles/constants.js";
 import { resolveAuthStorePathForDisplay } from "../agents/auth-profiles/paths.js";
-import {
-  ensureAuthProfileStore,
-  hasAnyAuthProfileStoreSource,
-} from "../agents/auth-profiles/store.js";
+import { ensureAuthProfileStore } from "../agents/auth-profiles/store.js";
 import type {
   AuthProfileStore,
   OAuthCredential,
@@ -198,18 +195,13 @@ export function noteClaudeCliHealth(
     workspaceDir?: string;
   },
 ) {
-  const hasConfigSignals = hasClaudeCliConfigSignals(cfg);
-  const store =
-    deps?.store ??
-    (hasConfigSignals || hasAnyAuthProfileStoreSource()
-      ? ensureAuthProfileStore(undefined, { allowKeychainPrompt: false })
-      : ({ version: 1, profiles: {} } as AuthProfileStore));
+  const store = deps?.store ?? ensureAuthProfileStore(undefined, { allowKeychainPrompt: false });
   const readClaudeCliCredentials =
     deps?.readClaudeCliCredentials ??
     (() => readClaudeCliCredentialsCached({ allowKeychainPrompt: false }));
   const credential = readClaudeCliCredentials();
 
-  if (!hasConfigSignals && !hasClaudeCliStoreSignals(store) && !credential) {
+  if (!hasClaudeCliConfigSignals(cfg) && !hasClaudeCliStoreSignals(store) && !credential) {
     return;
   }
 

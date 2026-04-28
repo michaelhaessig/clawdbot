@@ -4,8 +4,10 @@ read_when:
   - You want a self-hosted web search provider
   - You want to use SearXNG for web_search
   - You need a privacy-focused or air-gapped search option
-title: "SearXNG search"
+title: "SearXNG Search"
 ---
+
+# SearXNG Search
 
 OpenClaw supports [SearXNG](https://docs.searxng.org/) as a **self-hosted,
 key-free** `web_search` provider. SearXNG is an open-source meta-search engine

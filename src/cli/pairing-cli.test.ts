@@ -54,7 +54,6 @@ vi.mock("../channels/plugins/index.js", () => ({
 }));
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: vi.fn().mockReturnValue({}),
   loadConfig: vi.fn().mockReturnValue({}),
 }));
 

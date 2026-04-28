@@ -5,7 +5,7 @@ import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { queueEmbeddedPiMessage } from "../../agents/pi-embedded-runner/runs.js";
-import { deriveContextPromptTokens, hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
+import { hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
 import {
   loadSessionStore,
   resolveSessionPluginStatusLines,
@@ -16,11 +16,7 @@ import {
 import type { TypingMode } from "../../config/types.js";
 import { resolveSessionTranscriptCandidates } from "../../gateway/session-utils.fs.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
-import { emitTrustedDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
-import {
-  createChildDiagnosticTraceContext,
-  freezeDiagnosticTraceContext,
-} from "../../infra/diagnostic-trace-context.js";
+import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
@@ -68,7 +64,7 @@ import {
   type FollowupRun,
   type QueueSettings,
 } from "./queue.js";
-import { createReplyMediaContext } from "./reply-media-paths.js";
+import { createReplyMediaPathNormalizer } from "./reply-media-paths.js";
 import {
   createReplyOperation,
   ReplyRunAlreadyActiveError,
@@ -253,17 +249,13 @@ function mergeExecutionTrace(params: {
   runner: "embedded" | "cli";
 }): TraceExecutionView | undefined {
   const attempts: TraceAttemptView[] = [
-    ...(params.fallbackAttempts ?? []).map((attempt) =>
-      Object.assign(
-        {
-          provider: attempt.provider,
-          model: attempt.model,
-          result: inferFallbackAttemptResult(attempt),
-        },
-        attempt.reason ? { reason: attempt.reason } : {},
-        typeof attempt.status === `number` ? { status: attempt.status } : {},
-      ),
-    ),
+    ...(params.fallbackAttempts ?? []).map((attempt) => ({
+      provider: attempt.provider,
+      model: attempt.model,
+      result: inferFallbackAttemptResult(attempt),
+      ...(attempt.reason ? { reason: attempt.reason } : {}),
+      ...(typeof attempt.status === "number" ? { status: attempt.status } : {}),
+    })),
     ...(params.executionTrace?.attempts ?? []),
   ];
   const winnerProvider =
@@ -568,6 +560,53 @@ async function accumulateSessionUsageFromTranscript(params: {
   }
 }
 
+function resolveRequestPromptTokens(params: {
+  lastCallUsage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    total?: number;
+  };
+  promptTokens?: number;
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    total?: number;
+  };
+}): number | undefined {
+  const lastCall = params.lastCallUsage;
+  if (lastCall) {
+    const input = lastCall.input ?? 0;
+    const cacheRead = lastCall.cacheRead ?? 0;
+    const cacheWrite = lastCall.cacheWrite ?? 0;
+    const sum = input + cacheRead + cacheWrite;
+    if (sum > 0) {
+      return sum;
+    }
+  }
+  if (
+    typeof params.promptTokens === "number" &&
+    Number.isFinite(params.promptTokens) &&
+    params.promptTokens > 0
+  ) {
+    return params.promptTokens;
+  }
+  const usage = params.usage;
+  if (usage) {
+    const input = usage.input ?? 0;
+    const cacheRead = usage.cacheRead ?? 0;
+    const cacheWrite = usage.cacheWrite ?? 0;
+    const sum = input + cacheRead + cacheWrite;
+    if (sum > 0) {
+      return sum;
+    }
+  }
+  return undefined;
+}
+
 function formatRequestContextTraceBlock(params: {
   provider?: string;
   model?: string;
@@ -738,7 +777,7 @@ function buildInlineRawTracePayload(params: {
   if (params.entry?.traceLevel !== "raw") {
     return undefined;
   }
-  const resolvedPromptTokens = deriveContextPromptTokens({
+  const resolvedPromptTokens = resolveRequestPromptTokens({
     lastCallUsage: params.lastCallUsage,
     promptTokens: params.promptTokens,
     usage: params.usage,
@@ -817,7 +856,6 @@ function refreshSessionEntryFromStore(params: {
 
 export async function runReplyAgent(params: {
   commandBody: string;
-  transcriptCommandBody?: string;
   followupRun: FollowupRun;
   queueKey: string;
   resolvedQueue: QueueSettings;
@@ -831,7 +869,6 @@ export async function runReplyAgent(params: {
   sessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey?: string;
-  runtimePolicySessionKey?: string;
   storePath?: string;
   defaultModel: string;
   agentCfgContextTokens?: number;
@@ -849,12 +886,10 @@ export async function runReplyAgent(params: {
   shouldInjectGroupIntro: boolean;
   typingMode: TypingMode;
   resetTriggered?: boolean;
-  replyThreadingOverride?: TemplateContext["ReplyThreading"];
   replyOperation?: ReplyOperation;
 }): Promise<ReplyPayload | ReplyPayload[] | undefined> {
   const {
     commandBody,
-    transcriptCommandBody,
     followupRun,
     queueKey,
     resolvedQueue,
@@ -868,7 +903,6 @@ export async function runReplyAgent(params: {
     sessionEntry,
     sessionStore,
     sessionKey,
-    runtimePolicySessionKey,
     storePath,
     defaultModel,
     agentCfgContextTokens,
@@ -881,7 +915,6 @@ export async function runReplyAgent(params: {
     shouldInjectGroupIntro,
     typingMode,
     resetTriggered,
-    replyThreadingOverride,
     replyOperation: providedReplyOperation,
   } = params;
 
@@ -999,7 +1032,7 @@ export async function runReplyAgent(params: {
   );
   const applyReplyToMode = createReplyToModeFilterForChannel(replyToMode, replyToChannel);
   const cfg = followupRun.run.config;
-  const replyMediaContext = createReplyMediaContext({
+  const normalizeReplyMediaPaths = createReplyMediaPathNormalizer({
     cfg,
     sessionKey,
     workspaceDir: followupRun.run.workspaceDir,
@@ -1068,7 +1101,6 @@ export async function runReplyAgent(params: {
       sessionEntry: activeSessionEntry,
       sessionStore: activeSessionStore,
       sessionKey,
-      runtimePolicySessionKey,
       storePath,
       isHeartbeat,
       replyOperation,
@@ -1088,7 +1120,6 @@ export async function runReplyAgent(params: {
       sessionEntry: activeSessionEntry,
       sessionStore: activeSessionStore,
       sessionKey,
-      runtimePolicySessionKey,
       storePath,
       isHeartbeat,
       replyOperation,
@@ -1156,10 +1187,8 @@ export async function runReplyAgent(params: {
     const runStartedAt = Date.now();
     const runOutcome = await runAgentTurnWithFallback({
       commandBody,
-      transcriptCommandBody,
       followupRun,
       sessionCtx,
-      replyThreading: replyThreadingOverride ?? sessionCtx.ReplyThreading,
       replyOperation,
       opts,
       typingSignals,
@@ -1175,12 +1204,10 @@ export async function runReplyAgent(params: {
       resetSessionAfterRoleOrderingConflict,
       isHeartbeat,
       sessionKey,
-      runtimePolicySessionKey,
       getActiveSessionEntry: () => activeSessionEntry,
       activeSessionStore,
       storePath,
       resolvedVerboseLevel,
-      replyMediaContext,
     });
 
     if (runOutcome.kind === "final") {
@@ -1280,14 +1307,7 @@ export async function runReplyAgent(params: {
     const cliSessionBinding = isCliProvider(providerUsed, cfg)
       ? runResult.meta?.agentMeta?.cliSessionBinding
       : undefined;
-    const runtimeContextTokens =
-      typeof runResult.meta?.agentMeta?.contextTokens === "number" &&
-      Number.isFinite(runResult.meta.agentMeta.contextTokens) &&
-      runResult.meta.agentMeta.contextTokens > 0
-        ? Math.floor(runResult.meta.agentMeta.contextTokens)
-        : undefined;
     const contextTokensUsed =
-      runtimeContextTokens ??
       resolveContextTokensForModel({
         cfg,
         provider: providerUsed,
@@ -1295,8 +1315,7 @@ export async function runReplyAgent(params: {
         contextTokensOverride: agentCfgContextTokens,
         fallbackContextTokens: activeSessionEntry?.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
         allowAsyncLoad: false,
-      }) ??
-      DEFAULT_CONTEXT_TOKENS;
+      }) ?? DEFAULT_CONTEXT_TOKENS;
 
     await persistRunSessionUsage({
       storePath,
@@ -1321,7 +1340,6 @@ export async function runReplyAgent(params: {
       return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
     }
 
-    const currentMessageId = sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
     const payloadResult = await buildReplyPayloads({
       payloads: payloadArray,
       isHeartbeat,
@@ -1332,8 +1350,8 @@ export async function runReplyAgent(params: {
       directlySentBlockKeys,
       replyToMode,
       replyToChannel,
-      currentMessageId,
-      replyThreading: replyThreadingOverride ?? sessionCtx.ReplyThreading,
+      currentMessageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
+      replyThreading: sessionCtx.ReplyThreading,
       messageProvider: followupRun.run.messageProvider,
       messagingToolSentTexts: runResult.messagingToolSentTexts,
       messagingToolSentMediaUrls: runResult.messagingToolSentMediaUrls,
@@ -1344,7 +1362,7 @@ export async function runReplyAgent(params: {
         to: sessionCtx.To,
       }),
       accountId: sessionCtx.AccountId,
-      normalizeMediaPaths: replyMediaContext.normalizePayload,
+      normalizeMediaPaths: normalizeReplyMediaPaths,
     });
     const { replyPayloads } = payloadResult;
     didLogHeartbeatStrip = payloadResult.didLogHeartbeatStrip;
@@ -1381,32 +1399,19 @@ export async function runReplyAgent(params: {
       const output = usage.output ?? 0;
       const cacheRead = usage.cacheRead ?? 0;
       const cacheWrite = usage.cacheWrite ?? 0;
-      const usagePromptTokens = input + cacheRead + cacheWrite;
-      const totalTokens = usage.total ?? usagePromptTokens + output;
-      const contextUsedTokens = deriveContextPromptTokens({
-        lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
-        promptTokens,
-        usage,
-      });
+      const promptTokens = input + cacheRead + cacheWrite;
+      const totalTokens = usage.total ?? promptTokens + output;
       const costConfig = resolveModelCostConfig({
         provider: providerUsed,
         model: modelUsed,
         config: cfg,
       });
       const costUsd = estimateUsageCost({ usage, cost: costConfig });
-      emitTrustedDiagnosticEvent({
+      emitDiagnosticEvent({
         type: "model.usage",
-        ...(runResult.diagnosticTrace
-          ? {
-              trace: freezeDiagnosticTraceContext(
-                createChildDiagnosticTraceContext(runResult.diagnosticTrace),
-              ),
-            }
-          : {}),
         sessionKey,
         sessionId: followupRun.run.sessionId,
         channel: replyToChannel,
-        agentId: followupRun.run.agentId,
         provider: providerUsed,
         model: modelUsed,
         usage: {
@@ -1414,13 +1419,13 @@ export async function runReplyAgent(params: {
           output,
           cacheRead,
           cacheWrite,
-          promptTokens: usagePromptTokens,
+          promptTokens,
           total: totalTokens,
         },
         lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
         context: {
           limit: contextTokensUsed,
-          ...(contextUsedTokens !== undefined ? { used: contextUsedTokens } : {}),
+          used: totalTokens,
         },
         costUsd,
         durationMs: Date.now() - runStartedAt,
@@ -1534,11 +1539,9 @@ export async function runReplyAgent(params: {
         sessionKey,
         storePath,
         amount: autoCompactionCount,
-        compactionTokensAfter: runResult.meta?.agentMeta?.compactionTokensAfter,
         lastCallUsage: runResult.meta?.agentMeta?.lastCallUsage,
         contextTokensUsed,
         newSessionId: runResult.meta?.agentMeta?.sessionId,
-        newSessionFile: runResult.meta?.agentMeta?.sessionFile,
       });
       const refreshedSessionEntry =
         sessionKey && activeSessionStore ? activeSessionStore[sessionKey] : undefined;

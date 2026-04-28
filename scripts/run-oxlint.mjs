@@ -1,13 +1,10 @@
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import {
   acquireLocalHeavyCheckLockSync,
   applyLocalOxlintPolicy,
-  resolveLocalHeavyCheckEnv,
   shouldAcquireLocalHeavyCheckLockForOxlint,
 } from "./lib/local-heavy-check-runtime.mjs";
-import { runManagedCommand } from "./lib/managed-child-process.mjs";
 
 const oxlintPath = path.resolve("node_modules", ".bin", "oxlint");
 const PREPARE_EXTENSION_BOUNDARY_ARGS = [
@@ -23,106 +20,11 @@ const OXLINT_PREPARE_SKIP_FLAGS = new Set([
   "--init",
   "--lsp",
 ]);
-const OXLINT_VALUE_FLAGS = new Set([
-  "--config",
-  "--deny",
-  "--env",
-  "--format",
-  "--globals",
-  "--ignore-path",
-  "--max-warnings",
-  "--output-file",
-  "--plugin",
-  "--rules",
-  "--tsconfig",
-  "--warn",
-]);
-
 export function shouldPrepareExtensionPackageBoundaryArtifacts(args) {
   return !args.some((arg) => OXLINT_PREPARE_SKIP_FLAGS.has(arg));
 }
 
-export function filterSparseMissingOxlintTargets(
-  args,
-  {
-    cwd = process.cwd(),
-    fileExists = fs.existsSync,
-    isSparseCheckoutEnabled = getSparseCheckoutEnabled,
-    isTrackedPath = hasTrackedPath,
-  } = {},
-) {
-  if (!isSparseCheckoutEnabled({ cwd })) {
-    return { args, hadExplicitTargets: false, remainingExplicitTargets: 0, skippedTargets: [] };
-  }
-
-  const filteredArgs = [];
-  const skippedTargets = [];
-  let hadExplicitTargets = false;
-  let remainingExplicitTargets = 0;
-  let consumeNextValue = false;
-
-  for (const arg of args) {
-    if (consumeNextValue) {
-      filteredArgs.push(arg);
-      consumeNextValue = false;
-      continue;
-    }
-
-    if (arg === "--") {
-      filteredArgs.push(arg);
-      continue;
-    }
-
-    if (arg.startsWith("--")) {
-      filteredArgs.push(arg);
-      if (!arg.includes("=") && OXLINT_VALUE_FLAGS.has(arg)) {
-        consumeNextValue = true;
-      }
-      continue;
-    }
-
-    if (arg.startsWith("-")) {
-      filteredArgs.push(arg);
-      continue;
-    }
-
-    hadExplicitTargets = true;
-    const absoluteTarget = path.resolve(cwd, arg);
-    if (!fileExists(absoluteTarget) && isTrackedPath({ cwd, target: arg })) {
-      skippedTargets.push(arg);
-      continue;
-    }
-
-    remainingExplicitTargets += 1;
-    filteredArgs.push(arg);
-  }
-
-  return { args: filteredArgs, hadExplicitTargets, remainingExplicitTargets, skippedTargets };
-}
-
-function getSparseCheckoutEnabled({ cwd }) {
-  const result = spawnSync("git", ["config", "--get", "--bool", "core.sparseCheckout"], {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
-  });
-
-  return result.status === 0 && result.stdout.trim() === "true";
-}
-
-function hasTrackedPath({ cwd, target }) {
-  const result = spawnSync("git", ["ls-files", "--", target], {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
-  });
-
-  return result.status === 0 && result.stdout.trim().length > 0;
-}
-
-async function prepareExtensionPackageBoundaryArtifacts(env) {
+function prepareExtensionPackageBoundaryArtifacts(env) {
   const releaseArtifactsLock = acquireLocalHeavyCheckLockSync({
     cwd: process.cwd(),
     env,
@@ -131,15 +33,18 @@ async function prepareExtensionPackageBoundaryArtifacts(env) {
   });
 
   try {
-    const status = await runManagedCommand({
-      bin: process.execPath,
-      args: PREPARE_EXTENSION_BOUNDARY_ARGS,
+    const result = spawnSync(process.execPath, PREPARE_EXTENSION_BOUNDARY_ARGS, {
+      stdio: "inherit",
       env,
     });
 
-    if (status !== 0) {
+    if (result.error) {
+      throw result.error;
+    }
+
+    if ((result.status ?? 1) !== 0) {
       throw new Error(
-        `prepare-extension-package-boundary-artifacts failed with exit code ${status}`,
+        `prepare-extension-package-boundary-artifacts failed with exit code ${result.status ?? 1}`,
       );
     }
   } finally {
@@ -147,56 +52,40 @@ async function prepareExtensionPackageBoundaryArtifacts(env) {
   }
 }
 
-export async function main(argv = process.argv.slice(2), runtimeEnv = process.env) {
-  const { args: policyArgs, env } = applyLocalOxlintPolicy(
-    argv,
-    resolveLocalHeavyCheckEnv(runtimeEnv),
-  );
-  const sparseTargets = filterSparseMissingOxlintTargets(policyArgs);
-  const finalArgs = sparseTargets.args;
-  if (sparseTargets.skippedTargets.length > 0) {
-    console.error(
-      `[oxlint] sparse checkout is missing tracked target(s); skipping ${sparseTargets.skippedTargets.join(", ")}`,
-    );
-  }
-  if (sparseTargets.hadExplicitTargets && sparseTargets.remainingExplicitTargets === 0) {
-    console.error("[oxlint] no present sparse-checkout targets remain; skipping oxlint.");
-    return;
-  }
-
-  const releaseLock =
-    env.OPENCLAW_OXLINT_SKIP_LOCK === "1"
-      ? () => {}
-      : shouldAcquireLocalHeavyCheckLockForOxlint(finalArgs, {
-            cwd: process.cwd(),
-            env,
-          })
-        ? acquireLocalHeavyCheckLockSync({
-            cwd: process.cwd(),
-            env,
-            toolName: "oxlint",
-          })
-        : () => {};
+export function main(argv = process.argv.slice(2), runtimeEnv = process.env) {
+  const { args: finalArgs, env } = applyLocalOxlintPolicy(argv, runtimeEnv);
+  const releaseLock = shouldAcquireLocalHeavyCheckLockForOxlint(finalArgs, {
+    cwd: process.cwd(),
+    env,
+  })
+    ? acquireLocalHeavyCheckLockSync({
+        cwd: process.cwd(),
+        env,
+        toolName: "oxlint",
+      })
+    : () => {};
 
   try {
-    if (
-      env.OPENCLAW_OXLINT_SKIP_PREPARE !== "1" &&
-      shouldPrepareExtensionPackageBoundaryArtifacts(finalArgs)
-    ) {
-      await prepareExtensionPackageBoundaryArtifacts(env);
+    if (shouldPrepareExtensionPackageBoundaryArtifacts(finalArgs)) {
+      prepareExtensionPackageBoundaryArtifacts(env);
     }
 
-    const status = await runManagedCommand({
-      bin: oxlintPath,
-      args: finalArgs,
+    const result = spawnSync(oxlintPath, finalArgs, {
+      stdio: "inherit",
       env,
+      shell: process.platform === "win32",
     });
-    process.exitCode = status;
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    process.exitCode = result.status ?? 1;
   } finally {
     releaseLock();
   }
 }
 
 if (import.meta.main) {
-  await main();
+  main();
 }

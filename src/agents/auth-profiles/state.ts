@@ -9,18 +9,19 @@ function normalizeAuthProfileOrder(raw: unknown): AuthProfileState["order"] {
   if (!raw || typeof raw !== "object") {
     return undefined;
   }
-  const normalized = Object.entries(raw as Record<string, unknown>).reduce<
-    Record<string, string[]>
-  >((acc, [provider, value]) => {
-    if (!Array.isArray(value)) {
+  const normalized = Object.entries(raw as Record<string, unknown>).reduce(
+    (acc, [provider, value]) => {
+      if (!Array.isArray(value)) {
+        return acc;
+      }
+      const list = value.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean);
+      if (list.length > 0) {
+        acc[provider] = list;
+      }
       return acc;
-    }
-    const list = value.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean);
-    if (list.length > 0) {
-      acc[provider] = list;
-    }
-    return acc;
-  }, {});
+    },
+    {} as Record<string, string[]>,
+  );
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 

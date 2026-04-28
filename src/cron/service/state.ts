@@ -1,8 +1,7 @@
 import type { CronConfig } from "../../config/types.cron.js";
-import type { HeartbeatRunResult, HeartbeatWakeRequest } from "../../infra/heartbeat-wake.js";
+import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type {
   CronDeliveryStatus,
-  CronDeliveryTrace,
   CronJob,
   CronJobCreate,
   CronJobPatch,
@@ -24,7 +23,6 @@ export type CronEvent = {
   delivered?: boolean;
   deliveryStatus?: CronDeliveryStatus;
   deliveryError?: string;
-  delivery?: CronDeliveryTrace;
   sessionId?: string;
   sessionKey?: string;
   nextRunAtMs?: number;
@@ -64,9 +62,9 @@ export type CronServiceDeps = {
   maxMissedJobsPerRestart?: number;
   enqueueSystemEvent: (
     text: string,
-    opts?: { agentId?: string; sessionKey?: string; contextKey?: string; trusted?: boolean },
+    opts?: { agentId?: string; sessionKey?: string; contextKey?: string },
   ) => void;
-  requestHeartbeatNow: (opts?: HeartbeatWakeRequest) => void;
+  requestHeartbeatNow: (opts?: { reason?: string; agentId?: string; sessionKey?: string }) => void;
   runHeartbeatOnce?: (opts?: {
     reason?: string;
     agentId?: string;
@@ -86,7 +84,6 @@ export type CronServiceDeps = {
     job: CronJob;
     message: string;
     abortSignal?: AbortSignal;
-    onExecutionStarted?: () => void;
   }) => Promise<
     {
       summary?: string;
@@ -103,7 +100,6 @@ export type CronServiceDeps = {
        * if the final per-message ack status is uncertain.
        */
       deliveryAttempted?: boolean;
-      delivery?: CronDeliveryTrace;
     } & CronRunOutcome &
       CronRunTelemetry
   >;
@@ -129,12 +125,6 @@ export type CronServiceState = {
   running: boolean;
   op: Promise<unknown>;
   warnedDisabled: boolean;
-  /**
-   * Job ids whose missing `sessionTarget` was defaulted at load and warned
-   * about. Used to suppress duplicate warns across forceReload ticks so a
-   * single broken job does not spam the log on every scheduler cycle.
-   */
-  warnedMissingSessionTargetJobIds: Set<string>;
   storeLoadedAtMs: number | null;
   storeFileMtimeMs: number | null;
 };
@@ -147,7 +137,6 @@ export function createCronServiceState(deps: CronServiceDeps): CronServiceState 
     running: false,
     op: Promise.resolve(),
     warnedDisabled: false,
-    warnedMissingSessionTargetJobIds: new Set<string>(),
     storeLoadedAtMs: null,
     storeFileMtimeMs: null,
   };

@@ -1,3 +1,8 @@
+import {
+  resolveDefaultGroupPolicy,
+  resolveOpenProviderRuntimeGroupPolicy,
+  warnMissingProviderGroupPolicyFallbackOnce,
+} from "openclaw/plugin-sdk/runtime-group-policy";
 import { vi, type Mock } from "vitest";
 
 export type AsyncMock<TArgs extends unknown[] = unknown[], TResult = unknown> = {
@@ -18,13 +23,12 @@ export function resetPairingSecurityMocks(config: Record<string, unknown>) {
   upsertPairingRequestMock.mockReset().mockResolvedValue({ code: "PAIRCODE", created: true });
 }
 
-vi.mock("openclaw/plugin-sdk/runtime-config-snapshot", async () => {
-  const actual = await vi.importActual<
-    typeof import("openclaw/plugin-sdk/runtime-config-snapshot")
-  >("openclaw/plugin-sdk/runtime-config-snapshot");
+vi.mock("openclaw/plugin-sdk/config-runtime", () => {
   return {
-    ...actual,
-    getRuntimeConfig: (...args: unknown[]) => loadConfigMock(...args),
+    loadConfig: (...args: unknown[]) => loadConfigMock(...args),
+    resolveDefaultGroupPolicy,
+    resolveOpenProviderRuntimeGroupPolicy,
+    warnMissingProviderGroupPolicyFallbackOnce,
   };
 });
 

@@ -1,23 +1,19 @@
+import { Type } from "@sinclair/typebox";
 import {
   listMemoryCorpusSupplements,
   resolveMemorySearchConfig,
   resolveSessionAgentId,
+  type MemoryCorpusGetResult,
   type MemoryCorpusSearchResult,
   type AnyAgentTool,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
-import { Type } from "typebox";
 
 type MemoryToolRuntime = typeof import("./tools.runtime.js");
 type MemorySearchManagerResult = Awaited<
   ReturnType<(typeof import("./memory/index.js"))["getMemorySearchManager"]>
 >;
-type MemoryToolOptions = {
-  config?: OpenClawConfig;
-  getConfig?: () => OpenClawConfig | undefined;
-  agentSessionKey?: string;
-};
 
 let memoryToolRuntimePromise: Promise<MemoryToolRuntime> | null = null;
 
@@ -31,12 +27,7 @@ export const MemorySearchSchema = Type.Object({
   maxResults: Type.Optional(Type.Number()),
   minScore: Type.Optional(Type.Number()),
   corpus: Type.Optional(
-    Type.Union([
-      Type.Literal("memory"),
-      Type.Literal("wiki"),
-      Type.Literal("all"),
-      Type.Literal("sessions"),
-    ]),
+    Type.Union([Type.Literal("memory"), Type.Literal("wiki"), Type.Literal("all")]),
   ),
 });
 
@@ -49,8 +40,11 @@ export const MemoryGetSchema = Type.Object({
   ),
 });
 
-export function resolveMemoryToolContext(options: MemoryToolOptions) {
-  const cfg = options.getConfig?.() ?? options.config;
+export function resolveMemoryToolContext(options: {
+  config?: OpenClawConfig;
+  agentSessionKey?: string;
+}) {
+  const cfg = options.config;
   if (!cfg) {
     return null;
   }
@@ -81,7 +75,7 @@ export async function getMemoryManagerContext(params: {
 export async function getMemoryManagerContextWithPurpose(params: {
   cfg: OpenClawConfig;
   agentId: string;
-  purpose?: "default" | "status" | "cli";
+  purpose?: "default" | "status";
 }): Promise<
   | {
       manager: NonNullable<MemorySearchManagerResult["manager"]>;
@@ -100,7 +94,10 @@ export async function getMemoryManagerContextWithPurpose(params: {
 }
 
 export function createMemoryTool(params: {
-  options: MemoryToolOptions;
+  options: {
+    config?: OpenClawConfig;
+    agentSessionKey?: string;
+  };
   label: string;
   name: string;
   description: string;
@@ -116,10 +113,7 @@ export function createMemoryTool(params: {
     name: params.name,
     description: params.description,
     parameters: params.parameters,
-    execute: async (toolCallId, toolParams) => {
-      const latestCtx = resolveMemoryToolContext(params.options) ?? ctx;
-      return await params.execute(latestCtx)(toolCallId, toolParams);
-    },
+    execute: params.execute(ctx),
   };
 }
 
@@ -151,9 +145,9 @@ export async function searchMemoryCorpusSupplements(params: {
   query: string;
   maxResults?: number;
   agentSessionKey?: string;
-  corpus?: "memory" | "wiki" | "all" | "sessions";
+  corpus?: "memory" | "wiki" | "all";
 }): Promise<MemoryCorpusSearchResult[]> {
-  if (params.corpus === "memory" || params.corpus === "sessions") {
+  if (params.corpus === "memory") {
     return [];
   }
   const supplements = listMemoryCorpusSupplements();
@@ -180,9 +174,9 @@ export async function getMemoryCorpusSupplementResult(params: {
   fromLine?: number;
   lineCount?: number;
   agentSessionKey?: string;
-  corpus?: "memory" | "wiki" | "all" | "sessions";
-}) {
-  if (params.corpus === "memory" || params.corpus === "sessions") {
+  corpus?: "memory" | "wiki" | "all";
+}): Promise<MemoryCorpusGetResult | null> {
+  if (params.corpus === "memory") {
     return null;
   }
   for (const registration of listMemoryCorpusSupplements()) {

@@ -12,6 +12,7 @@ import {
   formatError,
   getStatusCode,
   logoutWeb,
+  waitForCredsSaveQueueWithTimeout,
   waitForWaConnection,
 } from "./session.js";
 
@@ -40,10 +41,8 @@ export type WhatsAppLiveConnection = {
   heartbeat: TimerHandle | null;
   watchdogTimer: TimerHandle | null;
   lastInboundAt: number | null;
-  lastTransportActivityAt: number;
   handledMessages: number;
   unregisterUnhandled: (() => void) | null;
-  unregisterTransportActivity: (() => void) | null;
   backgroundTasks: Set<Promise<unknown>>;
   closePromise: Promise<WebListenerCloseReason>;
   resolveClose: (reason: WebListenerCloseReason) => void;
@@ -53,7 +52,6 @@ export type WhatsAppConnectionSnapshot = {
   connectionId: string;
   startedAt: number;
   lastInboundAt: number | null;
-  lastTransportActivityAt: number;
   handledMessages: number;
   reconnectAttempts: number;
   uptimeMs: number;
@@ -75,22 +73,9 @@ export type WhatsAppConnectionCloseDecision = {
   normalized: NormalizedConnectionCloseReason;
 };
 
-export type WhatsAppReconnectAttemptDecision = {
-  action: "stop" | "retry";
-  delayMs?: number;
-  reconnectAttempts: number;
-  healthState: "stopped" | "reconnecting";
-};
-
 function createNeverResolvePromise<T>(): Promise<T> {
   return new Promise<T>(() => {});
 }
-
-type SocketActivityEmitter = {
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  off?: (event: string, listener: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
-};
 
 function createLiveConnection(params: {
   connectionId: string;
@@ -117,10 +102,8 @@ function createLiveConnection(params: {
     heartbeat: null,
     watchdogTimer: null,
     lastInboundAt: null,
-    lastTransportActivityAt: Date.now(),
     handledMessages: 0,
     unregisterUnhandled: null,
-    unregisterTransportActivity: null,
     backgroundTasks: new Set<Promise<unknown>>(),
     closePromise,
     resolveClose: resolveClosePromise,
@@ -171,7 +154,6 @@ export async function waitForWhatsAppLoginResult(params: {
   runtime: RuntimeEnv;
   waitForConnection?: typeof waitForWaConnection;
   createSocket?: typeof createWaSocket;
-  onQr?: (qr: string) => void;
   onSocketReplaced?: (sock: WaSocket) => void;
 }): Promise<WhatsAppLoginWaitResult> {
   const wait = params.waitForConnection ?? waitForWaConnection;
@@ -193,10 +175,10 @@ export async function waitForWhatsAppLoginResult(params: {
         restarted = true;
         params.runtime.log(info(WHATSAPP_LOGIN_RESTART_MESSAGE));
         closeWaSocket(currentSock);
+        await waitForCredsSaveQueueWithTimeout(params.authDir);
         try {
           currentSock = await createSocket(false, params.verbose, {
             authDir: params.authDir,
-            onQr: params.onQr,
           });
           params.onSocketReplaced?.(currentSock);
           continue;
@@ -243,7 +225,6 @@ export class WhatsAppConnectionController {
   private readonly heartbeatSeconds: number;
   private readonly keepAlive: boolean;
   private readonly messageTimeoutMs: number;
-  private readonly appSilenceTimeoutMs: number;
   private readonly watchdogCheckMs: number;
   private readonly verbose: boolean;
   private readonly abortSignal?: AbortSignal;
@@ -274,7 +255,6 @@ export class WhatsAppConnectionController {
     this.keepAlive = params.keepAlive;
     this.heartbeatSeconds = params.heartbeatSeconds;
     this.messageTimeoutMs = params.messageTimeoutMs;
-    this.appSilenceTimeoutMs = Math.max(params.messageTimeoutMs, params.messageTimeoutMs * 4);
     this.watchdogCheckMs = params.watchdogCheckMs;
     this.reconnectPolicy = params.reconnectPolicy;
     this.abortSignal = params.abortSignal;
@@ -324,14 +304,6 @@ export class WhatsAppConnectionController {
     }
     this.current.handledMessages += 1;
     this.current.lastInboundAt = timestamp;
-    this.current.lastTransportActivityAt = timestamp;
-  }
-
-  noteTransportActivity(timestamp = Date.now()): void {
-    if (!this.current) {
-      return;
-    }
-    this.current.lastTransportActivityAt = timestamp;
   }
 
   getCurrentSnapshot(
@@ -344,7 +316,6 @@ export class WhatsAppConnectionController {
       connectionId: connection.connectionId,
       startedAt: connection.startedAt,
       lastInboundAt: connection.lastInboundAt,
-      lastTransportActivityAt: connection.lastTransportActivityAt,
       handledMessages: connection.handledMessages,
       reconnectAttempts: this.reconnectAttempts,
       uptimeMs: Date.now() - connection.startedAt,
@@ -376,6 +347,7 @@ export class WhatsAppConnectionController {
     let sock: WaSocket | null = null;
     let connection: WhatsAppLiveConnection | null = null;
     try {
+      await waitForCredsSaveQueueWithTimeout(this.authDir);
       sock = await createWaSocket(false, this.verbose, {
         authDir: this.authDir,
       });
@@ -391,7 +363,6 @@ export class WhatsAppConnectionController {
       const listener = await params.createListener({ sock, connection });
       connection.listener = listener;
       this.current = connection;
-      connection.unregisterTransportActivity = this.attachTransportActivityListener(sock);
       registerWhatsAppConnectionController(this.accountId, this);
       this.startTimers(connection, {
         onHeartbeat: params.onHeartbeat,
@@ -406,7 +377,6 @@ export class WhatsAppConnectionController {
       if (connection?.unregisterUnhandled) {
         connection.unregisterUnhandled();
       }
-      connection?.unregisterTransportActivity?.();
       throw err;
     }
   }
@@ -479,26 +449,6 @@ export class WhatsAppConnectionController {
       };
     }
 
-    const retryDecision = this.consumeReconnectAttempt();
-    if (retryDecision.action === "stop") {
-      return {
-        action: "stop",
-        reconnectAttempts: retryDecision.reconnectAttempts,
-        healthState: retryDecision.healthState,
-        normalized,
-      };
-    }
-
-    return {
-      action: "retry",
-      delayMs: retryDecision.delayMs,
-      reconnectAttempts: retryDecision.reconnectAttempts,
-      healthState: retryDecision.healthState,
-      normalized,
-    };
-  }
-
-  consumeReconnectAttempt(): WhatsAppReconnectAttemptDecision {
     this.reconnectAttempts += 1;
     if (
       this.reconnectPolicy.maxAttempts > 0 &&
@@ -508,6 +458,7 @@ export class WhatsAppConnectionController {
         action: "stop",
         reconnectAttempts: this.reconnectAttempts,
         healthState: "stopped",
+        normalized,
       };
     }
 
@@ -516,6 +467,7 @@ export class WhatsAppConnectionController {
       delayMs: computeBackoff(this.reconnectPolicy, this.reconnectAttempts),
       reconnectAttempts: this.reconnectAttempts,
       healthState: "reconnecting",
+      normalized,
     };
   }
 
@@ -539,7 +491,6 @@ export class WhatsAppConnectionController {
       this.socketRef.current = null;
     }
     connection.unregisterUnhandled?.();
-    connection.unregisterTransportActivity?.();
     if (connection.heartbeat) {
       clearInterval(connection.heartbeat);
     }
@@ -588,14 +539,9 @@ export class WhatsAppConnectionController {
     }, this.heartbeatSeconds * 1000);
 
     connection.watchdogTimer = setInterval(() => {
-      const now = Date.now();
-      const transportStaleForMs = now - connection.lastTransportActivityAt;
-      const appBaselineAt = connection.lastInboundAt ?? connection.startedAt;
-      const appSilentForMs = now - appBaselineAt;
-      if (
-        transportStaleForMs <= this.messageTimeoutMs &&
-        appSilentForMs <= this.appSilenceTimeoutMs
-      ) {
+      const baselineAt = connection.lastInboundAt ?? connection.startedAt;
+      const staleForMs = Date.now() - baselineAt;
+      if (staleForMs <= this.messageTimeoutMs) {
         return;
       }
       const snapshot = this.getCurrentSnapshot(connection);
@@ -609,24 +555,6 @@ export class WhatsAppConnectionController {
         error: "watchdog-timeout",
       });
     }, this.watchdogCheckMs);
-  }
-
-  private attachTransportActivityListener(sock: WASocket): (() => void) | null {
-    const ws = sock.ws as SocketActivityEmitter | undefined;
-    if (!ws || typeof ws.on !== "function") {
-      return null;
-    }
-
-    const noteActivity = () => this.noteTransportActivity();
-    ws.on("frame", noteActivity);
-
-    return () => {
-      if (typeof ws.off === "function") {
-        ws.off("frame", noteActivity);
-        return;
-      }
-      ws.removeListener?.("frame", noteActivity);
-    };
   }
 
   private stopDisconnectRetries(): void {

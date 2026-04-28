@@ -19,7 +19,6 @@ type QaManualLaneParams = {
   thinkingDefault?: QaThinkingLevel;
   message: string;
   timeoutMs?: number;
-  replySettleMs?: number;
 };
 
 function resolveManualLaneTimeoutMs(params: {
@@ -109,10 +108,7 @@ export async function runQaManualLane(params: QaManualLaneParams) {
       { timeoutMs: timeoutMs + 5_000 },
     )) as { status?: string; error?: string };
 
-    const replySettleMs = params.replySettleMs ?? 500;
-    if (replySettleMs > 0) {
-      await sleep(replySettleMs);
-    }
+    await sleep(500);
 
     const reply =
       lab.state

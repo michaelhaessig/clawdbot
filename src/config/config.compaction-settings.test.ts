@@ -32,7 +32,6 @@ describe("config compaction settings", () => {
         prompt: "Write notes.",
         systemPrompt: "Flush memory now.",
       },
-      maxActiveTranscriptBytes: "20mb",
     });
 
     expect(compaction?.reserveTokensFloor).toBe(12_345);
@@ -47,7 +46,6 @@ describe("config compaction settings", () => {
     expect(compaction?.memoryFlush?.softThresholdTokens).toBe(1234);
     expect(compaction?.memoryFlush?.prompt).toBe("Write notes.");
     expect(compaction?.memoryFlush?.systemPrompt).toBe("Flush memory now.");
-    expect(compaction?.maxActiveTranscriptBytes).toBe("20mb");
   });
 
   it("preserves pi compaction override values", () => {

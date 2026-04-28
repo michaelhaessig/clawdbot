@@ -88,15 +88,13 @@ const baseAccount = (accountId: string) =>
 function registerTwoTargets() {
   const sinkA = vi.fn();
   const sinkB = vi.fn();
-  const logA = vi.fn();
-  const logB = vi.fn();
   const core = {} as PluginRuntime;
   const config = {} as OpenClawConfig;
 
   const unregisterA = registerGoogleChatWebhookTarget({
     account: baseAccount("A"),
     config,
-    runtime: { log: logA },
+    runtime: {},
     core,
     path: "/googlechat",
     statusSink: sinkA,
@@ -105,7 +103,7 @@ function registerTwoTargets() {
   const unregisterB = registerGoogleChatWebhookTarget({
     account: baseAccount("B"),
     config,
-    runtime: { log: logB },
+    runtime: {},
     core,
     path: "/googlechat",
     statusSink: sinkB,
@@ -113,8 +111,6 @@ function registerTwoTargets() {
   });
 
   return {
-    logA,
-    logB,
     sinkA,
     sinkB,
     unregister: () => {
@@ -181,7 +177,7 @@ describe("Google Chat webhook routing", () => {
   it("routes to the single verified target when earlier targets fail verification", async () => {
     mockSecondVerifierSuccess();
 
-    const { logA, logB, sinkA, sinkB, unregister } = registerTwoTargets();
+    const { sinkA, sinkB, unregister } = registerTwoTargets();
 
     try {
       await expectVerifiedRoute({
@@ -194,8 +190,6 @@ describe("Google Chat webhook routing", () => {
         sinkB,
         expectedSink: "B",
       });
-      expect(logA).not.toHaveBeenCalled();
-      expect(logB).not.toHaveBeenCalled();
     } finally {
       unregister();
     }

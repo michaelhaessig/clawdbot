@@ -3,8 +3,10 @@ summary: "Kimi web search via Moonshot web search"
 read_when:
   - You want to use Kimi for web_search
   - You need a KIMI_API_KEY or MOONSHOT_API_KEY
-title: "Kimi search"
+title: "Kimi Search"
 ---
+
+# Kimi Search
 
 OpenClaw supports Kimi as a `web_search` provider, using Moonshot web search
 to produce AI-synthesized answers with citations.
@@ -32,7 +34,7 @@ When you choose **Kimi** during `openclaw onboard` or
 - the Moonshot API region:
   - `https://api.moonshot.ai/v1`
   - `https://api.moonshot.cn/v1`
-- the default Kimi web-search model (defaults to `kimi-k2.6`)
+- the default Kimi web-search model (defaults to `kimi-k2.5`)
 
 ## Config
 
@@ -45,7 +47,7 @@ When you choose **Kimi** during `openclaw onboard` or
           webSearch: {
             apiKey: "sk-...", // optional if KIMI_API_KEY or MOONSHOT_API_KEY is set
             baseUrl: "https://api.moonshot.ai/v1",
-            model: "kimi-k2.6",
+            model: "kimi-k2.5",
           },
         },
       },
@@ -72,7 +74,7 @@ with `tools.web.search.kimi.baseUrl` when you need a different search base URL.
 Gateway environment. For a gateway install, put it in `~/.openclaw/.env`.
 
 If you omit `baseUrl`, OpenClaw defaults to `https://api.moonshot.ai/v1`.
-If you omit `model`, OpenClaw defaults to `kimi-k2.6`.
+If you omit `model`, OpenClaw defaults to `kimi-k2.5`.
 
 ## How it works
 

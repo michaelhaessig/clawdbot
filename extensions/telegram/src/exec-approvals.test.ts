@@ -5,7 +5,7 @@ import type {
   OpenClawConfig,
   TelegramAccountConfig,
   TelegramExecApprovalConfig,
-} from "openclaw/plugin-sdk/config-types";
+} from "openclaw/plugin-sdk/config-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getTelegramExecApprovalApprovers,
@@ -110,7 +110,7 @@ function makeForeignChannelApprovalRequest(params: {
 }
 
 describe("telegram exec approvals", () => {
-  it("requires explicit enablement even when approvers resolve", () => {
+  it("auto-enables when approvers resolve and disables only when forced off", () => {
     expect(isTelegramExecApprovalClientEnabled({ cfg: buildConfig() })).toBe(false);
     expect(
       isTelegramExecApprovalClientEnabled({
@@ -121,15 +121,10 @@ describe("telegram exec approvals", () => {
       isTelegramExecApprovalClientEnabled({
         cfg: buildConfig(undefined, { allowFrom: ["123"] }),
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isTelegramExecApprovalClientEnabled({
         cfg: buildConfig({ approvers: ["123"] }),
-      }),
-    ).toBe(false);
-    expect(
-      isTelegramExecApprovalClientEnabled({
-        cfg: buildConfig({ enabled: "auto", approvers: ["123"] }),
       }),
     ).toBe(true);
     expect(

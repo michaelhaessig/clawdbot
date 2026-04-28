@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { stringEnum } from "../schema/typebox.js";
 import {
   describeUpdatePlanTool,

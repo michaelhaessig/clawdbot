@@ -2,13 +2,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import JSZip from "jszip";
 import {
-  ARCHIVE_LIMIT_ERROR_CODE,
-  ArchiveLimitError,
   DEFAULT_MAX_ARCHIVE_BYTES_ZIP,
   DEFAULT_MAX_ENTRIES,
   DEFAULT_MAX_EXTRACTED_BYTES,
   DEFAULT_MAX_ENTRY_BYTES,
-  loadZipArchiveWithPreflight,
 } from "../infra/archive.js";
 import {
   ClawHubRequestError,
@@ -138,7 +135,7 @@ function isClawHubInstallFailure(value: unknown): value is ClawHubInstallFailure
     value &&
     typeof value === "object" &&
     "ok" in value &&
-    Object.is((value as { ok?: unknown }).ok, false) &&
+    (value as { ok?: unknown }).ok === false &&
     "error" in value,
   );
 }
@@ -461,27 +458,6 @@ function validateClawHubArchiveMetaJson(params: {
   return null;
 }
 
-function mapClawHubArchiveReadFailure(error: unknown): ClawHubInstallFailure {
-  if (error instanceof ArchiveLimitError) {
-    if (error.code === ARCHIVE_LIMIT_ERROR_CODE.ENTRY_COUNT_EXCEEDS_LIMIT) {
-      return buildClawHubInstallFailure(
-        "ClawHub archive fallback verification exceeded the archive entry limit.",
-        CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
-      );
-    }
-    if (error.code === ARCHIVE_LIMIT_ERROR_CODE.ARCHIVE_SIZE_EXCEEDS_LIMIT) {
-      return buildClawHubInstallFailure(
-        "ClawHub archive fallback verification rejected the downloaded archive because it exceeds the ZIP archive size limit.",
-        CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
-      );
-    }
-  }
-  return buildClawHubInstallFailure(
-    "ClawHub archive fallback verification failed while reading the downloaded archive.",
-    CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
-  );
-}
-
 async function verifyClawHubArchiveFiles(params: {
   archivePath: string;
   packageName: string;
@@ -497,12 +473,7 @@ async function verifyClawHubArchiveFiles(params: {
       );
     }
     const archiveBytes = await fs.readFile(params.archivePath);
-    const zip = await loadZipArchiveWithPreflight(archiveBytes, {
-      maxArchiveBytes: DEFAULT_MAX_ARCHIVE_BYTES_ZIP,
-      maxEntries: DEFAULT_MAX_ENTRIES,
-      maxExtractedBytes: DEFAULT_MAX_EXTRACTED_BYTES,
-      maxEntryBytes: DEFAULT_MAX_ENTRY_BYTES,
-    });
+    const zip = await JSZip.loadAsync(archiveBytes);
     const actualFiles = new Map<string, string>();
     const validatedGeneratedPaths = new Set<string>();
     let entryCount = 0;
@@ -584,8 +555,11 @@ async function verifyClawHubArchiveFiles(params: {
       ok: true,
       validatedGeneratedPaths: [...validatedGeneratedPaths].toSorted(),
     };
-  } catch (error) {
-    return mapClawHubArchiveReadFailure(error);
+  } catch {
+    return buildClawHubInstallFailure(
+      "ClawHub archive fallback verification failed while reading the downloaded archive.",
+      CLAWHUB_INSTALL_ERROR_CODE.ARCHIVE_INTEGRITY_MISMATCH,
+    );
   }
 }
 
@@ -594,7 +568,6 @@ async function resolveCompatiblePackageVersion(params: {
   requestedVersion?: string;
   baseUrl?: string;
   token?: string;
-  timeoutMs?: number;
 }): Promise<
   | {
       ok: true;
@@ -618,7 +591,6 @@ async function resolveCompatiblePackageVersion(params: {
       version: requestedVersion,
       baseUrl: params.baseUrl,
       token: params.token,
-      timeoutMs: params.timeoutMs,
     });
   } catch (error) {
     return mapClawHubRequestError(error, {
@@ -748,8 +720,6 @@ export async function installPluginFromClawHub(
     token?: string;
     logger?: PluginInstallLogger;
     mode?: "install" | "update";
-    extensionsDir?: string;
-    timeoutMs?: number;
     dryRun?: boolean;
     expectedPluginId?: string;
   },
@@ -778,7 +748,6 @@ export async function installPluginFromClawHub(
       name: parsed.name,
       baseUrl: params.baseUrl,
       token: params.token,
-      timeoutMs: params.timeoutMs,
     });
   } catch (error) {
     return mapClawHubRequestError(error, {
@@ -791,7 +760,6 @@ export async function installPluginFromClawHub(
     requestedVersion: parsed.version,
     baseUrl: params.baseUrl,
     token: params.token,
-    timeoutMs: params.timeoutMs,
   });
   if (!versionState.ok) {
     return versionState;
@@ -826,7 +794,6 @@ export async function installPluginFromClawHub(
       version: versionState.version,
       baseUrl: params.baseUrl,
       token: params.token,
-      timeoutMs: params.timeoutMs,
     });
   } catch (error) {
     return buildClawHubInstallFailure(formatErrorMessage(error));
@@ -869,8 +836,6 @@ export async function installPluginFromClawHub(
       dangerouslyForceUnsafeInstall: params.dangerouslyForceUnsafeInstall,
       logger: params.logger,
       mode: params.mode,
-      extensionsDir: params.extensionsDir,
-      timeoutMs: params.timeoutMs,
       dryRun: params.dryRun,
       expectedPluginId: params.expectedPluginId,
     });

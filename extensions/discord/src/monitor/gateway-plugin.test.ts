@@ -1,6 +1,4 @@
-import { EventEmitter } from "node:events";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DISCORD_GATEWAY_TRANSPORT_ACTIVITY_EVENT } from "./gateway-handle.js";
 
 const { baseConnectSpy, GatewayIntents, GatewayPlugin } = vi.hoisted(() => {
   const baseConnectSpy = vi.fn<(resume: boolean) => void>();
@@ -16,30 +14,12 @@ const { baseConnectSpy, GatewayIntents, GatewayPlugin } = vi.hoisted(() => {
     GuildMembers: 1 << 7,
   } as const;
 
-  class TestEmitter {
-    private readonly listenersByEvent = new Map<string, Array<(value: unknown) => void>>();
-
-    on(event: string, listener: (value: unknown) => void) {
-      const listeners = this.listenersByEvent.get(event) ?? [];
-      listeners.push(listener);
-      this.listenersByEvent.set(event, listeners);
-    }
-
-    emit(event: string, value: unknown) {
-      for (const listener of this.listenersByEvent.get(event) ?? []) {
-        listener(value);
-      }
-    }
-  }
-
   class GatewayPlugin {
     options: unknown;
     gatewayInfo: unknown;
-    emitter = new TestEmitter();
     heartbeatInterval: ReturnType<typeof setInterval> | undefined = undefined;
     firstHeartbeatTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
     isConnecting: boolean = false;
-    ws?: unknown;
 
     constructor(options?: unknown) {
       this.options = options;
@@ -84,9 +64,7 @@ describe("SafeGatewayPlugin.connect()", () => {
     baseConnectSpy.mockClear();
   });
 
-  function createPlugin(
-    testing?: NonNullable<Parameters<typeof createDiscordGatewayPlugin>[0]["__testing"]>,
-  ) {
+  function createPlugin() {
     return createDiscordGatewayPlugin({
       discordConfig: {},
       runtime: {
@@ -94,7 +72,6 @@ describe("SafeGatewayPlugin.connect()", () => {
         error: vi.fn(),
         exit: vi.fn(),
       },
-      ...(testing ? { __testing: testing } : {}),
     });
   }
 
@@ -134,59 +111,5 @@ describe("SafeGatewayPlugin.connect()", () => {
     } finally {
       clearTimeout(staleTimeout);
     }
-  });
-
-  it("emits transport activity for current gateway socket messages", () => {
-    const socket = new EventEmitter() as EventEmitter & { binaryType?: string };
-    const plugin = createPlugin({
-      webSocketCtor: function WebSocketCtor() {
-        return socket;
-      } as unknown as NonNullable<
-        Parameters<typeof createDiscordGatewayPlugin>[0]["__testing"]
-      >["webSocketCtor"],
-    });
-    const activitySpy = vi.fn();
-    (
-      plugin as unknown as {
-        emitter: { on: (event: string, listener: (value: unknown) => void) => void };
-      }
-    ).emitter.on(DISCORD_GATEWAY_TRANSPORT_ACTIVITY_EVENT, activitySpy);
-
-    const createdSocket = (
-      plugin as unknown as { createWebSocket: (url: string) => typeof socket }
-    ).createWebSocket("wss://gateway.discord.gg");
-    (plugin as unknown as { ws: unknown }).ws = createdSocket;
-
-    createdSocket.emit("message", Buffer.from("{}"));
-
-    expect(activitySpy).toHaveBeenCalledWith({ at: expect.any(Number) });
-  });
-
-  it("ignores messages from stale gateway sockets", () => {
-    const staleSocket = new EventEmitter() as EventEmitter & { binaryType?: string };
-    const currentSocket = new EventEmitter();
-    const plugin = createPlugin({
-      webSocketCtor: function WebSocketCtor() {
-        return staleSocket;
-      } as unknown as NonNullable<
-        Parameters<typeof createDiscordGatewayPlugin>[0]["__testing"]
-      >["webSocketCtor"],
-    });
-    const activitySpy = vi.fn();
-    (
-      plugin as unknown as {
-        emitter: { on: (event: string, listener: (value: unknown) => void) => void };
-      }
-    ).emitter.on(DISCORD_GATEWAY_TRANSPORT_ACTIVITY_EVENT, activitySpy);
-
-    const createdSocket = (
-      plugin as unknown as { createWebSocket: (url: string) => typeof staleSocket }
-    ).createWebSocket("wss://gateway.discord.gg");
-    expect(createdSocket).toBe(staleSocket);
-    (plugin as unknown as { ws: unknown }).ws = currentSocket;
-
-    staleSocket.emit("message", Buffer.from("{}"));
-
-    expect(activitySpy).not.toHaveBeenCalled();
   });
 });

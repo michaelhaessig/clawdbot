@@ -13,12 +13,8 @@ import {
   mergeBundlePathLists,
   normalizeBundlePathList,
 } from "./bundle-manifest.js";
-import {
-  hasExplicitPluginConfig,
-  normalizePluginsConfig,
-  resolveEffectivePluginActivationState,
-} from "./config-state.js";
-import { loadPluginManifestRegistryForPluginRegistry } from "./plugin-registry-contributions.js";
+import { normalizePluginsConfig, resolveEffectivePluginActivationState } from "./config-state.js";
+import { loadPluginManifestRegistry } from "./manifest-registry.js";
 
 export type ClaudeBundleCommandSpec = {
   pluginId: string;
@@ -173,14 +169,10 @@ export function loadEnabledClaudeBundleCommands(params: {
   workspaceDir: string;
   cfg?: OpenClawConfig;
 }): ClaudeBundleCommandSpec[] {
-  if (!hasExplicitPluginConfig(params.cfg?.plugins)) {
-    return [];
-  }
-  const registry = loadPluginManifestRegistryForPluginRegistry({
+  const registry = loadPluginManifestRegistry({
     workspaceDir: params.workspaceDir,
     config: params.cfg,
     cache: false,
-    includeDisabled: true,
   });
   const normalizedPlugins = normalizePluginsConfig(params.cfg?.plugins);
   const commands: ClaudeBundleCommandSpec[] = [];

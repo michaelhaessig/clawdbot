@@ -59,7 +59,6 @@ export function createExecApprovalChannelRuntime<
   let started = false;
   let shouldRun = false;
   let startPromise: Promise<void> | null = null;
-  let replayPromise: Promise<void> | null = null;
 
   const shouldKeepRunning = (): boolean => shouldRun;
 
@@ -213,53 +212,6 @@ export function createExecApprovalChannelRuntime<
     }
   };
 
-  const replayPendingApprovals = async (client: GatewayClient): Promise<void> => {
-    try {
-      for (const method of resolveApprovalReplayMethods(eventKinds)) {
-        if (stopClientIfInactive(client)) {
-          return;
-        }
-        const pendingRequests = await client.request<Array<TRequest>>(method, {});
-        if (stopClientIfInactive(client)) {
-          return;
-        }
-        for (const request of pendingRequests) {
-          if (stopClientIfInactive(client)) {
-            return;
-          }
-          await handleRequested(request, { ignoreIfInactive: true });
-        }
-      }
-    } catch (error) {
-      if (!shouldKeepRunning()) {
-        return;
-      }
-      throw error;
-    }
-  };
-
-  const startPendingApprovalReplay = (client: GatewayClient): void => {
-    const promise = replayPendingApprovals(client)
-      .catch((err: unknown) => {
-        const message = formatErrorMessage(err);
-        log.error(`error replaying pending approvals: ${message}`);
-      })
-      .finally(() => {
-        if (replayPromise === promise) {
-          replayPromise = null;
-        }
-      });
-    replayPromise = promise;
-  };
-
-  const waitForPendingApprovalReplay = async (): Promise<void> => {
-    const replay = replayPromise;
-    if (!replay) {
-      return;
-    }
-    await replay.catch(() => {});
-  };
-
   return {
     async start(): Promise<void> {
       if (started) {
@@ -323,8 +275,22 @@ export function createExecApprovalChannelRuntime<
           if (stopClientIfInactive(client)) {
             return;
           }
+          for (const method of resolveApprovalReplayMethods(eventKinds)) {
+            if (stopClientIfInactive(client)) {
+              return;
+            }
+            const pendingRequests = await client.request<Array<TRequest>>(method, {});
+            if (stopClientIfInactive(client)) {
+              return;
+            }
+            for (const request of pendingRequests) {
+              if (stopClientIfInactive(client)) {
+                return;
+              }
+              await handleRequested(request, { ignoreIfInactive: true });
+            }
+          }
           started = true;
-          startPendingApprovalReplay(client);
         } catch (error) {
           gatewayClient = null;
           started = false;
@@ -343,21 +309,19 @@ export function createExecApprovalChannelRuntime<
       if (startPromise) {
         await startPromise.catch(() => {});
       }
-      const wasActive = started || gatewayClient !== null || replayPromise !== null;
-      started = false;
-      gatewayClient?.stop();
-      gatewayClient = null;
-      await waitForPendingApprovalReplay();
-      if (!wasActive) {
+      if (!started && !gatewayClient) {
         await adapter.onStopped?.();
         return;
       }
+      started = false;
       for (const entry of pending.values()) {
         if (entry.timeoutId) {
           clearTimeout(entry.timeoutId);
         }
       }
       pending.clear();
+      gatewayClient?.stop();
+      gatewayClient = null;
       await adapter.onStopped?.();
       log.debug("stopped");
     },

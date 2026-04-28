@@ -3,7 +3,6 @@ import {
   MATRIX_QA_DRIVER_DM_SHARED_ROOM_KEY,
   MATRIX_QA_E2EE_ROOM_KEY,
   MATRIX_QA_MEDIA_ROOM_KEY,
-  MATRIX_QA_PROFILE_NAMES,
   MATRIX_QA_MEMBERSHIP_ROOM_KEY,
   MATRIX_QA_SCENARIOS,
   MATRIX_QA_SECONDARY_ROOM_KEY,
@@ -14,8 +13,6 @@ import {
   resolveMatrixQaScenarioRoomId,
   type MatrixQaScenarioDefinition,
   type MatrixQaScenarioId,
-  type MatrixQaProfile,
-  __matrixQaProfileTesting,
 } from "./scenario-catalog.js";
 import {
   buildMatrixReplyArtifact,
@@ -37,7 +34,6 @@ import type {
 
 export type { MatrixQaScenarioDefinition, MatrixQaScenarioId };
 export {
-  MATRIX_QA_PROFILE_NAMES,
   MATRIX_QA_SCENARIOS,
   MATRIX_QA_STANDARD_SCENARIO_IDS,
   buildMatrixReplyArtifact,
@@ -50,7 +46,6 @@ export {
   runMatrixQaCanary,
   runMatrixQaScenario,
 };
-export type { MatrixQaProfile };
 export type {
   MatrixQaCanaryArtifact,
   MatrixQaReplyArtifact,
@@ -66,7 +61,6 @@ export const __testing = {
   MATRIX_QA_E2EE_ROOM_KEY,
   MATRIX_QA_MEDIA_ROOM_KEY,
   MATRIX_QA_MEMBERSHIP_ROOM_KEY,
-  MATRIX_QA_PROFILE_NAMES,
   MATRIX_QA_SECONDARY_ROOM_KEY,
   MATRIX_QA_STANDARD_SCENARIO_IDS,
   buildMatrixQaE2eeScenarioRoomKey,
@@ -75,8 +69,6 @@ export const __testing = {
   buildMatrixReplyArtifact,
   buildMentionPrompt,
   findMatrixQaScenarios,
-  getMatrixQaProfileScenarioIds: __matrixQaProfileTesting.getMatrixQaProfileScenarioIds,
-  normalizeMatrixQaProfile: __matrixQaProfileTesting.normalizeMatrixQaProfile,
   readMatrixQaSyncCursor,
   resolveMatrixQaScenarioRoomId,
   writeMatrixQaSyncCursor,

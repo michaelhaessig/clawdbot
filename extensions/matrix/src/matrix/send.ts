@@ -1,5 +1,4 @@
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
-import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
 import type { PollInput } from "../runtime-api.js";
 import { getMatrixRuntime } from "../runtime.js";
 import type { CoreConfig } from "../types.js";
@@ -136,13 +135,13 @@ async function resolvePreviousEditMentions(params: {
 export function prepareMatrixSingleText(
   text: string,
   opts: {
-    cfg: CoreConfig;
+    cfg?: CoreConfig;
     accountId?: string;
     tableMode?: MarkdownTableMode;
-  },
+  } = {},
 ): MatrixPreparedSingleText {
   const trimmedText = text.trim();
-  const cfg = requireRuntimeConfig(opts.cfg, "Matrix text preparation") as CoreConfig;
+  const cfg = opts.cfg ?? getCore().config.loadConfig();
   const tableMode =
     opts.tableMode ??
     getCore().channel.text.resolveMarkdownTableMode({
@@ -166,13 +165,13 @@ export function prepareMatrixSingleText(
 export function chunkMatrixText(
   text: string,
   opts: {
-    cfg: CoreConfig;
+    cfg?: CoreConfig;
     accountId?: string;
     tableMode?: MarkdownTableMode;
-  },
+  } = {},
 ): MatrixPreparedChunkedText {
   const preparedText = prepareMatrixSingleText(text, opts);
-  const cfg = requireRuntimeConfig(opts.cfg, "Matrix text chunking") as CoreConfig;
+  const cfg = opts.cfg ?? getCore().config.loadConfig();
   const chunkMode = getCore().channel.text.resolveChunkMode(cfg, "matrix", opts.accountId);
   return {
     ...preparedText,
@@ -187,7 +186,7 @@ export function chunkMatrixText(
 export async function sendMessageMatrix(
   to: string,
   message: string | undefined,
-  opts: MatrixSendOpts,
+  opts: MatrixSendOpts = {},
 ): Promise<MatrixSendResult> {
   const trimmedMessage = message?.trim() ?? "";
   if (!trimmedMessage && !opts.mediaUrl) {
@@ -202,7 +201,7 @@ export async function sendMessageMatrix(
     },
     async (client) => {
       const roomId = await resolveMatrixRoomId(client, to);
-      const cfg = requireRuntimeConfig(opts.cfg, "Matrix send") as CoreConfig;
+      const cfg = opts.cfg ?? getCore().config.loadConfig();
       const { chunks } = chunkMatrixText(trimmedMessage, {
         cfg,
         accountId: opts.accountId,
@@ -331,7 +330,7 @@ export async function sendMessageMatrix(
 export async function sendPollMatrix(
   to: string,
   poll: PollInput,
-  opts: MatrixSendOpts,
+  opts: MatrixSendOpts = {},
 ): Promise<{ eventId: string; roomId: string }> {
   if (!poll.question?.trim()) {
     throw new Error("Matrix poll requires a question");
@@ -373,26 +372,17 @@ export async function sendPollMatrix(
 export async function sendTypingMatrix(
   roomId: string,
   typing: boolean,
-  optsOrTimeoutMs?: number | MatrixClientResolveOpts,
+  timeoutMs?: number,
   client?: MatrixClient,
 ): Promise<void> {
-  const opts =
-    typeof optsOrTimeoutMs === "number"
-      ? { timeoutMs: optsOrTimeoutMs, ...(client ? { client } : {}) }
-      : {
-          ...normalizeMatrixClientResolveOpts(optsOrTimeoutMs),
-          ...(client ? { client } : {}),
-        };
   await withResolvedMatrixControlClient(
     {
-      client: opts.client,
-      cfg: opts.cfg,
-      timeoutMs: opts.timeoutMs,
-      accountId: opts.accountId,
+      client,
+      timeoutMs,
     },
     async (resolved) => {
       const resolvedRoom = await resolveMatrixRoomId(resolved, roomId);
-      const resolvedTimeoutMs = typeof opts.timeoutMs === "number" ? opts.timeoutMs : 30_000;
+      const resolvedTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : 30_000;
       await resolved.setTyping(resolvedRoom, typing, resolvedTimeoutMs);
     },
   );
@@ -417,7 +407,7 @@ export async function sendSingleTextMessageMatrix(
   text: string,
   opts: {
     client?: MatrixClient;
-    cfg: CoreConfig;
+    cfg?: CoreConfig;
     replyToId?: string;
     threadId?: string;
     accountId?: string;
@@ -426,7 +416,7 @@ export async function sendSingleTextMessageMatrix(
     extraContent?: MatrixExtraContentFields;
     /** When true, marks the message as a live/streaming update (MSC4357). */
     live?: boolean;
-  },
+  } = {},
 ): Promise<MatrixSendResult> {
   const { trimmedText, convertedText, singleEventLimit, fitsInSingleEvent } =
     prepareMatrixSingleText(text, {
@@ -503,7 +493,7 @@ export async function editMessageMatrix(
   newText: string,
   opts: {
     client?: MatrixClient;
-    cfg: CoreConfig;
+    cfg?: CoreConfig;
     threadId?: string;
     accountId?: string;
     timeoutMs?: number;
@@ -512,7 +502,7 @@ export async function editMessageMatrix(
     extraContent?: MatrixExtraContentFields;
     /** When true, marks the edit as a live/streaming update (MSC4357). */
     live?: boolean;
-  },
+  } = {},
 ): Promise<string> {
   return await withResolvedMatrixSendClient(
     {
@@ -523,7 +513,7 @@ export async function editMessageMatrix(
     },
     async (client) => {
       const resolvedRoom = await resolveMatrixRoomId(client, roomId);
-      const cfg = requireRuntimeConfig(opts.cfg, "Matrix message edit") as CoreConfig;
+      const cfg = opts.cfg ?? getCore().config.loadConfig();
       const tableMode = getCore().channel.text.resolveMarkdownTableMode({
         cfg,
         channel: "matrix",

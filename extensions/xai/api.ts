@@ -2,6 +2,7 @@ import {
   getModelProviderHint,
   normalizeNativeXaiModelId,
   normalizeProviderId,
+  resolveProviderEndpoint,
 } from "openclaw/plugin-sdk/provider-model-shared";
 import {
   applyXaiModelCompat,
@@ -11,18 +12,15 @@ import { readStringValue } from "openclaw/plugin-sdk/text-runtime";
 
 export { buildXaiProvider } from "./provider-catalog.js";
 export { applyXaiConfig, applyXaiProviderConfig } from "./onboard.js";
-export { buildXaiImageGenerationProvider } from "./image-generation-provider.js";
 export {
   buildXaiCatalogModels,
   buildXaiModelDefinition,
   resolveXaiCatalogEntry,
   XAI_BASE_URL,
   XAI_DEFAULT_CONTEXT_WINDOW,
-  XAI_DEFAULT_IMAGE_MODEL,
   XAI_DEFAULT_MODEL_ID,
   XAI_DEFAULT_MODEL_REF,
   XAI_DEFAULT_MAX_TOKENS,
-  XAI_IMAGE_MODELS,
 } from "./model-definitions.js";
 export { isModernXaiModel, resolveXaiForwardCompatModel } from "./provider-models.js";
 export {
@@ -32,19 +30,9 @@ export {
   resolveXaiModelCompatPatch,
 } from "openclaw/plugin-sdk/provider-tools";
 
-const XAI_NATIVE_ENDPOINT_HOSTS = new Set(["api.x.ai", "api.grok.x.ai"]);
-
-function resolveHostname(value: string): string | undefined {
-  try {
-    return new URL(value).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
-}
-
 function isXaiNativeEndpoint(baseUrl: unknown): boolean {
   return (
-    typeof baseUrl === "string" && XAI_NATIVE_ENDPOINT_HOSTS.has(resolveHostname(baseUrl) ?? "")
+    typeof baseUrl === "string" && resolveProviderEndpoint(baseUrl).endpointClass === "xai-native"
   );
 }
 
@@ -90,19 +78,4 @@ export function resolveXaiTransport(params: {
     api: "openai-responses",
     baseUrl: readStringValue(params.baseUrl),
   };
-}
-
-export function resolveXaiBaseUrl(baseUrlOrConfig?: unknown): string {
-  let candidate = baseUrlOrConfig;
-  if (
-    baseUrlOrConfig &&
-    typeof baseUrlOrConfig === "object" &&
-    !Array.isArray(baseUrlOrConfig) &&
-    "cfg" in baseUrlOrConfig
-  ) {
-    candidate =
-      (baseUrlOrConfig as { cfg?: { models?: { providers?: { xai?: { baseUrl?: unknown } } } } })
-        .cfg?.models?.providers?.xai?.baseUrl ?? baseUrlOrConfig;
-  }
-  return readStringValue(candidate) || "https://api.x.ai/v1";
 }

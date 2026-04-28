@@ -141,7 +141,6 @@ export const linePlugin: ChannelPlugin<ResolvedLineAccount> = createChatChannelP
           getLineRuntime().channel.line?.pushMessageLine ??
           (await loadLineChannelRuntime()).pushMessageLine;
         await pushMessageLine(id, message, {
-          cfg,
           accountId: account.accountId,
           channelAccessToken: account.channelAccessToken,
         });

@@ -2,11 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createChannelApprovalHandlerFromCapability,
   createLazyChannelApprovalNativeRuntimeAdapter,
+  type ChannelApprovalNativeRuntimeAdapter,
 } from "./approval-handler-runtime.js";
-import {
-  createApprovalNativeRuntimeAdapterStubs,
-  type ApprovalNativeRuntimeAdapterStubParams,
-} from "./approval-handler.test-helpers.js";
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 
 type ApprovalCapability = NonNullable<
@@ -56,7 +53,15 @@ function makeNativeApprovalCapability(
     >["preferredSurface"];
     supportsApproverDmSurface?: boolean;
     resolveApproverDmTargets?: ApprovalNativeAdapter["resolveApproverDmTargets"];
-  } & ApprovalNativeRuntimeAdapterStubParams = {},
+    resolveApprovalKind?: ChannelApprovalNativeRuntimeAdapter["resolveApprovalKind"];
+    buildResolvedResult?: ChannelApprovalNativeRuntimeAdapter["presentation"]["buildResolvedResult"];
+    unbindPending?: NonNullable<
+      ChannelApprovalNativeRuntimeAdapter["interactions"]
+    >["unbindPending"];
+    prepareTarget?: ChannelApprovalNativeRuntimeAdapter["transport"]["prepareTarget"];
+    deliverPending?: ChannelApprovalNativeRuntimeAdapter["transport"]["deliverPending"];
+    bindPending?: NonNullable<ChannelApprovalNativeRuntimeAdapter["interactions"]>["bindPending"];
+  } = {},
 ): ApprovalCapability {
   const preferredSurface = params.preferredSurface ?? "origin";
   return {
@@ -73,7 +78,31 @@ function makeNativeApprovalCapability(
         ? { resolveApproverDmTargets: params.resolveApproverDmTargets }
         : {}),
     },
-    nativeRuntime: createApprovalNativeRuntimeAdapterStubs(params),
+    nativeRuntime: {
+      resolveApprovalKind: params.resolveApprovalKind,
+      availability: {
+        isConfigured: vi.fn().mockReturnValue(true),
+        shouldHandle: vi.fn().mockReturnValue(true),
+      },
+      presentation: {
+        buildPendingPayload: vi.fn().mockResolvedValue({ text: "pending" }),
+        buildResolvedResult: params.buildResolvedResult ?? vi.fn(),
+        buildExpiredResult: vi.fn(),
+      },
+      transport: {
+        prepareTarget:
+          params.prepareTarget ??
+          vi.fn().mockResolvedValue({
+            dedupeKey: "origin-chat",
+            target: { to: "origin-chat" },
+          }),
+        deliverPending: params.deliverPending ?? vi.fn().mockResolvedValue({ messageId: "1" }),
+      },
+      interactions: {
+        bindPending: params.bindPending ?? vi.fn().mockResolvedValue({ bindingId: "bound" }),
+        unbindPending: params.unbindPending,
+      },
+    },
   };
 }
 

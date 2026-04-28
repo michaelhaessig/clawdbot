@@ -45,24 +45,6 @@ async function runLogsCli(argv: string[]) {
   });
 }
 
-function captureStdoutWrites() {
-  const writes: string[] = [];
-  vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
-    writes.push(String(chunk));
-    return true;
-  });
-  return writes;
-}
-
-function captureStderrWrites() {
-  const writes: string[] = [];
-  vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
-    writes.push(String(chunk));
-    return true;
-  });
-  return writes;
-}
-
 describe("logs cli", () => {
   afterEach(() => {
     callGatewayFromCli.mockClear();
@@ -81,8 +63,16 @@ describe("logs cli", () => {
       reset: true,
     });
 
-    const stdoutWrites = captureStdoutWrites();
-    const stderrWrites = captureStderrWrites();
+    const stdoutWrites: string[] = [];
+    const stderrWrites: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      stderrWrites.push(String(chunk));
+      return true;
+    });
 
     await runLogsCli(["logs"]);
 
@@ -104,7 +94,11 @@ describe("logs cli", () => {
       ],
     });
 
-    const stdoutWrites = captureStdoutWrites();
+    const stdoutWrites: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
 
     await runLogsCli(["logs", "--local-time", "--plain"]);
 
@@ -121,11 +115,15 @@ describe("logs cli", () => {
       lines: ["line one"],
     });
 
-    const stderrWrites = captureStderrWrites();
+    const stderrWrites: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation(() => {
       const err = new Error("EPIPE") as NodeJS.ErrnoException;
       err.code = "EPIPE";
       throw err;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      stderrWrites.push(String(chunk));
+      return true;
     });
 
     await runLogsCli(["logs"]);
@@ -144,8 +142,16 @@ describe("logs cli", () => {
       reset: false,
     });
 
-    const stdoutWrites = captureStdoutWrites();
-    const stderrWrites = captureStderrWrites();
+    const stdoutWrites: string[] = [];
+    const stderrWrites: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      stderrWrites.push(String(chunk));
+      return true;
+    });
 
     await runLogsCli(["logs"]);
 
@@ -154,29 +160,6 @@ describe("logs cli", () => {
       limit: 200,
       maxBytes: 250_000,
     });
-    expect(stdoutWrites.join("")).toContain("local fallback line");
-    expect(stderrWrites.join("")).toContain("reading local log file instead");
-  });
-
-  it("falls back to the local log file on loopback scope-upgrade errors", async () => {
-    callGatewayFromCli.mockRejectedValueOnce(
-      new Error("scope upgrade pending approval (requestId: req-123)"),
-    );
-    readConfiguredLogTail.mockResolvedValueOnce({
-      file: "/tmp/openclaw.log",
-      cursor: 5,
-      size: 5,
-      lines: ["local fallback line"],
-      truncated: false,
-      reset: false,
-    });
-
-    const stdoutWrites = captureStdoutWrites();
-    const stderrWrites = captureStderrWrites();
-
-    await runLogsCli(["logs"]);
-
-    expect(readConfiguredLogTail).toHaveBeenCalledTimes(1);
     expect(stdoutWrites.join("")).toContain("local fallback line");
     expect(stderrWrites.join("")).toContain("reading local log file instead");
   });

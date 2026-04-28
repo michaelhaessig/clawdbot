@@ -30,27 +30,6 @@ vi.mock("./sessions-helpers.js", async (importActual) => {
   };
 });
 
-type SessionsListDetails = {
-  sessions?: Array<{
-    deliveryContext?: {
-      accountId?: string;
-      channel?: string;
-      threadId?: string | number;
-      to?: string;
-    };
-    elevatedLevel?: string;
-    fastMode?: boolean;
-    reasoningLevel?: string;
-    responseUsage?: string;
-    thinkingLevel?: string;
-    verboseLevel?: string;
-  }>;
-};
-
-function getSessionsListDetails(result: { details?: unknown }): SessionsListDetails {
-  return result.details as SessionsListDetails;
-}
-
 describe("sessions-list-tool", () => {
   let createSessionsListTool: typeof import("./sessions-list-tool.js").createSessionsListTool;
 
@@ -110,7 +89,16 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-1", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        deliveryContext?: {
+          channel?: string;
+          to?: string;
+          accountId?: string;
+          threadId?: string | number;
+        };
+      }>;
+    };
 
     expect(details.sessions?.[0]?.deliveryContext).toEqual({
       channel: "discord",
@@ -152,7 +140,16 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-2", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        deliveryContext?: {
+          channel?: string;
+          to?: string;
+          accountId?: string;
+          threadId?: string | number;
+        };
+      }>;
+    };
 
     expect(details.sessions?.[0]?.deliveryContext).toEqual({
       channel: "telegram",
@@ -188,7 +185,16 @@ describe("sessions-list-tool", () => {
     const tool = createSessionsListTool({ config: {} as never });
 
     const result = await tool.execute("call-3", {});
-    const details = getSessionsListDetails(result);
+    const details = result.details as {
+      sessions?: Array<{
+        thinkingLevel?: string;
+        fastMode?: boolean;
+        verboseLevel?: string;
+        reasoningLevel?: string;
+        elevatedLevel?: string;
+        responseUsage?: string;
+      }>;
+    };
 
     expect(details.sessions?.[0]).toMatchObject({
       thinkingLevel: "high",

@@ -1,20 +1,9 @@
 import {
-  normalizeFastMode,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "../shared/string-coerce.js";
 
-export { normalizeFastMode };
-
-export type ThinkLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "adaptive"
-  | "max";
+export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
 export type VerboseLevel = "off" | "on" | "full";
 export type TraceLevel = "off" | "on" | "raw";
 export type NoticeLevel = "off" | "on" | "full";
@@ -28,21 +17,20 @@ export type ThinkingCatalogEntry = {
   reasoning?: boolean;
 };
 
-export const BASE_THINKING_LEVELS: ThinkLevel[] = ["off", "minimal", "low", "medium", "high"];
-export const THINKING_LEVEL_RANKS: Record<ThinkLevel, number> = {
-  off: 0,
-  minimal: 10,
-  low: 20,
-  medium: 30,
-  high: 40,
-  adaptive: 30,
-  xhigh: 60,
-  max: 70,
-};
+const BASE_THINKING_LEVELS: ThinkLevel[] = ["off", "minimal", "low", "medium", "high", "adaptive"];
 const NO_THINKING_LEVELS: ThinkLevel[] = [...BASE_THINKING_LEVELS];
 
 export function isBinaryThinkingProvider(provider?: string | null): boolean {
   void provider;
+  return false;
+}
+
+export function supportsBuiltInXHighThinking(
+  provider?: string | null,
+  model?: string | null,
+): boolean {
+  void provider;
+  void model;
   return false;
 }
 
@@ -55,9 +43,6 @@ export function normalizeThinkLevel(raw?: string | null): ThinkLevel | undefined
   const collapsed = key.replace(/[\s_-]+/g, "");
   if (collapsed === "adaptive" || collapsed === "auto") {
     return "adaptive";
-  }
-  if (collapsed === "max") {
-    return "max";
   }
   if (collapsed === "xhigh" || collapsed === "extrahigh") {
     return "xhigh";
@@ -77,7 +62,9 @@ export function normalizeThinkLevel(raw?: string | null): ThinkLevel | undefined
   if (["mid", "med", "medium", "thinkharder", "think-harder", "harder"].includes(key)) {
     return "medium";
   }
-  if (["high", "ultra", "ultrathink", "think-hard", "thinkhardest", "highest"].includes(key)) {
+  if (
+    ["high", "ultra", "ultrathink", "think-hard", "thinkhardest", "highest", "max"].includes(key)
+  ) {
     return "high";
   }
   if (["think"].includes(key)) {
@@ -192,6 +179,23 @@ export function normalizeUsageDisplay(raw?: string | null): UsageDisplayLevel | 
 
 export function resolveResponseUsageMode(raw?: string | null): UsageDisplayLevel {
   return normalizeUsageDisplay(raw) ?? "off";
+}
+
+export function normalizeFastMode(raw?: string | boolean | null): boolean | undefined {
+  if (typeof raw === "boolean") {
+    return raw;
+  }
+  if (!raw) {
+    return undefined;
+  }
+  const key = normalizeLowercaseStringOrEmpty(raw);
+  if (["off", "false", "no", "0", "disable", "disabled", "normal"].includes(key)) {
+    return false;
+  }
+  if (["on", "true", "yes", "1", "enable", "enabled", "fast"].includes(key)) {
+    return true;
+  }
+  return undefined;
 }
 
 export function normalizeElevatedLevel(raw?: string | null): ElevatedLevel | undefined {

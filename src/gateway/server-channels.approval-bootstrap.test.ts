@@ -95,7 +95,7 @@ function createManager(
   const runtime = runtimeForLogger(log);
   const channelRuntimeEnvs = { discord: runtime } as unknown as Record<ChannelId, RuntimeEnv>;
   return createChannelManager({
-    getRuntimeConfig: () => ({}),
+    loadConfig: () => ({}),
     channelLogs,
     channelRuntimeEnvs,
     ...(options?.channelRuntime ? { channelRuntime: options.channelRuntime } : {}),

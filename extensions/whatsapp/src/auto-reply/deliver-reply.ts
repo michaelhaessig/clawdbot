@@ -1,26 +1,33 @@
-import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-types";
+import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
-  isReasoningReplyPayload,
+  resolveOutboundMediaUrls,
   sendMediaWithLeadingCaption,
 } from "openclaw/plugin-sdk/reply-payload";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { loadWebMedia } from "../media.js";
-import {
-  normalizeWhatsAppOutboundPayload,
-  normalizeWhatsAppPayloadTextPreservingIndentation,
-  prepareWhatsAppOutboundMedia,
-  sendWhatsAppOutboundWithRetry,
-} from "../outbound-media-contract.js";
-import { buildQuotedMessageOptions, lookupInboundMessageMeta } from "../quoted-message.js";
 import { newConnectionId } from "../reconnect.js";
 import { formatError } from "../session.js";
-import { convertMarkdownTables } from "../text-runtime.js";
+import { convertMarkdownTables, sleep } from "../text-runtime.js";
 import { markdownToWhatsApp } from "../text-runtime.js";
 import { whatsappOutboundLog } from "./loggers.js";
 import type { WebInboundMsg } from "./types.js";
 import { elide } from "./util.js";
+
+const REASONING_PREFIX = "reasoning:";
+
+function shouldSuppressReasoningReply(payload: ReplyPayload): boolean {
+  if (payload.isReasoning === true) {
+    return true;
+  }
+  const text = payload.text;
+  if (typeof text !== "string") {
+    return false;
+  }
+  return normalizeLowercaseStringOrEmpty(text.trimStart()).startsWith(REASONING_PREFIX);
+}
 
 export async function deliverWebReply(params: {
   replyResult: ReplyPayload;
@@ -39,46 +46,39 @@ export async function deliverWebReply(params: {
 }) {
   const { replyResult, msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
   const replyStarted = Date.now();
-  if (isReasoningReplyPayload(replyResult)) {
+  if (shouldSuppressReasoningReply(replyResult)) {
     whatsappOutboundLog.debug(`Suppressed reasoning payload to ${msg.from}`);
     return;
   }
   const tableMode = params.tableMode ?? "code";
   const chunkMode = params.chunkMode ?? "length";
-  const normalizedReply = normalizeWhatsAppOutboundPayload(replyResult, {
-    normalizeText: normalizeWhatsAppPayloadTextPreservingIndentation,
-  });
-  const convertedText = markdownToWhatsApp(convertMarkdownTables(normalizedReply.text, tableMode));
+  const convertedText = markdownToWhatsApp(
+    convertMarkdownTables(replyResult.text || "", tableMode),
+  );
   const textChunks = chunkMarkdownTextWithMode(convertedText, textLimit, chunkMode);
-  const mediaList = normalizedReply.mediaUrls ?? [];
-
-  const getQuote = () => {
-    if (!replyResult.replyToId) {
-      return undefined;
-    }
-    // Use replyToId (not msg.id) so batched payloads quote the correct
-    // per-message target.  Look up cached metadata for the specific
-    // message being quoted — msg.body may be a combined batch body.
-    const cached = lookupInboundMessageMeta(msg.accountId, msg.chatId, replyResult.replyToId);
-    return buildQuotedMessageOptions({
-      messageId: replyResult.replyToId,
-      remoteJid: msg.chatId,
-      fromMe: cached?.fromMe ?? false,
-      participant: cached?.participant ?? (msg.chatType === "group" ? msg.senderJid : undefined),
-      messageText: cached?.body ?? "",
-    });
-  };
+  const mediaList = resolveOutboundMediaUrls(replyResult);
 
   const sendWithRetry = async (fn: () => Promise<unknown>, label: string, maxAttempts = 3) => {
-    return await sendWhatsAppOutboundWithRetry({
-      send: fn,
-      maxAttempts,
-      onRetry: ({ attempt, maxAttempts: retryMaxAttempts, backoffMs, errorText }) => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const errText = formatError(err);
+        const isLast = attempt === maxAttempts;
+        const shouldRetry = /closed|reset|timed\s*out|disconnect/i.test(errText);
+        if (!shouldRetry || isLast) {
+          throw err;
+        }
+        const backoffMs = 500 * attempt;
         logVerbose(
-          `Retrying ${label} to ${msg.from} after failure (${attempt}/${retryMaxAttempts - 1}) in ${backoffMs}ms: ${errorText}`,
+          `Retrying ${label} to ${msg.from} after failure (${attempt}/${maxAttempts - 1}) in ${backoffMs}ms: ${errText}`,
         );
-      },
-    });
+        await sleep(backoffMs);
+      }
+    }
+    throw lastErr;
   };
 
   // Text-only replies
@@ -86,8 +86,7 @@ export async function deliverWebReply(params: {
     const totalChunks = textChunks.length;
     for (const [index, chunk] of textChunks.entries()) {
       const chunkStarted = Date.now();
-      const quote = getQuote();
-      await sendWithRetry(() => msg.reply(chunk, quote), "text");
+      await sendWithRetry(() => msg.reply(chunk), "text");
       if (!skipLog) {
         const durationMs = Date.now() - chunkStarted;
         whatsappOutboundLog.debug(
@@ -120,13 +119,10 @@ export async function deliverWebReply(params: {
     mediaUrls: mediaList,
     caption: leadingCaption,
     send: async ({ mediaUrl, caption }) => {
-      const media = await prepareWhatsAppOutboundMedia(
-        await loadWebMedia(mediaUrl, {
-          maxBytes: maxMediaBytes,
-          localRoots: params.mediaLocalRoots,
-        }),
-        mediaUrl,
-      );
+      const media = await loadWebMedia(mediaUrl, {
+        maxBytes: maxMediaBytes,
+        localRoots: params.mediaLocalRoots,
+      });
       if (shouldLogVerbose()) {
         logVerbose(
           `Web auto-reply media size: ${(media.buffer.length / (1024 * 1024)).toFixed(2)}MB`,
@@ -134,63 +130,47 @@ export async function deliverWebReply(params: {
         logVerbose(`Web auto-reply media source: ${mediaUrl} (kind ${media.kind})`);
       }
       if (media.kind === "image") {
-        const quote = getQuote();
         await sendWithRetry(
           () =>
-            msg.sendMedia(
-              {
-                image: media.buffer,
-                caption,
-                mimetype: media.mimetype,
-              },
-              quote,
-            ),
+            msg.sendMedia({
+              image: media.buffer,
+              caption,
+              mimetype: media.contentType,
+            }),
           "media:image",
         );
       } else if (media.kind === "audio") {
-        const quote = getQuote();
         await sendWithRetry(
           () =>
-            msg.sendMedia(
-              {
-                audio: media.buffer,
-                ptt: true,
-                mimetype: media.mimetype,
-              },
-              quote,
-            ),
+            msg.sendMedia({
+              audio: media.buffer,
+              ptt: true,
+              mimetype: media.contentType,
+              caption,
+            }),
           "media:audio",
         );
-        if (caption) {
-          await sendWithRetry(() => msg.reply(caption, quote), "media:audio-text");
-        }
       } else if (media.kind === "video") {
-        const quote = getQuote();
         await sendWithRetry(
           () =>
-            msg.sendMedia(
-              {
-                video: media.buffer,
-                caption,
-                mimetype: media.mimetype,
-              },
-              quote,
-            ),
+            msg.sendMedia({
+              video: media.buffer,
+              caption,
+              mimetype: media.contentType,
+            }),
           "media:video",
         );
       } else {
-        const quote = getQuote();
+        const fileName = media.fileName ?? mediaUrl.split("/").pop() ?? "file";
+        const mimetype = media.contentType ?? "application/octet-stream";
         await sendWithRetry(
           () =>
-            msg.sendMedia(
-              {
-                document: media.buffer,
-                fileName: media.fileName,
-                caption,
-                mimetype: media.mimetype,
-              },
-              quote,
-            ),
+            msg.sendMedia({
+              document: media.buffer,
+              fileName,
+              caption,
+              mimetype,
+            }),
           "media:document",
         );
       }
@@ -218,19 +198,20 @@ export async function deliverWebReply(params: {
       if (!isFirst) {
         return;
       }
-      const warning = "⚠️ Media failed.";
+      const warning =
+        error instanceof Error ? `⚠️ Media failed: ${error.message}` : "⚠️ Media failed.";
       const fallbackTextParts = [remainingText.shift() ?? caption ?? "", warning].filter(Boolean);
       const fallbackText = fallbackTextParts.join("\n");
       if (!fallbackText) {
         return;
       }
       whatsappOutboundLog.warn(`Media skipped; sent text-only to ${msg.from}`);
-      await msg.reply(fallbackText, getQuote());
+      await msg.reply(fallbackText);
     },
   });
 
   // Remaining text chunks after media
   for (const chunk of remainingText) {
-    await msg.reply(chunk, getQuote());
+    await msg.reply(chunk);
   }
 }

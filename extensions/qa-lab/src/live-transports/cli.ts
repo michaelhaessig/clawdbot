@@ -1,5 +1,4 @@
 import { listQaRunnerCliContributions } from "openclaw/plugin-sdk/qa-runner-runtime";
-import { discordQaCliRegistration } from "./discord/cli.js";
 import type { LiveTransportQaCliRegistration } from "./shared/live-transport-cli.js";
 import { telegramQaCliRegistration } from "./telegram/cli.js";
 
@@ -37,7 +36,6 @@ function createQaRunnerCliRegistration(
 
 export const LIVE_TRANSPORT_QA_CLI_REGISTRATIONS: readonly LiveTransportQaCliRegistration[] = [
   telegramQaCliRegistration,
-  discordQaCliRegistration,
 ];
 
 export function listLiveTransportQaCliRegistrations(): readonly LiveTransportQaCliRegistration[] {

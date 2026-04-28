@@ -1,11 +1,10 @@
 import { completeSimple, type TextContent } from "@mariozechner/pi-ai";
-import { requireApiKey } from "../../agents/model-auth.js";
+import { getApiKeyForModel, requireApiKey } from "../../agents/model-auth.js";
 import { resolveDefaultModelForAgent } from "../../agents/model-selection.js";
 import { resolveModelAsync } from "../../agents/pi-embedded-runner/model.js";
 import { prepareModelForSimpleCompletion } from "../../agents/simple-completion-transport.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
-import { getRuntimeAuthForModel } from "../../plugins/runtime/runtime-model-auth.runtime.js";
 
 const DEFAULT_MAX_LABEL_LENGTH = 128;
 const TIMEOUT_MS = 15_000;
@@ -44,11 +43,7 @@ export async function generateConversationLabel(
   const completionModel = prepareModelForSimpleCompletion({ model: resolved.model, cfg });
 
   const apiKey = requireApiKey(
-    await getRuntimeAuthForModel({
-      model: completionModel,
-      cfg,
-      workspaceDir: agentDir,
-    }),
+    await getApiKeyForModel({ model: completionModel, cfg, agentDir }),
     modelRef.provider,
   );
 

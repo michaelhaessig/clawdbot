@@ -1,79 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
-
-const providerEndpointPlugins = vi.hoisted(() => [
-  {
-    providerEndpoints: [
-      { endpointClass: "openai-public", hosts: ["api.openai.com"] },
-      { endpointClass: "openai-codex", hosts: ["chatgpt.com"] },
-      { endpointClass: "azure-openai", hostSuffixes: [".openai.azure.com"] },
-      { endpointClass: "anthropic-public", hosts: ["api.anthropic.com"] },
-      { endpointClass: "cerebras-native", hosts: ["api.cerebras.ai"] },
-      { endpointClass: "mistral-public", hosts: ["api.mistral.ai"] },
-      { endpointClass: "chutes-native", hosts: ["llm.chutes.ai"] },
-      { endpointClass: "deepseek-native", hosts: ["api.deepseek.com"] },
-      { endpointClass: "github-copilot-native", hostSuffixes: [".githubcopilot.com"] },
-      { endpointClass: "groq-native", hosts: ["api.groq.com"] },
-      { endpointClass: "opencode-native", hostSuffixes: ["opencode.ai"] },
-      { endpointClass: "openrouter", hostSuffixes: ["openrouter.ai"] },
-      { endpointClass: "zai-native", hosts: ["api.z.ai"] },
-      { endpointClass: "google-generative-ai", hosts: ["generativelanguage.googleapis.com"] },
-      {
-        endpointClass: "google-vertex",
-        hosts: ["aiplatform.googleapis.com"],
-        googleVertexRegion: "global",
-      },
-      {
-        endpointClass: "google-vertex",
-        hostSuffixes: ["-aiplatform.googleapis.com"],
-        googleVertexRegionHostSuffix: "-aiplatform.googleapis.com",
-      },
-      {
-        endpointClass: "moonshot-native",
-        baseUrls: ["https://api.moonshot.ai/v1", "https://api.moonshot.cn/v1"],
-      },
-      {
-        endpointClass: "modelstudio-native",
-        baseUrls: [
-          "https://coding-intl.dashscope.aliyuncs.com/v1",
-          "https://coding.dashscope.aliyuncs.com/v1",
-          "https://dashscope.aliyuncs.com/compatible-mode/v1",
-          "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        ],
-      },
-      {
-        endpointClass: "xai-native",
-        hosts: ["api.x.ai", "api.grok.x.ai"],
-      },
-    ],
-    providerRequest: {
-      providers: {
-        anthropic: { family: "anthropic" },
-        cerebras: { family: "cerebras" },
-        chutes: { family: "chutes" },
-        deepseek: { family: "deepseek" },
-        "github-copilot": { family: "github-copilot" },
-        google: { family: "google" },
-        groq: { family: "groq" },
-        kimi: { family: "moonshot", compatibilityFamily: "moonshot" },
-        mistral: { family: "mistral" },
-        moonshot: { family: "moonshot", compatibilityFamily: "moonshot" },
-        openrouter: { family: "openrouter" },
-        qwen: { family: "modelstudio" },
-        together: { family: "together" },
-        xai: { family: "xai" },
-        zai: { family: "zai" },
-      },
-    },
-  },
-]);
-
-vi.mock("../plugins/plugin-registry.js", () => ({
-  loadPluginManifestRegistryForPluginRegistry: () => ({
-    plugins: providerEndpointPlugins,
-    diagnostics: [],
-  }),
-}));
-
+import { describe, expect, it } from "vitest";
 import {
   listProviderAttributionPolicies,
   resolveProviderAttributionHeaders,
@@ -787,15 +712,13 @@ describe("provider attribution", () => {
 
     expect(
       resolveProviderRequestCapabilities({
-        provider: "custom-local",
-        api: "openai-completions",
-        baseUrl: "http://127.0.0.1:11434/v1",
+        provider: "ollama",
+        modelId: "kimi-k2.5:cloud",
         capability: "llm",
         transport: "stream",
       }),
     ).toMatchObject({
-      endpointClass: "local",
-      supportsNativeStreamingUsageCompat: false,
+      compatibilityFamily: "moonshot",
     });
   });
 

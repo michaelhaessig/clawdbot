@@ -1,6 +1,8 @@
 import path from "node:path";
-import { BUNDLED_PLUGIN_PATH_PREFIX } from "../../scripts/lib/bundled-plugin-paths.mjs";
-import { splitChannelExtensionTestRoots } from "./vitest.extension-channel-split-paths.mjs";
+import {
+  BUNDLED_PLUGIN_PATH_PREFIX,
+  bundledPluginRoot,
+} from "../../scripts/lib/bundled-plugin-paths.mjs";
 
 const normalizeRepoPath = (value) => value.split(path.sep).join("/");
 
@@ -8,13 +10,17 @@ export const extensionRoutedChannelTestFiles = [];
 
 const extensionRoutedChannelTestFileSet = new Set(extensionRoutedChannelTestFiles);
 
-export const channelTestRoots = ["src/channels", ...splitChannelExtensionTestRoots];
+export const channelTestRoots = [
+  "src/channels",
+  bundledPluginRoot("discord"),
+  bundledPluginRoot("slack"),
+  bundledPluginRoot("signal"),
+  bundledPluginRoot("imessage"),
+  bundledPluginRoot("line"),
+];
 
-const splitChannelExtensionTestRootSet = new Set(splitChannelExtensionTestRoots);
-
-export const extensionChannelTestRoots = channelTestRoots.filter(
-  (root) =>
-    root.startsWith(BUNDLED_PLUGIN_PATH_PREFIX) && !splitChannelExtensionTestRootSet.has(root),
+export const extensionChannelTestRoots = channelTestRoots.filter((root) =>
+  root.startsWith(BUNDLED_PLUGIN_PATH_PREFIX),
 );
 export const coreChannelTestRoots = channelTestRoots.filter(
   (root) => !root.startsWith(BUNDLED_PLUGIN_PATH_PREFIX),

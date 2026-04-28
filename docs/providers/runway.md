@@ -1,11 +1,13 @@
 ---
-summary: "Runway video generation setup in OpenClaw"
 title: "Runway"
+summary: "Runway video generation setup in OpenClaw"
 read_when:
   - You want to use Runway video generation in OpenClaw
   - You need the Runway API key/env setup
   - You want to make Runway the default video provider
 ---
+
+# Runway
 
 OpenClaw ships a bundled `runway` provider for hosted video generation.
 
@@ -64,7 +66,7 @@ Video-to-video currently requires `runway/gen4_aleph` specifically.
 }
 ```
 
-## Advanced configuration
+## Advanced notes
 
 <AccordionGroup>
   <Accordion title="Environment variable aliases">
@@ -85,7 +87,7 @@ Video-to-video currently requires `runway/gen4_aleph` specifically.
   <Card title="Video generation" href="/tools/video-generation" icon="video">
     Shared tool parameters, provider selection, and async behavior.
   </Card>
-  <Card title="Configuration reference" href="/gateway/config-agents#agent-defaults" icon="gear">
+  <Card title="Configuration reference" href="/gateway/configuration-reference#agent-defaults" icon="gear">
     Agent default settings including video generation model.
   </Card>
 </CardGroup>

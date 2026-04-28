@@ -4,7 +4,7 @@ import {
   resolveGatewaySystemdServiceName,
 } from "../../daemon/constants.js";
 import { renderGatewayServiceCleanupHints } from "../../daemon/inspect.js";
-import { resolveGatewayLogPaths, resolveGatewayRestartLogPath } from "../../daemon/restart-logs.js";
+import { resolveGatewayLogPaths } from "../../daemon/launchd.js";
 import {
   isSystemdUnavailableDetail,
   renderSystemdUnavailableHints,
@@ -48,17 +48,6 @@ function sanitizeDaemonStatusForJson(status: DaemonStatus): DaemonStatus {
       command: nextCommand,
     },
   };
-}
-
-function formatProbeKindLabel(kind?: "connect" | "read") {
-  return kind === "read" ? "Read probe:" : "Connectivity probe:";
-}
-
-function formatCapabilityLabel(capability?: string) {
-  if (!capability) {
-    return null;
-  }
-  return capability.replaceAll("_", "-");
 }
 
 export function printDaemonStatus(status: DaemonStatus, opts: { json: boolean }) {
@@ -165,7 +154,6 @@ export function printDaemonStatus(status: DaemonStatus, opts: { json: boolean })
         bind: status.gateway.bindMode,
         customBindHost: status.gateway.customBindHost,
         basePath: status.config?.daemon?.controlUi?.basePath,
-        tlsEnabled: status.gateway.tlsEnabled === true,
       });
       defaultRuntime.log(`${label("Dashboard:")} ${infoText(links.httpUrl)}`);
     }
@@ -187,25 +175,20 @@ export function printDaemonStatus(status: DaemonStatus, opts: { json: boolean })
     );
   }
   if (rpc) {
-    const probeLabel = formatProbeKindLabel(rpc.kind);
     if (rpc.ok) {
-      defaultRuntime.log(`${label(probeLabel)} ${okText("ok")}`);
+      defaultRuntime.log(`${label("RPC probe:")} ${okText("ok")}`);
     } else {
-      defaultRuntime.error(`${label(probeLabel)} ${errorText("failed")}`);
+      defaultRuntime.error(`${label("RPC probe:")} ${errorText("failed")}`);
       if (rpc.authWarning) {
-        defaultRuntime.error(`${label("Probe auth:")} ${warnText(rpc.authWarning)}`);
+        defaultRuntime.error(`${label("RPC auth:")} ${warnText(rpc.authWarning)}`);
       }
       if (rpc.url) {
-        defaultRuntime.error(`${label("Probe target:")} ${rpc.url}`);
+        defaultRuntime.error(`${label("RPC target:")} ${rpc.url}`);
       }
       const lines = (rpc.error ?? "unknown").split(/\r?\n/).filter(Boolean);
       for (const line of lines.slice(0, 12)) {
         defaultRuntime.error(`  ${errorText(line)}`);
       }
-    }
-    const capability = formatCapabilityLabel(rpc.capability);
-    if (capability) {
-      defaultRuntime.log(`${label("Capability:")} ${infoText(capability)}`);
     }
     spacer();
   }
@@ -249,15 +232,6 @@ export function printDaemonStatus(status: DaemonStatus, opts: { json: boolean })
   if (service.runtime?.missingUnit) {
     defaultRuntime.error(errorText("Service unit not found."));
     for (const hint of renderRuntimeHints(service.runtime, process.env, status.logFile)) {
-      defaultRuntime.error(errorText(hint));
-    }
-  } else if (service.runtime?.missingSupervision) {
-    defaultRuntime.error(errorText("LaunchAgent plist exists but launchd has no loaded job."));
-    for (const hint of renderRuntimeHints(
-      service.runtime,
-      service.command?.environment ?? process.env,
-      status.logFile,
-    )) {
       defaultRuntime.error(errorText(hint));
     }
   } else if (service.loaded && service.runtime?.status === "stopped") {
@@ -314,23 +288,20 @@ export function printDaemonStatus(status: DaemonStatus, opts: { json: boolean })
     defaultRuntime.error(
       errorText(`Gateway port ${status.port.port} is not listening (service appears running).`),
     );
-    const serviceEnv = { ...process.env, ...service.command?.environment };
     if (status.lastError) {
       defaultRuntime.error(`${errorText("Last gateway error:")} ${status.lastError}`);
     }
     if (process.platform === "linux") {
-      const unit = resolveGatewaySystemdServiceName(serviceEnv.OPENCLAW_PROFILE);
+      const env = service.command?.environment ?? process.env;
+      const unit = resolveGatewaySystemdServiceName(env.OPENCLAW_PROFILE);
       defaultRuntime.error(
         errorText(`Logs: journalctl --user -u ${unit}.service -n 200 --no-pager`),
       );
     } else if (process.platform === "darwin") {
-      const logs = resolveGatewayLogPaths(serviceEnv);
+      const logs = resolveGatewayLogPaths(service.command?.environment ?? process.env);
       defaultRuntime.error(`${errorText("Logs:")} ${shortenHomePath(logs.stdoutPath)}`);
       defaultRuntime.error(`${errorText("Errors:")} ${shortenHomePath(logs.stderrPath)}`);
     }
-    defaultRuntime.error(
-      `${errorText("Restart log:")} ${shortenHomePath(resolveGatewayRestartLogPath(serviceEnv))}`,
-    );
     spacer();
   }
 

@@ -1,4 +1,4 @@
-import type { GatewayBrowserClient, GatewayHelloOk } from "../gateway.ts";
+import type { GatewayBrowserClient } from "../gateway.ts";
 import { isPluginEnabledInConfigSnapshot } from "../plugin-activation.ts";
 import type { ConfigSnapshot } from "../types.ts";
 
@@ -201,7 +201,6 @@ type WikiMemoryPalacePayload = {
 export type DreamingState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
-  hello: GatewayHelloOk | null;
   configSnapshot: ConfigSnapshot | null;
   applySessionKey: string;
   dreamingStatusLoading: boolean;
@@ -235,22 +234,6 @@ function isMemoryWikiEnabled(state: DreamingState): boolean {
   return isPluginEnabledInConfigSnapshot(state.configSnapshot, MEMORY_WIKI_PLUGIN_ID, {
     enabledByDefault: false,
   });
-}
-
-function hasGatewayMethod(state: DreamingState, method: string): boolean | null {
-  const methods = state.hello?.features?.methods;
-  if (!Array.isArray(methods)) {
-    return null;
-  }
-  return methods.includes(method);
-}
-
-function canCallMemoryWikiMethod(state: DreamingState, method: string): boolean {
-  const available = hasGatewayMethod(state, method);
-  if (available !== null) {
-    return available;
-  }
-  return isMemoryWikiEnabled(state);
 }
 
 function buildDreamDiaryActionSuccessMessage(
@@ -765,7 +748,7 @@ export async function loadWikiImportInsights(state: DreamingState): Promise<void
   if (!state.client || !state.connected || state.wikiImportInsightsLoading) {
     return;
   }
-  if (!canCallMemoryWikiMethod(state, "wiki.importInsights")) {
+  if (!isMemoryWikiEnabled(state)) {
     state.wikiImportInsights = null;
     state.wikiImportInsightsError = null;
     return;
@@ -789,7 +772,7 @@ export async function loadWikiMemoryPalace(state: DreamingState): Promise<void> 
   if (!state.client || !state.connected || state.wikiMemoryPalaceLoading) {
     return;
   }
-  if (!canCallMemoryWikiMethod(state, "wiki.palace")) {
+  if (!isMemoryWikiEnabled(state)) {
     state.wikiMemoryPalace = null;
     state.wikiMemoryPalaceError = null;
     return;

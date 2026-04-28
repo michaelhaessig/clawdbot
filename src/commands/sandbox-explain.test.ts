@@ -9,7 +9,6 @@ vi.mock("../config/config.js", async () => {
   const actual = await vi.importActual<typeof import("../config/config.js")>("../config/config.js");
   return {
     ...actual,
-    getRuntimeConfig: vi.fn().mockImplementation(() => mockCfg),
     loadConfig: vi.fn().mockImplementation(() => mockCfg),
   };
 });
@@ -24,7 +23,7 @@ describe("sandbox explain command", () => {
       },
       tools: {
         sandbox: { tools: { deny: ["browser"] } },
-        elevated: { enabled: true, allowFrom: { quietchat: ["*"] } },
+        elevated: { enabled: true, allowFrom: { whatsapp: ["*"] } },
       },
       session: { store: "/tmp/openclaw-test-sessions-{agentId}.json" },
     };

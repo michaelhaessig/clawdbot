@@ -1,6 +1,5 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/memory-core";
 import { resolveMemoryDreamingConfig } from "openclaw/plugin-sdk/memory-core-host-status";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { asRecord } from "./dreaming-shared.js";
 import { resolveShortTermPromotionDreamingConfig } from "./dreaming.js";
@@ -91,7 +90,7 @@ export function registerDreamingCommand(api: OpenClawPluginApi): void {
         .split(/\s+/)
         .filter(Boolean)
         .map((token) => normalizeLowercaseStringOrEmpty(token));
-      const currentConfig = api.runtime.config.current() as OpenClawConfig;
+      const currentConfig = api.runtime.config.loadConfig();
 
       if (
         !firstToken ||
@@ -112,10 +111,7 @@ export function registerDreamingCommand(api: OpenClawPluginApi): void {
         }
         const enabled = firstToken === "on";
         const nextConfig = updateDreamingEnabledInConfig(currentConfig, enabled);
-        await api.runtime.config.replaceConfigFile({
-          nextConfig,
-          afterWrite: { mode: "auto" },
-        });
+        await api.runtime.config.writeConfigFile(nextConfig);
         return {
           text: [
             `Dreaming ${enabled ? "enabled" : "disabled"}.`,

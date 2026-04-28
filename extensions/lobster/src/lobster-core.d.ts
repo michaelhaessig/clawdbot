@@ -4,7 +4,6 @@ declare module "@clawdbot/lobster/core" {
     prompt: string;
     items: unknown[];
     resumeToken?: string;
-    approvalId?: string;
   } | null;
 
   type LobsterToolContext = {

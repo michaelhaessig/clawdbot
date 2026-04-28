@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import {
   MAX_PLUGIN_APPROVAL_TIMEOUT_MS,
   PLUGIN_APPROVAL_DESCRIPTION_MAX_LENGTH,

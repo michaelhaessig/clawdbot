@@ -1,11 +1,10 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import {
   groupPluginDiscoveryProvidersByOrder,
   normalizePluginDiscoveryResult,
-  resolveRuntimePluginDiscoveryProviders,
+  resolvePluginDiscoveryProviders,
   runProviderCatalog,
 } from "../plugins/provider-discovery.js";
 import { resolveOwningPluginIdsForProvider } from "../plugins/providers.js";
@@ -23,7 +22,7 @@ import {
   createProviderApiKeyResolver,
   createProviderAuthResolver,
 } from "./models-config.providers.secrets.js";
-import { findNormalizedProviderValue, normalizeProviderId } from "./provider-id.js";
+import { findNormalizedProviderValue } from "./provider-id.js";
 
 const log = createSubsystemLogger("agents/model-providers");
 
@@ -44,7 +43,6 @@ type ImplicitProviderParams = {
   env?: NodeJS.ProcessEnv;
   workspaceDir?: string;
   explicitProviders?: Record<string, ProviderConfig> | null;
-  pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "index" | "manifestRegistry" | "owners">;
 };
 
 type ImplicitProviderContext = ImplicitProviderParams & {
@@ -72,7 +70,6 @@ function resolveProviderDiscoveryFilter(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env: NodeJS.ProcessEnv;
-  resolveOwners?: (provider: string) => readonly string[] | undefined;
 }): string[] | undefined {
   const { config, workspaceDir, env } = params;
   const testRaw = env.OPENCLAW_TEST_ONLY_PROVIDER_PLUGIN_IDS?.trim();
@@ -105,14 +102,12 @@ function resolveProviderDiscoveryFilter(params: {
   const pluginIds = new Set<string>();
   for (const id of ids) {
     const owners =
-      params.resolveOwners?.(id) ??
       resolveOwningPluginIdsForProvider({
         provider: id,
         config,
         workspaceDir,
         env,
-      }) ??
-      [];
+      }) ?? [];
     if (owners.length > 0) {
       for (const owner of owners) {
         pluginIds.add(owner);
@@ -126,76 +121,12 @@ function resolveProviderDiscoveryFilter(params: {
     : undefined;
 }
 
-function resolvePluginMetadataProviderOwners(
-  pluginMetadataSnapshot: Pick<PluginMetadataSnapshot, "owners"> | undefined,
-  provider: string,
-): readonly string[] | undefined {
-  if (!pluginMetadataSnapshot) {
-    return undefined;
-  }
-  const normalizedProvider = normalizeProviderId(provider);
-  if (!normalizedProvider) {
-    return undefined;
-  }
-  const owners = new Set<string>();
-  appendNormalizedPluginMetadataOwners(
-    owners,
-    pluginMetadataSnapshot.owners.providers,
-    provider,
-    normalizedProvider,
-  );
-  appendNormalizedPluginMetadataOwners(
-    owners,
-    pluginMetadataSnapshot.owners.cliBackends,
-    provider,
-    normalizedProvider,
-  );
-  return owners.size > 0
-    ? [...owners].toSorted((left, right) => left.localeCompare(right))
-    : undefined;
-}
-
-function appendNormalizedPluginMetadataOwners(
-  target: Set<string>,
-  ownerMap: ReadonlyMap<string, readonly string[]>,
-  provider: string,
-  normalizedProvider: string,
-): void {
-  for (const owner of ownerMap.get(provider) ?? []) {
-    target.add(owner);
-  }
-  if (normalizedProvider !== provider) {
-    for (const owner of ownerMap.get(normalizedProvider) ?? []) {
-      target.add(owner);
-    }
-  }
-  for (const [ownedId, owners] of ownerMap.entries()) {
-    if (
-      ownedId !== provider &&
-      ownedId !== normalizedProvider &&
-      normalizeProviderId(ownedId) === normalizedProvider
-    ) {
-      for (const owner of owners) {
-        target.add(owner);
-      }
-    }
-  }
-}
-
 export function resolveProviderDiscoveryFilterForTest(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env: NodeJS.ProcessEnv;
-  resolveOwners?: (provider: string) => readonly string[] | undefined;
 }): string[] | undefined {
   return resolveProviderDiscoveryFilter(params);
-}
-
-export function resolvePluginMetadataProviderOwnersForTest(
-  pluginMetadataSnapshot: Pick<PluginMetadataSnapshot, "owners"> | undefined,
-  provider: string,
-): readonly string[] | undefined {
-  return resolvePluginMetadataProviderOwners(pluginMetadataSnapshot, provider);
 }
 
 function mergeImplicitProviderSet(
@@ -424,7 +355,7 @@ export async function resolveImplicitProviders(
     resolveProviderApiKey: createProviderApiKeyResolver(env, getAuthStore, params.config),
     resolveProviderAuth: createProviderAuthResolver(env, getAuthStore, params.config),
   };
-  const discoveryProviders = await resolveRuntimePluginDiscoveryProviders({
+  const discoveryProviders = await resolvePluginDiscoveryProviders({
     config: params.config,
     workspaceDir: params.workspaceDir,
     env,
@@ -432,13 +363,7 @@ export async function resolveImplicitProviders(
       config: params.config,
       workspaceDir: params.workspaceDir,
       env,
-      resolveOwners: params.pluginMetadataSnapshot
-        ? (provider) => resolvePluginMetadataProviderOwners(params.pluginMetadataSnapshot, provider)
-        : undefined,
     }),
-    ...(params.pluginMetadataSnapshot
-      ? { pluginMetadataSnapshot: params.pluginMetadataSnapshot }
-      : {}),
   });
 
   for (const order of PLUGIN_DISCOVERY_ORDERS) {

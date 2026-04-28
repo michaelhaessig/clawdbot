@@ -2,8 +2,10 @@
 summary: "Expose an OpenAI-compatible /v1/chat/completions HTTP endpoint from the Gateway"
 read_when:
   - Integrating tools that expect OpenAI Chat Completions
-title: "OpenAI chat completions"
+title: "OpenAI Chat Completions"
 ---
+
+# OpenAI Chat Completions (HTTP)
 
 OpenClaw’s Gateway can serve a small OpenAI-compatible Chat Completions endpoint.
 
@@ -168,7 +170,7 @@ This is the highest-leverage compatibility set for self-hosted frontends and too
 
     Examples:
     `x-openclaw-model: openai/gpt-5.4`
-    `x-openclaw-model: gpt-5.5`
+    `x-openclaw-model: gpt-5.4`
 
     If you omit it, the selected agent runs with its normal configured model choice.
 
@@ -276,8 +278,3 @@ Notes:
 - `openclaw/default` is always present so one stable id works across environments.
 - Backend provider/model overrides belong in `x-openclaw-model`, not the OpenAI `model` field.
 - `/v1/embeddings` supports `input` as a string or array of strings.
-
-## Related
-
-- [Configuration reference](/gateway/configuration-reference)
-- [OpenAI](/providers/openai)

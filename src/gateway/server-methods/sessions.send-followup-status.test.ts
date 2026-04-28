@@ -69,7 +69,6 @@ describe("sessions.send completed subagent follow-up status", () => {
     };
 
     loadSessionEntryMock.mockReturnValue({
-      cfg: {},
       canonicalKey: childSessionKey,
       storePath: "/tmp/sessions.json",
       entry: { sessionId: "sess-followup" },
@@ -93,7 +92,6 @@ describe("sessions.send completed subagent follow-up status", () => {
       chatAbortControllers: new Map(),
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
-      getRuntimeConfig: () => ({}),
     } as unknown as GatewayRequestContext;
 
     await sessionsHandlers["sessions.send"]({

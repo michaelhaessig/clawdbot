@@ -36,22 +36,18 @@ export {
 } from "../channels/plugins/group-policy-warnings.js";
 export { buildAccountScopedDmSecurityPolicy } from "../channels/plugins/helpers.js";
 export {
-  resolveChannelGroupPolicy,
   resolveChannelGroupRequireMention,
   resolveChannelGroupToolsPolicy,
   resolveToolsBySender,
-  type ChannelGroupPolicy,
 } from "../config/group-policy.js";
 export {
   DM_GROUP_ACCESS_REASON,
   readStoreAllowFromForDmPolicy,
-  resolveDmGroupAccessWithCommandGate,
   resolveDmGroupAccessWithLists,
   resolveEffectiveAllowFromLists,
 } from "../security/dm-policy-shared.js";
 export {
   evaluateGroupRouteAccessForPolicy,
-  evaluateSenderGroupAccessForPolicy,
   resolveSenderScopedGroupPolicy,
 } from "./group-access.js";
 export { createAllowlistProviderRestrictSendersWarningCollector };
@@ -164,7 +160,6 @@ export function createRestrictSendersChannelSecurity<
   approveChannelId?: string;
   approveHint?: string;
   normalizeDmEntry?: (raw: string) => string;
-  inheritSharedDefaultsFromDefaultAccount?: boolean;
 }): ChannelSecurityAdapter<ResolvedAccount> {
   return {
     resolveDmPolicy: createScopedDmSecurityResolver<ResolvedAccount>({
@@ -178,7 +173,6 @@ export function createRestrictSendersChannelSecurity<
       approveChannelId: params.approveChannelId,
       approveHint: params.approveHint,
       normalizeEntry: params.normalizeDmEntry,
-      inheritSharedDefaultsFromDefaultAccount: params.inheritSharedDefaultsFromDefaultAccount,
     }),
     collectWarnings: createAllowlistProviderRestrictSendersWarningCollector<ResolvedAccount>({
       providerConfigPresent:

@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CommandHandler, HandleCommandsParams } from "./commands-types.js";
-
-const loadCommandHandlersMock = vi.hoisted(
-  (): ReturnType<typeof vi.fn<() => CommandHandler[]>> => vi.fn<() => CommandHandler[]>(() => []),
-);
+import type { HandleCommandsParams } from "./commands-types.js";
 
 vi.mock("./commands-handlers.runtime.js", () => ({
-  loadCommandHandlers: () => loadCommandHandlersMock(),
+  loadCommandHandlers: () => [],
 }));
 
 vi.mock("./commands-reset.js", () => ({
@@ -16,6 +12,8 @@ vi.mock("./commands-reset.js", () => ({
 vi.mock("../commands-registry.js", () => ({
   shouldHandleTextCommands: vi.fn(() => true),
 }));
+
+import { handleCommands } from "./commands-core.js";
 
 function makeParams(): HandleCommandsParams {
   return {
@@ -78,42 +76,14 @@ function makeParams(): HandleCommandsParams {
 describe("handleCommands send policy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    loadCommandHandlersMock.mockReturnValue([]);
   });
 
   it("allows processing to continue even when send policy is deny (#53328)", async () => {
-    const { handleCommands } = await import("./commands-core.js");
     // sendPolicy deny now only suppresses outbound delivery, not inbound processing.
     // The deny gate moved to dispatch-from-config.ts where it suppresses delivery
     // after the agent has processed the message.
     const result = await handleCommands(makeParams());
 
     expect(result).toEqual({ shouldContinue: true });
-  });
-
-  it("marks command replies as non-threaded", async () => {
-    const { handleCommands } = await import("./commands-core.js");
-    loadCommandHandlersMock.mockReturnValue([
-      vi.fn(async () => ({
-        shouldContinue: false,
-        reply: {
-          text: "done",
-          replyToId: "msg-123",
-          replyToCurrent: true,
-        },
-      })),
-    ]);
-
-    const result = await handleCommands(makeParams());
-
-    expect(result).toEqual({
-      shouldContinue: false,
-      reply: {
-        text: "done",
-        replyToId: undefined,
-        replyToCurrent: false,
-      },
-    });
   });
 });

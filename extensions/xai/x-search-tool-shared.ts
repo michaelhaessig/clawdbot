@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 
 export function buildMissingXSearchApiKeyPayload() {
   return {

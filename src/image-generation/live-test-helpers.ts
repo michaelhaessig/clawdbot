@@ -14,10 +14,8 @@ export const DEFAULT_LIVE_IMAGE_MODELS: Record<string, string> = {
   fal: "fal/fal-ai/flux/dev",
   google: "google/gemini-3.1-flash-image-preview",
   minimax: "minimax/image-01",
-  openai: "openai/gpt-image-2",
-  openrouter: "openrouter/google/gemini-3.1-flash-image-preview",
+  openai: "openai/gpt-image-1",
   vydra: "vydra/grok-imagine",
-  xai: "xai/grok-imagine-image",
 };
 
 export function parseCaseFilter(raw?: string): Set<string> | null {

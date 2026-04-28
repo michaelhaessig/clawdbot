@@ -1,38 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSlackPluginBase, setSlackChannelAllowlist } from "./shared.js";
-
-describe("createSlackPluginBase", () => {
-  it("owns Slack native command name overrides", () => {
-    const plugin = createSlackPluginBase({
-      setup: {} as never,
-      setupWizard: {} as never,
-    });
-
-    expect(
-      plugin.commands?.resolveNativeCommandName?.({
-        commandKey: "status",
-        defaultName: "status",
-      }),
-    ).toBe("agentstatus");
-    expect(
-      plugin.commands?.resolveNativeCommandName?.({
-        commandKey: "tts",
-        defaultName: "tts",
-      }),
-    ).toBe("tts");
-  });
-
-  it("exposes security checks on the setup surface", () => {
-    const plugin = createSlackPluginBase({
-      setup: {} as never,
-      setupWizard: {} as never,
-    });
-
-    expect(plugin.security?.resolveDmPolicy).toBeTypeOf("function");
-    expect(plugin.security?.collectWarnings).toBeTypeOf("function");
-    expect(plugin.security?.collectAuditFindings).toBeTypeOf("function");
-  });
-});
+import { setSlackChannelAllowlist } from "./shared.js";
 
 describe("setSlackChannelAllowlist", () => {
   it("writes canonical enabled entries for setup-generated channel allowlists", () => {

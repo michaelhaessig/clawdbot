@@ -35,7 +35,7 @@ describe("qa suite transport helpers", () => {
 
     state.addOutboundMessage({
       to: "dm:qa-operator",
-      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai/gpt-5.5 with the Codex OAuth profile, or set OPENAI_API_KEY for direct OpenAI API access.',
+      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/gpt-5.4 (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.4.',
       senderId: "openclaw",
       senderName: "OpenClaw QA",
     });
@@ -79,24 +79,6 @@ describe("qa suite transport helpers", () => {
     await expect(pending).rejects.toThrow("checking thread context");
   });
 
-  it("fails success-only waitForOutboundMessage calls when a tool-backed scenario reports missing tools", async () => {
-    const state = createQaBusState();
-    const pending = waitForOutboundMessage(
-      state,
-      (candidate) => candidate.text.includes("Status: complete"),
-      5_000,
-    );
-
-    state.addOutboundMessage({
-      to: "dm:qa-operator",
-      text: "Read: AGENT.md\nEvidence snippet: Tool read not found\nStatus: blocked",
-      senderId: "openclaw",
-      senderName: "OpenClaw QA",
-    });
-
-    await expect(pending).rejects.toThrow("Tool read not found");
-  });
-
   it("fails raw scenario waitForCondition calls when a classified failure reply arrives", async () => {
     const state = createQaBusState();
     const waitForCondition = createScenarioWaitForCondition(state);
@@ -117,7 +99,7 @@ describe("qa suite transport helpers", () => {
 
     state.addOutboundMessage({
       to: "dm:qa-operator",
-      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai/gpt-5.5 with the Codex OAuth profile, or set OPENAI_API_KEY for direct OpenAI API access.',
+      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/gpt-5.4 (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.4.',
       senderId: "openclaw",
       senderName: "OpenClaw QA",
     });
@@ -164,7 +146,7 @@ describe("qa suite transport helpers", () => {
 
     state.addOutboundMessage({
       to: "dm:qa-operator",
-      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai/gpt-5.5 with the Codex OAuth profile, or set OPENAI_API_KEY for direct OpenAI API access.',
+      text: '⚠️ No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/gpt-5.4 (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.4.',
       senderId: "openclaw",
       senderName: "OpenClaw QA",
     });

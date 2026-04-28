@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   findAgentEntryIndex: vi.fn((_list?: unknown, _agentId?: string) => -1),
   applyAgentConfig: vi.fn((_cfg: unknown, _opts: unknown) => ({})),
   pruneAgentConfig: vi.fn(() => ({ config: {}, removedBindings: 0 })),
-  writeConfigFile: vi.fn(async (_nextConfig?: unknown) => {}),
+  writeConfigFile: vi.fn(async () => {}),
   ensureAgentWorkspace: vi.fn(
     async (params?: { dir?: string }): Promise<{ dir: string; identityPathCreated: boolean }> => ({
       dir: params?.dir
@@ -47,10 +47,8 @@ vi.mock("../../config/config.js", async () => {
     await vi.importActual<typeof import("../../config/config.js")>("../../config/config.js");
   return {
     ...actual,
-    getRuntimeConfig: () => mocks.loadConfigReturn,
+    loadConfig: () => mocks.loadConfigReturn,
     writeConfigFile: mocks.writeConfigFile,
-    replaceConfigFile: async (params: { nextConfig: unknown }) =>
-      await mocks.writeConfigFile(params.nextConfig),
   };
 });
 
@@ -162,7 +160,7 @@ function makeCall(method: keyof typeof agentsHandlers, params: Record<string, un
   const promise = handler({
     params,
     respond,
-    context: { getRuntimeConfig: () => mocks.loadConfigReturn } as never,
+    context: {} as never,
     req: { type: "req" as const, id: "1", method },
     client: null,
     isWebchatConnect: () => false,
@@ -223,9 +221,7 @@ type MockConfig = {
 };
 
 function getAgentList(cfg: unknown): MockAgentEntry[] {
-  return ((cfg as MockConfig | undefined)?.agents?.list ?? []).map((entry) =>
-    Object.assign({}, entry),
-  );
+  return ((cfg as MockConfig | undefined)?.agents?.list ?? []).map((entry) => ({ ...entry }));
 }
 
 function mergeAgentConfig(cfg: unknown, opts: unknown): MockConfig {

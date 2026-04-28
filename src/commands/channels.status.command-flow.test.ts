@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 import { channelsStatusCommand } from "./channels/status.js";
-import { createCapturingTestRuntime } from "./test-runtime-config-helpers.js";
 
 const resolveDefaultAccountId = () => DEFAULT_ACCOUNT_ID;
 
@@ -11,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(async () => ({ path: "/tmp/openclaw.json" })),
   requireValidConfigSnapshot: vi.fn(),
   listChannelPlugins: vi.fn(),
-  listConfiguredChannelIdsForReadOnlyScope: vi.fn((_params: unknown) => ["discord"]),
   withProgress: vi.fn(async (_opts: unknown, run: () => Promise<unknown>) => await run()),
 }));
 
@@ -35,11 +33,6 @@ vi.mock("../config/config.js", () => ({
   readConfigFileSnapshot: () => mocks.readConfigFileSnapshot(),
 }));
 
-vi.mock("../plugins/channel-plugin-ids.js", () => ({
-  listConfiguredChannelIdsForReadOnlyScope: (params: unknown) =>
-    mocks.listConfiguredChannelIdsForReadOnlyScope(params),
-}));
-
 vi.mock("./channels/shared.js", () => ({
   requireValidConfigSnapshot: (runtime: unknown) => mocks.requireValidConfigSnapshot(runtime),
   formatChannelAccountLabel: ({
@@ -50,47 +43,12 @@ vi.mock("./channels/shared.js", () => ({
     accountId: string;
     name?: string;
   }) => `${channel} ${accountId}`,
-  appendEnabledConfiguredLinkedBits: (bits: string[], account: Record<string, unknown>) => {
-    if (typeof account.enabled === "boolean") {
-      bits.push(account.enabled ? "enabled" : "disabled");
-    }
-    if (account.configured === true) {
-      bits.push("configured");
-      if (Object.values(account).includes("configured_unavailable")) {
-        bits.push("secret unavailable in this command path");
-      }
-    }
-  },
-  appendModeBit: (bits: string[], account: Record<string, unknown>) => {
-    if (typeof account.mode === "string" && account.mode.length > 0) {
-      bits.push(`mode:${account.mode}`);
-    }
-  },
-  appendTokenSourceBits: (bits: string[], account: Record<string, unknown>) => {
-    if (account.tokenSource === "config") {
-      const unavailable = account.tokenStatus === "configured_unavailable" ? " (unavailable)" : "";
-      bits.push(`token:config${unavailable}`);
-    }
-  },
-  appendBaseUrlBit: (bits: string[], account: Record<string, unknown>) => {
-    if (typeof account.baseUrl === "string" && account.baseUrl) {
-      bits.push(`url:${account.baseUrl}`);
-    }
-  },
-  buildChannelAccountLine: (channel: string, account: Record<string, unknown>, bits: string[]) => {
-    const accountId = typeof account.accountId === "string" ? account.accountId : "default";
-    return `- ${channel} ${accountId}: ${bits.join(", ")}`;
-  },
 }));
 
 vi.mock("../channels/plugins/index.js", () => ({
   listChannelPlugins: () => mocks.listChannelPlugins(),
   getChannelPlugin: (channel: string) =>
     (mocks.listChannelPlugins() as Array<{ id: string }>).find((plugin) => plugin.id === channel),
-}));
-
-vi.mock("../channels/plugins/read-only.js", () => ({
-  listReadOnlyChannelPluginsForConfig: () => mocks.listChannelPlugins(),
 }));
 
 vi.mock("../channels/account-snapshot-fields.js", () => ({
@@ -130,7 +88,7 @@ vi.mock("../channels/plugins/status.js", () => ({
 }));
 
 vi.mock("../cli/command-secret-targets.js", () => ({
-  getConfiguredChannelsCommandSecretTargetIds: () => [],
+  getChannelsCommandSecretTargetIds: () => [],
 }));
 
 vi.mock("../infra/channels-status-issues.js", () => ({
@@ -140,17 +98,6 @@ vi.mock("../infra/channels-status-issues.js", () => ({
 vi.mock("../cli/progress.js", () => ({
   withProgress: (opts: unknown, run: () => Promise<unknown>) => mocks.withProgress(opts, run),
 }));
-
-function createTokenAccountSnapshot(cfg: { secretResolved?: boolean }) {
-  return {
-    name: "Primary",
-    enabled: true,
-    configured: true,
-    token: cfg.secretResolved ? "resolved-discord-token" : "",
-    tokenSource: "config",
-    tokenStatus: cfg.secretResolved ? "available" : "configured_unavailable",
-  };
-}
 
 function createTokenOnlyPlugin() {
   return {
@@ -166,8 +113,42 @@ function createTokenOnlyPlugin() {
     config: {
       listAccountIds: () => ["default"],
       defaultAccountId: resolveDefaultAccountId,
-      inspectAccount: createTokenAccountSnapshot,
-      resolveAccount: createTokenAccountSnapshot,
+      inspectAccount: (cfg: { secretResolved?: boolean }) =>
+        cfg.secretResolved
+          ? {
+              name: "Primary",
+              enabled: true,
+              configured: true,
+              token: "resolved-discord-token",
+              tokenSource: "config",
+              tokenStatus: "available",
+            }
+          : {
+              name: "Primary",
+              enabled: true,
+              configured: true,
+              token: "",
+              tokenSource: "config",
+              tokenStatus: "configured_unavailable",
+            },
+      resolveAccount: (cfg: { secretResolved?: boolean }) =>
+        cfg.secretResolved
+          ? {
+              name: "Primary",
+              enabled: true,
+              configured: true,
+              token: "resolved-discord-token",
+              tokenSource: "config",
+              tokenStatus: "available",
+            }
+          : {
+              name: "Primary",
+              enabled: true,
+              configured: true,
+              token: "",
+              tokenSource: "config",
+              tokenStatus: "configured_unavailable",
+            },
       isConfigured: () => true,
       isEnabled: () => true,
     },
@@ -177,6 +158,17 @@ function createTokenOnlyPlugin() {
   };
 }
 
+function createRuntimeCapture() {
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const runtime = {
+    log: (message: unknown) => logs.push(String(message)),
+    error: (message: unknown) => errors.push(String(message)),
+    exit: (_code?: number) => undefined,
+  };
+  return { runtime, logs, errors };
+}
+
 describe("channelsStatusCommand SecretRef fallback flow", () => {
   beforeEach(() => {
     mocks.callGateway.mockReset();
@@ -184,8 +176,6 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
     mocks.readConfigFileSnapshot.mockClear();
     mocks.requireValidConfigSnapshot.mockReset();
     mocks.listChannelPlugins.mockReset();
-    mocks.listConfiguredChannelIdsForReadOnlyScope.mockClear();
-    mocks.listConfiguredChannelIdsForReadOnlyScope.mockReturnValue(["discord"]);
     mocks.withProgress.mockClear();
     mocks.listChannelPlugins.mockReturnValue([createTokenOnlyPlugin()]);
   });
@@ -200,7 +190,7 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
         "channels status: channels.discord.token is unavailable in this command path; continuing with degraded read-only config.",
       ],
     });
-    const { runtime, logs, errors } = createCapturingTestRuntime();
+    const { runtime, logs, errors } = createRuntimeCapture();
 
     await channelsStatusCommand({ probe: false }, runtime as never);
 
@@ -229,7 +219,7 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
       effectiveConfig: { secretResolved: true, channels: {} },
       diagnostics: [],
     });
-    const { runtime, logs } = createCapturingTestRuntime();
+    const { runtime, logs } = createRuntimeCapture();
 
     await channelsStatusCommand({ probe: false }, runtime as never);
 
@@ -238,52 +228,5 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
     expect(joined).toContain("token:config");
     expect(joined).not.toContain("secret unavailable in this command path");
     expect(joined).not.toContain("token:config (unavailable)");
-  });
-
-  it("keeps JSON fallback structured without rendering config-only text", async () => {
-    mocks.callGateway.mockRejectedValue(
-      new Error(
-        [
-          "gateway timeout after 3000ms",
-          "Gateway target: wss://user:pass@gateway.example.com/socket?token=secret-token&keep=visible",
-          "Gateway fallback: (wss://fallback-user:fallback-pass@[bad-host/socket?token=fallback-secret&keep=visible)",
-          "Source: env OPENCLAW_GATEWAY_URL",
-        ].join("\n"),
-      ),
-    );
-    mocks.requireValidConfigSnapshot.mockResolvedValue({ secretResolved: false, channels: {} });
-    mocks.resolveCommandConfigWithSecrets.mockResolvedValue({
-      resolvedConfig: { secretResolved: true, channels: {} },
-      effectiveConfig: { secretResolved: true, channels: {} },
-      diagnostics: [],
-    });
-    const { runtime, logs, errors } = createCapturingTestRuntime();
-
-    await channelsStatusCommand({ json: true, probe: false }, runtime as never);
-
-    expect(mocks.listChannelPlugins).not.toHaveBeenCalled();
-    expect(mocks.listConfiguredChannelIdsForReadOnlyScope).toHaveBeenCalledWith(
-      expect.objectContaining({
-        config: expect.objectContaining({ secretResolved: true }),
-        includePersistedAuthState: false,
-      }),
-    );
-    const payload = JSON.parse(logs.at(-1) ?? "{}");
-    expect(errors.join("\n")).not.toContain("user:pass");
-    expect(errors.join("\n")).not.toContain("secret-token");
-    expect(errors.join("\n")).not.toContain("fallback-user:fallback-pass");
-    expect(errors.join("\n")).not.toContain("fallback-secret");
-    expect(payload.error).toContain("Gateway target:");
-    expect(payload.error).not.toContain("user:pass");
-    expect(payload.error).not.toContain("secret-token");
-    expect(payload.error).not.toContain("fallback-user:fallback-pass");
-    expect(payload.error).not.toContain("fallback-secret");
-    expect(payload).toEqual(
-      expect.objectContaining({
-        gatewayReachable: false,
-        configOnly: true,
-        configuredChannels: ["discord"],
-      }),
-    );
   });
 });

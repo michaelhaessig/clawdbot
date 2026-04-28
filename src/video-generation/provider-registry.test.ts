@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VideoGenerationProviderPlugin } from "../plugins/types.js";
 
 const { resolvePluginCapabilityProvidersMock } = vi.hoisted(() => ({
@@ -9,8 +9,8 @@ vi.mock("../plugins/capability-provider-runtime.js", () => ({
   resolvePluginCapabilityProviders: resolvePluginCapabilityProvidersMock,
 }));
 
-const { getVideoGenerationProvider, listVideoGenerationProviders } =
-  await import("./provider-registry.js");
+let getVideoGenerationProvider: typeof import("./provider-registry.js").getVideoGenerationProvider;
+let listVideoGenerationProviders: typeof import("./provider-registry.js").listVideoGenerationProviders;
 
 function createProvider(
   params: Pick<VideoGenerationProviderPlugin, "id"> & Partial<VideoGenerationProviderPlugin>,
@@ -26,6 +26,11 @@ function createProvider(
 }
 
 describe("video-generation provider registry", () => {
+  beforeAll(async () => {
+    ({ getVideoGenerationProvider, listVideoGenerationProviders } =
+      await import("./provider-registry.js"));
+  });
+
   beforeEach(() => {
     resolvePluginCapabilityProvidersMock.mockReset();
     resolvePluginCapabilityProvidersMock.mockReturnValue([]);

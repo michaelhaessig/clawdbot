@@ -11,7 +11,7 @@ import {
 import { ChannelType } from "discord-api-types/v10";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import { resolveCommandAuthorizedFromAuthorizers } from "openclaw/plugin-sdk/command-auth-native";
-import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-name-runtime";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
@@ -39,7 +39,6 @@ import {
   resolveDiscordOwnerAccess,
   resolveGroupDmAllow,
 } from "./allow-list.js";
-import { resolveDiscordChannelInfoSafe } from "./channel-access.js";
 import { formatDiscordUserTag } from "./format.js";
 
 export const AGENT_BUTTON_KEY = "agent";
@@ -183,20 +182,22 @@ export function resolveDiscordChannelContext(
   interaction: AgentComponentInteraction,
 ): DiscordChannelContext {
   const channel = interaction.channel;
-  const channelInfo = resolveDiscordChannelInfoSafe(channel);
-  const channelName = channelInfo.name;
+  const channelName = channel && "name" in channel ? (channel.name as string) : undefined;
   const channelSlug = channelName ? normalizeDiscordSlug(channelName) : "";
-  const channelType = channelInfo.type;
+  const channelType = channel && "type" in channel ? (channel.type as number) : undefined;
   const isThread = isThreadChannelType(channelType);
 
   let parentId: string | undefined;
   let parentName: string | undefined;
   let parentSlug = "";
-  if (isThread) {
-    parentId = channelInfo.parentId;
-    parentName = channelInfo.parentName;
-    if (parentName) {
-      parentSlug = normalizeDiscordSlug(parentName);
+  if (isThread && channel && "parentId" in channel) {
+    parentId = (channel.parentId as string) ?? undefined;
+    if ("parent" in channel) {
+      const parent = (channel as { parent?: { name?: string } }).parent;
+      if (parent?.name) {
+        parentName = parent.name;
+        parentSlug = normalizeDiscordSlug(parentName);
+      }
     }
   }
 

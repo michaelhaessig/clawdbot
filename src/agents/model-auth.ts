@@ -27,7 +27,6 @@ import {
   resolveAuthProfileOrder,
   resolveAuthStorePathForDisplay,
 } from "./auth-profiles.js";
-import * as cliCredentials from "./cli-credentials.js";
 import { resolveEnvApiKey, type EnvApiKeyResult } from "./model-auth-env.js";
 import {
   CUSTOM_LOCAL_AUTH_MARKER,
@@ -157,34 +156,22 @@ export function resolveUsableCustomProviderApiKey(params: {
   if (!isNonSecretApiKeyMarker(customKey)) {
     return { apiKey: customKey, source: "models.json" };
   }
-  if (isKnownEnvApiKeyMarker(customKey)) {
-    const envValue = normalizeOptionalSecretInput((params.env ?? process.env)[customKey]);
-    if (!envValue) {
-      return null;
-    }
-    const applied = new Set(getShellEnvAppliedKeys());
-    return {
-      apiKey: envValue,
-      source: resolveEnvSourceLabel({
-        applied,
-        envVars: [customKey],
-        label: `${customKey} (models.json marker)`,
-      }),
-    };
+  if (!isKnownEnvApiKeyMarker(customKey)) {
+    return null;
   }
-  if (
-    customProviderConfig &&
-    isCustomLocalProviderConfig(customProviderConfig) &&
-    (customProviderConfig.api === "openai-completions" || customProviderConfig.api === "ollama") &&
-    customProviderConfig.baseUrl &&
-    isLocalBaseUrl(customProviderConfig.baseUrl)
-  ) {
-    return {
-      apiKey: customProviderConfig.api === "ollama" ? customKey : CUSTOM_LOCAL_AUTH_MARKER,
-      source: "models.json (local marker)",
-    };
+  const envValue = normalizeOptionalSecretInput((params.env ?? process.env)[customKey]);
+  if (!envValue) {
+    return null;
   }
-  return null;
+  const applied = new Set(getShellEnvAppliedKeys());
+  return {
+    apiKey: envValue,
+    source: resolveEnvSourceLabel({
+      applied,
+      envVars: [customKey],
+      label: `${customKey} (models.json marker)`,
+    }),
+  };
 }
 
 export function hasUsableCustomProviderApiKey(
@@ -221,35 +208,18 @@ function resolveProviderAuthOverride(
 
 function isLocalBaseUrl(baseUrl: string): boolean {
   try {
-    let host = normalizeLowercaseStringOrEmpty(new URL(baseUrl).hostname);
-    if (host.startsWith("[") && host.endsWith("]")) {
-      host = host.slice(1, -1);
-    }
+    const host = normalizeLowercaseStringOrEmpty(new URL(baseUrl).hostname);
     return (
       host === "localhost" ||
       host === "127.0.0.1" ||
       host === "0.0.0.0" ||
-      host === "::1" ||
-      host === "::ffff:7f00:1" ||
-      host === "::ffff:127.0.0.1" ||
-      host.endsWith(".local") ||
-      isPrivateIpv4Host(host)
+      host === "[::1]" ||
+      host === "[::ffff:7f00:1]" ||
+      host === "[::ffff:127.0.0.1]"
     );
   } catch {
     return false;
   }
-}
-
-function isPrivateIpv4Host(host: string): boolean {
-  if (!/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-    return false;
-  }
-  const octets = host.split(".").map((part) => Number.parseInt(part, 10));
-  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-  const [a, b] = octets;
-  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
 function hasExplicitProviderApiKeyConfig(providerConfig: ModelProviderConfig): boolean {
@@ -287,17 +257,15 @@ function resolveProviderSyntheticRuntimeAuth(params: {
     config: OpenClawConfig | undefined,
   ): ResolvedProviderAuth | undefined => {
     const providerConfig = resolveProviderConfig(config, params.provider);
-    return (
-      resolveProviderSyntheticAuthWithPlugin({
-        provider: params.provider,
+    return resolveProviderSyntheticAuthWithPlugin({
+      provider: params.provider,
+      config,
+      context: {
         config,
-        context: {
-          config,
-          provider: params.provider,
-          providerConfig,
-        },
-      }) ?? undefined
-    );
+        provider: params.provider,
+        providerConfig,
+      },
+    });
   };
 
   const directAuth = resolveFromConfig(params.cfg);
@@ -446,7 +414,7 @@ export async function resolveApiKeyForProvider(params: {
   store?: AuthProfileStore;
   agentDir?: string;
   /** When true, treat profileId as a user-locked selection that must not be
-   *  silently overridden by env/config credentials. */
+   *  silently overridden by env/config credentials (e.g. ollama-local). */
   lockedProfile?: boolean;
   credentialPrecedence?: ProviderCredentialPrecedence;
 }): Promise<ResolvedProviderAuth> {
@@ -682,13 +650,6 @@ export function resolveModelAuthMode(
   const envKey = resolveEnvApiKey(resolved);
   if (envKey?.apiKey) {
     return envKey.source.includes("OAUTH_TOKEN") ? "oauth" : "api-key";
-  }
-
-  if (
-    normalizeProviderId(resolved) === "codex" &&
-    cliCredentials.readCodexCliCredentialsCached({ ttlMs: 5_000 })
-  ) {
-    return "oauth";
   }
 
   if (hasUsableCustomProviderApiKey(cfg, resolved)) {

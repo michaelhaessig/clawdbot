@@ -11,12 +11,11 @@ import {
 } from "./inbound-dedupe.js";
 import { materializeDiscordInboundJob, type DiscordInboundJob } from "./inbound-job.js";
 import type { RuntimeEnv } from "./message-handler.preflight.types.js";
+import { processDiscordMessage } from "./message-handler.process.js";
+import { deliverDiscordReply } from "./reply-delivery.js";
 import type { DiscordMonitorStatusSink } from "./status.js";
 import { resolveDiscordReplyDeliveryPlan } from "./threading.js";
 import { normalizeDiscordInboundWorkerTimeoutMs, runDiscordTaskWithTimeout } from "./timeouts.js";
-
-type ProcessDiscordMessage = typeof import("./message-handler.process.js").processDiscordMessage;
-type DeliverDiscordReply = typeof import("./reply-delivery.js").deliverDiscordReply;
 
 type DiscordInboundWorkerParams = {
   runtime: RuntimeEnv;
@@ -33,24 +32,9 @@ export type DiscordInboundWorker = {
 };
 
 export type DiscordInboundWorkerTestingHooks = {
-  processDiscordMessage?: ProcessDiscordMessage;
-  deliverDiscordReply?: DeliverDiscordReply;
+  processDiscordMessage?: typeof processDiscordMessage;
+  deliverDiscordReply?: typeof deliverDiscordReply;
 };
-
-let messageProcessRuntimePromise:
-  | Promise<typeof import("./message-handler.process.js")>
-  | undefined;
-let replyDeliveryRuntimePromise: Promise<typeof import("./reply-delivery.js")> | undefined;
-
-async function loadMessageProcessRuntime() {
-  messageProcessRuntimePromise ??= import("./message-handler.process.js");
-  return await messageProcessRuntimePromise;
-}
-
-async function loadReplyDeliveryRuntime() {
-  replyDeliveryRuntimePromise ??= import("./reply-delivery.js");
-  return await replyDeliveryRuntimePromise;
-}
 
 function formatDiscordRunContextSuffix(job: DiscordInboundJob): string {
   const channelId = job.payload.messageChannelId?.trim();
@@ -78,9 +62,7 @@ async function processDiscordInboundJob(params: {
   let finalReplyStarted = false;
   let createdThreadId: string | undefined;
   let sessionKey: string | undefined;
-  const processDiscordMessageImpl =
-    params.testing?.processDiscordMessage ??
-    (await loadMessageProcessRuntime()).processDiscordMessage;
+  const processDiscordMessageImpl = params.testing?.processDiscordMessage ?? processDiscordMessage;
   try {
     await runDiscordTaskWithTimeout({
       run: async (abortSignal) => {
@@ -153,7 +135,7 @@ async function sendDiscordInboundWorkerTimeoutReply(params: {
   contextSuffix: string;
   createdThreadId?: string;
   sessionKey?: string;
-  deliverDiscordReplyImpl?: DeliverDiscordReply;
+  deliverDiscordReplyImpl?: typeof deliverDiscordReply;
 }) {
   const messageChannelId = params.job.payload.messageChannelId?.trim();
   const messageId = params.job.payload.message?.id?.trim();
@@ -176,9 +158,7 @@ async function sendDiscordInboundWorkerTimeoutReply(params: {
   });
 
   try {
-    const deliverDiscordReplyImpl =
-      params.deliverDiscordReplyImpl ?? (await loadReplyDeliveryRuntime()).deliverDiscordReply;
-    await deliverDiscordReplyImpl({
+    await (params.deliverDiscordReplyImpl ?? deliverDiscordReply)({
       cfg: params.job.payload.cfg,
       replies: [{ text: "Discord inbound worker timed out.", isError: true }],
       target: deliveryPlan.deliverTarget,

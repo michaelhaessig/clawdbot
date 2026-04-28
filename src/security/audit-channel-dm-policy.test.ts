@@ -22,7 +22,6 @@ describe("security audit channel dm policy", () => {
         capabilities: { chatTypes: ["direct"] },
         config: {
           listAccountIds: () => ["default"],
-          inspectAccount: () => ({ enabled: true, configured: true }),
           resolveAccount: () => ({}),
           isEnabled: () => true,
           isConfigured: () => true,

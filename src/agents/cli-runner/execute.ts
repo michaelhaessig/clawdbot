@@ -17,7 +17,6 @@ import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import { classifyFailoverReason } from "../pi-embedded-helpers.js";
 import { applyPluginTextReplacements } from "../plugin-text-transforms.js";
 import { applySkillEnvOverridesFromSnapshot } from "../skills.js";
-import { runClaudeLiveSessionTurn, shouldUseClaudeLiveSession } from "./claude-live-session.js";
 import { prepareClaudeCliSkillsPlugin } from "./claude-skills-plugin.js";
 import {
   buildCliSupervisorScopeKey,
@@ -153,17 +152,6 @@ function formatCliEnvKeyList(keys: readonly string[]): string {
   return keys.length > 0 ? keys.join(",") : "none";
 }
 
-function buildCliEnvMcpLog(childEnv: Record<string, string>): string {
-  return [
-    `token=${childEnv.OPENCLAW_MCP_TOKEN ? "set" : "missing"}`,
-    `sessionKey=${childEnv.OPENCLAW_MCP_SESSION_KEY ? "set" : "<empty>"}`,
-    `agentId=${childEnv.OPENCLAW_MCP_AGENT_ID || "<empty>"}`,
-    `accountId=${childEnv.OPENCLAW_MCP_ACCOUNT_ID || "<empty>"}`,
-    `messageChannel=${childEnv.OPENCLAW_MCP_MESSAGE_CHANNEL || "<empty>"}`,
-    `senderIsOwner=${childEnv.OPENCLAW_MCP_SENDER_IS_OWNER || "<empty>"}`,
-  ].join(" ");
-}
-
 export function buildCliEnvAuthLog(childEnv: Record<string, string>): string {
   const hostKeys = listPresentCliAuthEnvKeys(process.env);
   const childKeys = listPresentCliAuthEnvKeys(childEnv);
@@ -205,11 +193,8 @@ export async function executePreparedCliRun(
         })
       : undefined;
 
-  const basePrompt = cliSessionIdToUse
-    ? params.prompt
-    : (context.openClawHistoryPrompt ?? params.prompt);
   let prompt = applyPluginTextReplacements(
-    prependBootstrapPromptWarning(basePrompt, context.bootstrapPromptWarningLines, {
+    prependBootstrapPromptWarning(params.prompt, context.bootstrapPromptWarningLines, {
       preserveExactPrompt: context.heartbeatPrompt,
     }),
     context.backendResolved.textTransforms?.input,
@@ -239,7 +224,6 @@ export async function executePreparedCliRun(
     backendId: context.backendResolved.id,
     skillsSnapshot: params.skillsSnapshot,
   });
-  let claudeSkillsPluginCleanupOwned = false;
   const args = buildCliArgs({
     backend,
     baseArgs:
@@ -273,7 +257,7 @@ export async function executePreparedCliRun(
         : undefined;
       try {
         cliBackendLog.info(
-          `cli exec: provider=${params.provider} model=${context.normalizedModel} promptChars=${basePrompt.length}`,
+          `cli exec: provider=${params.provider} model=${context.normalizedModel} promptChars=${params.prompt.length}`,
         );
         const logOutputText =
           isTruthyEnvValue(process.env[CLI_BACKEND_LOG_OUTPUT_ENV]) ||
@@ -320,13 +304,6 @@ export async function executePreparedCliRun(
           });
           cliBackendLog.info(`cli argv: ${backend.command} ${logArgs.join(" ")}`);
           cliBackendLog.info(`cli env auth: ${buildCliEnvAuthLog(env)}`);
-          if (
-            env.OPENCLAW_MCP_TOKEN ||
-            env.OPENCLAW_MCP_SESSION_KEY ||
-            env.OPENCLAW_MCP_SENDER_IS_OWNER
-          ) {
-            cliBackendLog.info(`cli env mcp: ${buildCliEnvMcpLog(env)}`);
-          }
         }
 
         const noOutputTimeoutMs = resolveCliNoOutputTimeoutMs({
@@ -334,71 +311,29 @@ export async function executePreparedCliRun(
           timeoutMs: params.timeoutMs,
           useResume,
         });
-        const hasJsonlOutput = backend.output === "jsonl";
-        if (shouldUseClaudeLiveSession(context)) {
-          if (!hasJsonlOutput) {
-            throw new Error("Claude live session requires JSONL streaming parser");
-          }
-          claudeSkillsPluginCleanupOwned = true;
-          const liveResult = await runClaudeLiveSessionTurn({
-            context,
-            args,
-            env,
-            prompt,
-            useResume,
-            noOutputTimeoutMs,
-            getProcessSupervisor: executeDeps.getProcessSupervisor,
-            onAssistantDelta: ({ text, delta }) => {
-              emitAgentEvent({
-                runId: params.runId,
-                stream: "assistant",
-                data: {
-                  text: applyPluginTextReplacements(
-                    text,
-                    context.backendResolved.textTransforms?.output,
-                  ),
-                  delta: applyPluginTextReplacements(
-                    delta,
-                    context.backendResolved.textTransforms?.output,
-                  ),
+        const streamingParser =
+          backend.output === "jsonl"
+            ? createCliJsonlStreamingParser({
+                backend,
+                providerId: context.backendResolved.id,
+                onAssistantDelta: ({ text, delta }) => {
+                  emitAgentEvent({
+                    runId: params.runId,
+                    stream: "assistant",
+                    data: {
+                      text: applyPluginTextReplacements(
+                        text,
+                        context.backendResolved.textTransforms?.output,
+                      ),
+                      delta: applyPluginTextReplacements(
+                        delta,
+                        context.backendResolved.textTransforms?.output,
+                      ),
+                    },
+                  });
                 },
-              });
-            },
-            cleanup: claudeSkillsPlugin.cleanup,
-          });
-          const rawText = liveResult.output.text;
-          return {
-            ...liveResult.output,
-            rawText,
-            finalPromptText: prompt,
-            text: applyPluginTextReplacements(
-              rawText,
-              context.backendResolved.textTransforms?.output,
-            ),
-          };
-        }
-        const streamingParser = hasJsonlOutput
-          ? createCliJsonlStreamingParser({
-              backend,
-              providerId: context.backendResolved.id,
-              onAssistantDelta: ({ text, delta }) => {
-                emitAgentEvent({
-                  runId: params.runId,
-                  stream: "assistant",
-                  data: {
-                    text: applyPluginTextReplacements(
-                      text,
-                      context.backendResolved.textTransforms?.output,
-                    ),
-                    delta: applyPluginTextReplacements(
-                      delta,
-                      context.backendResolved.textTransforms?.output,
-                    ),
-                  },
-                });
-              },
-            })
-          : null;
+              })
+            : null;
         const supervisor = executeDeps.getProcessSupervisor();
         const scopeKey = buildCliSupervisorScopeKey({
           backend,
@@ -420,14 +355,13 @@ export async function executePreparedCliRun(
           input: stdinPayload,
           onStdout: streamingParser ? (chunk: string) => streamingParser.push(chunk) : undefined,
         });
-        let replyBackendCompleted = false;
         const replyBackendHandle = params.replyOperation
           ? {
               kind: "cli" as const,
               cancel: () => {
                 managedRun.cancel("manual-cancel");
               },
-              isStreaming: () => !replyBackendCompleted,
+              isStreaming: () => false,
             }
           : undefined;
         if (replyBackendHandle) {
@@ -444,7 +378,6 @@ export async function executePreparedCliRun(
         try {
           result = await managedRun.wait();
         } finally {
-          replyBackendCompleted = true;
           if (replyBackendHandle) {
             params.replyOperation?.detachBackend(replyBackendHandle);
           }
@@ -544,9 +477,7 @@ export async function executePreparedCliRun(
       }
     });
   } finally {
-    if (!claudeSkillsPluginCleanupOwned) {
-      await claudeSkillsPlugin.cleanup();
-    }
+    await claudeSkillsPlugin.cleanup();
     if (systemPromptFile) {
       await systemPromptFile.cleanup();
     }

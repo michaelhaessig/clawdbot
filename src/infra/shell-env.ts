@@ -220,10 +220,8 @@ export function loadShellEnvFallback(opts: ShellEnvFallbackOptions): ShellEnvFal
     return { ok: true, applied: [], skippedReason: "disabled" };
   }
 
-  const missingExpectedKeys = opts.expectedKeys.filter(
-    (key) => !hasExplicitEnvBinding(opts.env, key),
-  );
-  if (missingExpectedKeys.length === 0) {
+  const hasAnyKey = opts.expectedKeys.some((key) => hasExplicitEnvBinding(opts.env, key));
+  if (hasAnyKey) {
     lastAppliedKeys = [];
     return { ok: true, applied: [], skippedReason: "already-has-keys" };
   }
@@ -240,7 +238,10 @@ export function loadShellEnvFallback(opts: ShellEnvFallbackOptions): ShellEnvFal
   }
 
   const applied: string[] = [];
-  for (const key of missingExpectedKeys) {
+  for (const key of opts.expectedKeys) {
+    if (hasExplicitEnvBinding(opts.env, key)) {
+      continue;
+    }
     const value = probe.shellEnv.get(key);
     if (!value?.trim()) {
       continue;

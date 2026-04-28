@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getRuntimeConfig } from "../../config/config.js";
+import { loadConfig } from "../../config/config.js";
 import { getCachedPluginJitiLoader, type PluginJitiLoaderCache } from "../jiti-loader-cache.js";
 import { loadPluginManifestRegistry } from "../manifest-registry.js";
-import { shouldPreferNativeJiti } from "../sdk-alias.js";
+import { buildPluginLoaderAliasMap, shouldPreferNativeJiti } from "../sdk-alias.js";
 
 type PluginRuntimeRecord = {
   origin?: string;
@@ -20,7 +20,7 @@ type CachedPluginBoundaryLoaderParams = {
 
 export function readPluginBoundaryConfigSafely() {
   try {
-    return getRuntimeConfig();
+    return loadConfig();
   } catch {
     return {};
   }
@@ -116,16 +116,17 @@ export function resolvePluginRuntimeModulePath(
 
 export function getPluginBoundaryJiti(modulePath: string, loaders: PluginJitiLoaderCache) {
   const tryNative = shouldPreferNativeJiti(modulePath);
+  const aliasMap = buildPluginLoaderAliasMap(modulePath);
   return getCachedPluginJitiLoader({
     cache: loaders,
     modulePath,
     importerUrl: import.meta.url,
     jitiFilename: import.meta.url,
+    aliasMap,
     tryNative,
   });
 }
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Dynamic plugin boundary loaders use caller-supplied module types.
 export function loadPluginBoundaryModuleWithJiti<TModule>(
   modulePath: string,
   loaders: PluginJitiLoaderCache,
@@ -133,7 +134,6 @@ export function loadPluginBoundaryModuleWithJiti<TModule>(
   return getPluginBoundaryJiti(modulePath, loaders)(modulePath) as TModule;
 }
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Dynamic plugin boundary loaders use caller-supplied module types.
 export function createCachedPluginBoundaryModuleLoader<TModule>(
   params: CachedPluginBoundaryLoaderParams,
 ): () => TModule | null {

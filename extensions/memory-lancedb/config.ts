@@ -129,7 +129,7 @@ export const memoryConfigSchema = {
     }
 
     const dreaming =
-      cfg.dreaming === undefined
+      typeof cfg.dreaming === "undefined"
         ? undefined
         : cfg.dreaming && typeof cfg.dreaming === "object" && !Array.isArray(cfg.dreaming)
           ? (cfg.dreaming as Record<string, unknown>)

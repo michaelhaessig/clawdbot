@@ -53,14 +53,11 @@ export function getTrustedChannelPluginCatalogEntry(
   });
 }
 
-function listChannelPluginCatalogEntriesWithTrustedFallback(
-  params: {
-    cfg: OpenClawConfig;
-    workspaceDir?: string;
-    env?: NodeJS.ProcessEnv;
-  },
-  onMissingFallback: (entry: ChannelPluginCatalogEntry) => ChannelPluginCatalogEntry[],
-): ChannelPluginCatalogEntry[] {
+export function listTrustedChannelPluginCatalogEntries(params: {
+  cfg: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+}): ChannelPluginCatalogEntry[] {
   const unfiltered = listChannelPluginCatalogEntries({
     workspaceDir: params.workspaceDir,
   });
@@ -75,16 +72,8 @@ function listChannelPluginCatalogEntriesWithTrustedFallback(
       return [entry];
     }
     const fallback = fallbackById.get(entry.id);
-    return fallback ? [fallback] : onMissingFallback(entry);
+    return fallback ? [fallback] : [];
   });
-}
-
-export function listTrustedChannelPluginCatalogEntries(params: {
-  cfg: OpenClawConfig;
-  workspaceDir?: string;
-  env?: NodeJS.ProcessEnv;
-}): ChannelPluginCatalogEntry[] {
-  return listChannelPluginCatalogEntriesWithTrustedFallback(params, () => []);
 }
 
 export function listSetupDiscoveryChannelPluginCatalogEntries(params: {
@@ -92,5 +81,20 @@ export function listSetupDiscoveryChannelPluginCatalogEntries(params: {
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
 }): ChannelPluginCatalogEntry[] {
-  return listChannelPluginCatalogEntriesWithTrustedFallback(params, (entry) => [entry]);
+  const unfiltered = listChannelPluginCatalogEntries({
+    workspaceDir: params.workspaceDir,
+  });
+  const fallbackById = new Map(
+    listChannelPluginCatalogEntries({
+      workspaceDir: params.workspaceDir,
+      excludeWorkspace: true,
+    }).map((entry) => [entry.id, entry]),
+  );
+  return unfiltered.flatMap((entry) => {
+    if (isTrustedWorkspaceChannelCatalogEntry(entry, params.cfg, params.env)) {
+      return [entry];
+    }
+    const fallback = fallbackById.get(entry.id);
+    return fallback ? [fallback] : [entry];
+  });
 }

@@ -1,20 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildOpenAISpeechProvider } from "./speech-provider.js";
 
-vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  fetchWithSsrFGuard: async ({
-    url,
-    init,
-  }: {
-    url: string;
-    init?: RequestInit;
-  }): Promise<{ response: Response; release: () => Promise<void> }> => ({
-    response: await globalThis.fetch(url, init),
-    release: vi.fn(async () => {}),
-  }),
-  ssrfPolicyFromHttpBaseUrlAllowedHostname: () => undefined,
-}));
-
 function isSpeechRequestBody(value: unknown): value is { response_format?: string } {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -28,16 +14,6 @@ function parseRequestBody(init: RequestInit | undefined): { response_format?: st
     throw new Error("expected OpenAI speech request body");
   }
   return body;
-}
-
-function mockSpeechFetchExpectingFormat(responseFormat: string) {
-  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-    const body = parseRequestBody(init);
-    expect(body.response_format).toBe(responseFormat);
-    return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
-  });
-  globalThis.fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
 }
 
 describe("buildOpenAISpeechProvider", () => {
@@ -162,43 +138,14 @@ describe("buildOpenAISpeechProvider", () => {
     });
   });
 
-  it("maps persona prompt fields to instructions when instructions are unset", async () => {
-    const provider = buildOpenAISpeechProvider();
-
-    const prepared = await provider.prepareSynthesis?.({
-      text: "hello",
-      cfg: {} as never,
-      providerConfig: {
-        apiKey: "sk-test",
-        model: "gpt-4o-mini-tts",
-        voice: "cedar",
-      },
-      persona: {
-        id: "alfred",
-        label: "Alfred",
-        prompt: {
-          profile: "A brilliant British butler.",
-          scene: "A quiet late-night study.",
-          sampleContext: "The speaker is answering a trusted operator.",
-          style: "Refined and lightly amused.",
-          accent: "British English.",
-          pacing: "Measured.",
-          constraints: ["Do not read configuration values aloud."],
-        },
-      },
-      target: "audio-file",
-      timeoutMs: 1_000,
-    });
-
-    expect(prepared?.providerConfig?.instructions).toContain("Persona: Alfred");
-    expect(prepared?.providerConfig?.instructions).toContain(
-      "Constraint: Do not read configuration values aloud.",
-    );
-  });
-
   it("uses wav for Groq-compatible OpenAI TTS endpoints", async () => {
     const provider = buildOpenAISpeechProvider();
-    mockSpeechFetchExpectingFormat("wav");
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = parseRequestBody(init);
+      expect(body.response_format).toBe("wav");
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const result = await provider.synthesize({
       text: "hello",
@@ -220,7 +167,12 @@ describe("buildOpenAISpeechProvider", () => {
 
   it("honors explicit responseFormat overrides and clears voice-note compatibility when not opus", async () => {
     const provider = buildOpenAISpeechProvider();
-    mockSpeechFetchExpectingFormat("wav");
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = parseRequestBody(init);
+      expect(body.response_format).toBe("wav");
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const result = await provider.synthesize({
       text: "hello",

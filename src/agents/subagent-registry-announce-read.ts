@@ -1,10 +1,9 @@
-import { normalizeDeliveryContext } from "../utils/delivery-context.shared.js";
-import type { DeliveryContext } from "../utils/delivery-context.types.js";
+import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import {
   countPendingDescendantRunsExcludingRunFromRuns,
   countPendingDescendantRunsFromRuns,
-  isSubagentSessionRunActiveFromRuns,
+  findRunIdsByChildSessionKeyFromRuns,
   listRunsForRequesterFromRuns,
   resolveRequesterForChildSessionFromRuns,
   shouldIgnorePostCompletionAnnounceForSessionFromRuns,
@@ -30,7 +29,18 @@ export function resolveRequesterForChildSession(childSessionKey: string): {
 }
 
 export function isSubagentSessionRunActive(childSessionKey: string): boolean {
-  return isSubagentSessionRunActiveFromRuns(subagentRuns, childSessionKey);
+  const runIds = findRunIdsByChildSessionKeyFromRuns(subagentRuns, childSessionKey);
+  let latest: SubagentRunRecord | undefined;
+  for (const runId of runIds) {
+    const entry = subagentRuns.get(runId);
+    if (!entry) {
+      continue;
+    }
+    if (!latest || entry.createdAt > latest.createdAt) {
+      latest = entry;
+    }
+  }
+  return Boolean(latest && typeof latest.endedAt !== "number");
 }
 
 export function shouldIgnorePostCompletionAnnounceForSession(childSessionKey: string): boolean {

@@ -1,14 +1,5 @@
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 
-type ChannelDoctorModule = typeof import("./channel-doctor.js");
-
-let channelDoctorModulePromise: Promise<ChannelDoctorModule> | undefined;
-
-function loadChannelDoctorModule(): Promise<ChannelDoctorModule> {
-  channelDoctorModulePromise ??= import("./channel-doctor.js");
-  return channelDoctorModulePromise;
-}
-
 function hasRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -78,10 +69,8 @@ function hasConfiguredSafeBins(cfg: OpenClawConfig): boolean {
 export async function collectDoctorPreviewWarnings(params: {
   cfg: OpenClawConfig;
   doctorFixCommand: string;
-  env?: NodeJS.ProcessEnv;
 }): Promise<string[]> {
   const warnings: string[] = [];
-  const env = params.env ?? process.env;
   const hasChannelConfig = hasChannels(params.cfg);
   const hasPluginConfig = hasPlugins(params.cfg);
 
@@ -90,7 +79,7 @@ export async function collectDoctorPreviewWarnings(params: {
       ? await import("./channel-plugin-blockers.js")
       : undefined;
   const channelPluginBlockerHits =
-    channelPluginRuntime?.scanConfiguredChannelPluginBlockers(params.cfg, env) ?? [];
+    channelPluginRuntime?.scanConfiguredChannelPluginBlockers(params.cfg, process.env) ?? [];
   if (channelPluginRuntime && channelPluginBlockerHits.length > 0) {
     warnings.push(
       channelPluginRuntime
@@ -100,11 +89,10 @@ export async function collectDoctorPreviewWarnings(params: {
   }
 
   if (hasChannelConfig) {
-    const { collectChannelDoctorPreviewWarnings } = await loadChannelDoctorModule();
+    const { collectChannelDoctorPreviewWarnings } = await import("./channel-doctor.js");
     const channelDoctorWarnings = await collectChannelDoctorPreviewWarnings({
       cfg: params.cfg,
       doctorFixCommand: params.doctorFixCommand,
-      env,
     });
     if (channelDoctorWarnings.length > 0) {
       warnings.push(...channelDoctorWarnings);
@@ -123,33 +111,28 @@ export async function collectDoctorPreviewWarnings(params: {
     }
   }
 
-  if (hasPluginConfig || hasChannelConfig) {
+  if (hasPluginConfig) {
     const {
       collectStalePluginConfigWarnings,
       isStalePluginAutoRepairBlocked,
       scanStalePluginConfig,
     } = await import("./stale-plugin-config.js");
-    const stalePluginHits = scanStalePluginConfig(params.cfg, env);
+    const stalePluginHits = scanStalePluginConfig(params.cfg, process.env);
     if (stalePluginHits.length > 0) {
       warnings.push(
         collectStalePluginConfigWarnings({
           hits: stalePluginHits,
           doctorFixCommand: params.doctorFixCommand,
-          autoRepairBlocked: isStalePluginAutoRepairBlocked(params.cfg, env),
+          autoRepairBlocked: isStalePluginAutoRepairBlocked(params.cfg, process.env),
         }).join("\n"),
       );
     }
   }
 
-  if (hasPluginConfig) {
-    const { collectCodexRouteWarnings } = await import("./codex-route-warnings.js");
-    warnings.push(...collectCodexRouteWarnings({ cfg: params.cfg, env }));
-  }
-
   if (hasPluginLoadPaths(params.cfg)) {
     const { collectBundledPluginLoadPathWarnings, scanBundledPluginLoadPathMigrations } =
       await import("./bundled-plugin-load-paths.js");
-    const bundledPluginLoadPathHits = scanBundledPluginLoadPathMigrations(params.cfg, env);
+    const bundledPluginLoadPathHits = scanBundledPluginLoadPathMigrations(params.cfg, process.env);
     if (bundledPluginLoadPathHits.length > 0) {
       warnings.push(
         collectBundledPluginLoadPathWarnings({
@@ -161,17 +144,11 @@ export async function collectDoctorPreviewWarnings(params: {
   }
 
   if (hasChannelConfig) {
-    const { createChannelDoctorEmptyAllowlistPolicyHooks } = await loadChannelDoctorModule();
+    const { collectChannelDoctorEmptyAllowlistExtraWarnings } = await import("./channel-doctor.js");
     const { scanEmptyAllowlistPolicyWarnings } = await import("./empty-allowlist-scan.js");
-    const emptyAllowlistHooks = createChannelDoctorEmptyAllowlistPolicyHooks({
-      cfg: params.cfg,
-      env,
-    });
     const emptyAllowlistWarnings = scanEmptyAllowlistPolicyWarnings(params.cfg, {
       doctorFixCommand: params.doctorFixCommand,
-      extraWarningsForAccount: emptyAllowlistHooks.extraWarningsForAccount,
-      shouldSkipDefaultEmptyGroupAllowlistWarning:
-        emptyAllowlistHooks.shouldSkipDefaultEmptyGroupAllowlistWarning,
+      extraWarningsForAccount: collectChannelDoctorEmptyAllowlistExtraWarnings,
     }).filter(
       (warning) =>
         !(

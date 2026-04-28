@@ -4,7 +4,6 @@
  */
 
 import crypto from "node:crypto";
-import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import type { SessionEntry } from "../api.js";
 import type { VoiceCallConfig } from "./config.js";
@@ -172,14 +171,6 @@ function extractSpokenTextFromPayloads(payloads: VoiceResponsePayload[]): string
   return spokenSegments.length > 0 ? spokenSegments.join(" ").trim() : null;
 }
 
-function resolveVoiceSandboxSessionKey(agentId: string, sessionKey: string): string {
-  const trimmed = sessionKey.trim();
-  if (trimmed.toLowerCase().startsWith("agent:")) {
-    return trimmed;
-  }
-  return `agent:${agentId}:${trimmed}`;
-}
-
 /**
  * Generate a voice response using the embedded Pi agent with full tool support.
  * Uses the same agent infrastructure as messaging for consistent behavior.
@@ -197,7 +188,7 @@ export async function generateVoiceResponse(
   // Build voice-specific session key based on phone number
   const normalizedPhone = from.replace(/\D/g, "");
   const sessionKey = `voice:${normalizedPhone}`;
-  const agentId = voiceConfig.agentId ?? "main";
+  const agentId = "main";
 
   // Resolve paths
   const storePath = agentRuntime.session.resolveStorePath(cfg.session?.store, { agentId });
@@ -211,7 +202,6 @@ export async function generateVoiceResponse(
   const sessionStore = agentRuntime.session.loadSessionStore(storePath);
   const now = Date.now();
   let sessionEntry = sessionStore[sessionKey] as SessionEntry | undefined;
-  let sessionEntryUpdated = false;
 
   if (!sessionEntry) {
     sessionEntry = {
@@ -219,29 +209,16 @@ export async function generateVoiceResponse(
       updatedAt: now,
     };
     sessionStore[sessionKey] = sessionEntry;
-    sessionEntryUpdated = true;
-  }
-
-  const sessionId = sessionEntry.sessionId;
-
-  // Resolve model from config
-  const { provider, model } = resolveVoiceResponseModel({ voiceConfig, agentRuntime });
-  if (voiceConfig.responseModel) {
-    sessionEntryUpdated =
-      applyModelOverrideToSessionEntry({
-        entry: sessionEntry,
-        selection: { provider, model },
-        selectionSource: "auto",
-      }).updated || sessionEntryUpdated;
-  }
-
-  if (sessionEntryUpdated) {
     await agentRuntime.session.saveSessionStore(storePath, sessionStore);
   }
 
+  const sessionId = sessionEntry.sessionId;
   const sessionFile = agentRuntime.session.resolveSessionFilePath(sessionId, sessionEntry, {
     agentId,
   });
+
+  // Resolve model from config
+  const { provider, model } = resolveVoiceResponseModel({ voiceConfig, agentRuntime });
 
   // Resolve thinking level
   const thinkLevel = agentRuntime.resolveThinkingDefault({ cfg, provider, model });
@@ -272,8 +249,6 @@ export async function generateVoiceResponse(
     const result = await agentRuntime.runEmbeddedPiAgent({
       sessionId,
       sessionKey,
-      sandboxSessionKey: resolveVoiceSandboxSessionKey(agentId, sessionKey),
-      agentId,
       messageProvider: "voice",
       sessionFile,
       workspaceDir,

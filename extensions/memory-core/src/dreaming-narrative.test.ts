@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import * as configRuntimeModule from "openclaw/plugin-sdk/config-runtime";
 import {
   RequestScopedSubagentRuntimeError,
   SUBAGENT_RUNTIME_REQUEST_SCOPE_ERROR_CODE,
 } from "openclaw/plugin-sdk/error-runtime";
 import * as memoryCoreHostRuntimeCoreModule from "openclaw/plugin-sdk/memory-core-host-runtime-core";
-import * as runtimeConfigSnapshotModule from "openclaw/plugin-sdk/runtime-config-snapshot";
-import * as sessionStoreRuntimeModule from "openclaw/plugin-sdk/session-store-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveGlobalMap } from "../../../src/shared/global-singleton.js";
 import {
@@ -597,7 +596,6 @@ describe("generateAndAppendDreamNarrative", () => {
       },
       nowMs,
       timezone: "UTC",
-      model: "anthropic/claude-sonnet-4-6",
       logger,
     });
 
@@ -605,10 +603,7 @@ describe("generateAndAppendDreamNarrative", () => {
     expect(subagent.run.mock.calls[0][0]).toMatchObject({
       idempotencyKey: expectedSessionKey,
       sessionKey: expectedSessionKey,
-      lane: `dreaming-narrative:${expectedSessionKey}`,
-      lightContext: true,
       deliver: false,
-      model: "anthropic/claude-sonnet-4-6",
     });
     expect(subagent.waitForRun).toHaveBeenCalledOnce();
     expect(subagent.deleteSession).toHaveBeenCalledOnce();
@@ -660,10 +655,12 @@ describe("generateAndAppendDreamNarrative", () => {
     expect(exists).toBe(false);
   });
 
-  it("skips extra settle waits after timeout and still attempts cleanup", async () => {
+  it("waits once more before cleanup after timeout and logs cleanup failures", async () => {
     const workspaceDir = await createTempWorkspace("openclaw-dreaming-narrative-");
     const subagent = createMockSubagent("");
-    subagent.waitForRun.mockResolvedValueOnce({ status: "timeout" });
+    subagent.waitForRun
+      .mockResolvedValueOnce({ status: "timeout" })
+      .mockResolvedValueOnce({ status: "ok" });
     subagent.deleteSession.mockRejectedValue(new Error("still active"));
     const logger = createMockLogger();
 
@@ -674,8 +671,8 @@ describe("generateAndAppendDreamNarrative", () => {
       logger,
     });
 
-    expect(subagent.waitForRun).toHaveBeenCalledOnce();
-    expect(subagent.waitForRun.mock.calls[0][0]).toMatchObject({ timeoutMs: 15_000 });
+    expect(subagent.waitForRun).toHaveBeenCalledTimes(2);
+    expect(subagent.waitForRun.mock.calls[1][0]).toMatchObject({ timeoutMs: 120_000 });
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("narrative session cleanup failed for rem phase"),
     );
@@ -722,13 +719,9 @@ describe("generateAndAppendDreamNarrative", () => {
 
     const content = await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf-8");
     expect(content).toContain("API endpoints need authentication");
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("request-scoped"));
-    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("request-scoped"));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("request-scoped"));
     expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining(workspaceDir));
-    expect(logger.warn).not.toHaveBeenCalledWith(
-      expect.stringContaining("narrative session cleanup failed"),
-    );
-    expect(subagent.deleteSession).not.toHaveBeenCalled();
+    expect(subagent.deleteSession).toHaveBeenCalledOnce();
   });
 
   it("falls back when the request-scoped runtime error is detected by stable code", async () => {
@@ -753,9 +746,6 @@ describe("generateAndAppendDreamNarrative", () => {
 
     const content = await fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf-8");
     expect(content).toContain("A durable candidate surfaced.");
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("request-scoped"));
-    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("request-scoped"));
-    expect(subagent.deleteSession).not.toHaveBeenCalled();
   });
 
   it("does not fall back for non-Error objects that only spoof the stable code", async () => {
@@ -828,16 +818,14 @@ describe("generateAndAppendDreamNarrative", () => {
     await fs.utimes(orphanPath, oldDate, oldDate);
     await fs.utimes(livePath, oldDate, oldDate);
 
-    vi.spyOn(runtimeConfigSnapshotModule, "getRuntimeConfig").mockReturnValue({
-      session: {},
-    } as never);
-    vi.spyOn(sessionStoreRuntimeModule, "resolveStorePath").mockImplementation(((
+    vi.spyOn(configRuntimeModule, "loadConfig").mockReturnValue({ session: {} } as never);
+    vi.spyOn(configRuntimeModule, "resolveStorePath").mockImplementation(((
       _store: string | undefined,
       { agentId }: { agentId: string },
     ) => {
       expect(agentId).toBe("main");
       return storePath;
-    }) as typeof sessionStoreRuntimeModule.resolveStorePath);
+    }) as typeof configRuntimeModule.resolveStorePath);
     vi.spyOn(memoryCoreHostRuntimeCoreModule, "resolveStateDir").mockReturnValue(stateDir);
 
     const subagent = createMockSubagent("The repository whispered of forgotten endpoints.");

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withServer } from "../../../test/helpers/http-test-server.js";
 import type { PluginRuntime } from "../runtime-api.js";
 import {
@@ -47,7 +47,7 @@ describe("Zalo reply-once lifecycle", () => {
     });
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await resetLifecycleTestState();
   });
 
@@ -65,10 +65,7 @@ describe("Zalo reply-once lifecycle", () => {
       },
     );
 
-    const monitor = await startWebhookLifecycleMonitor({
-      ...createReplyOnceMonitorSetup(),
-      cacheKey: "zalo-reply-once-lifecycle",
-    });
+    const monitor = await startWebhookLifecycleMonitor(createReplyOnceMonitorSetup());
 
     try {
       await withServer(
@@ -134,10 +131,7 @@ describe("Zalo reply-once lifecycle", () => {
       },
     );
 
-    const monitor = await startWebhookLifecycleMonitor({
-      ...createReplyOnceMonitorSetup(),
-      cacheKey: "zalo-reply-once-lifecycle",
-    });
+    const monitor = await startWebhookLifecycleMonitor(createReplyOnceMonitorSetup());
 
     try {
       await withServer(

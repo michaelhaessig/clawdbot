@@ -1,6 +1,5 @@
 import os from "node:os";
 import path from "node:path";
-import { mapPluginConfigIssues } from "openclaw/plugin-sdk/extension-shared";
 import { buildPluginConfigSchema, z, type OpenClawPluginConfigSchema } from "../api.js";
 
 export const WIKI_VAULT_MODES = ["isolated", "bridge", "unsafe-local"] as const;
@@ -175,7 +174,13 @@ const memoryWikiConfigSchemaBase = buildPluginConfigSchema(MemoryWikiConfigSourc
     return {
       success: false,
       error: {
-        issues: mapPluginConfigIssues(result.error.issues),
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.filter((segment): segment is string | number => {
+            const kind = typeof segment;
+            return kind === "string" || kind === "number";
+          }),
+          message: issue.message,
+        })),
       },
     };
   },

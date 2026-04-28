@@ -17,27 +17,13 @@ function loadCommandHandlersRuntime() {
 
 let HANDLERS: CommandHandler[] | null = null;
 
-function normalizeCommandHandlerResult(result: CommandHandlerResult): CommandHandlerResult {
-  if (!result.reply) {
-    return result;
-  }
-  return {
-    ...result,
-    reply: {
-      ...result.reply,
-      replyToId: undefined,
-      replyToCurrent: false,
-    },
-  };
-}
-
 export async function handleCommands(params: HandleCommandsParams): Promise<CommandHandlerResult> {
   if (HANDLERS === null) {
     HANDLERS = (await loadCommandHandlersRuntime()).loadCommandHandlers();
   }
   const resetResult = await maybeHandleResetCommand(params);
   if (resetResult) {
-    return normalizeCommandHandlerResult(resetResult);
+    return resetResult;
   }
 
   const allowTextCommands = shouldHandleTextCommands({
@@ -49,7 +35,7 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
   for (const handler of HANDLERS) {
     const result = await handler(params, allowTextCommands);
     if (result) {
-      return normalizeCommandHandlerResult(result);
+      return result;
     }
   }
 

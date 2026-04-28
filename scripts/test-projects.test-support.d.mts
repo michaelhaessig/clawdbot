@@ -14,14 +14,6 @@ export type VitestRunSpec = {
   watchMode: boolean;
 };
 
-export type ChangedTestTargetOptions = {
-  cwd?: string;
-  env?: Record<string, string | undefined>;
-  broad?: boolean;
-};
-
-export const DEFAULT_TEST_PROJECTS_VITEST_NO_OUTPUT_TIMEOUT_MS: string;
-
 export function parseTestProjectsArgs(
   args: string[],
   cwd?: string,
@@ -35,25 +27,13 @@ export function buildVitestRunPlans(
   args: string[],
   cwd?: string,
   listChangedPaths?: (baseRef: string, cwd: string) => string[],
-  options?: ChangedTestTargetOptions,
 ): VitestRunPlan[];
 
 export function resolveChangedTargetArgs(
   args: string[],
   cwd?: string,
   listChangedPaths?: (baseRef: string, cwd: string) => string[],
-  options?: ChangedTestTargetOptions,
 ): string[] | null;
-
-export function resolveChangedTestTargetPlan(
-  changedPaths: string[],
-  options?: ChangedTestTargetOptions,
-): {
-  mode: "none" | "broad" | "targets";
-  targets: string[];
-};
-
-export function listFullExtensionVitestProjectConfigs(): string[];
 
 export function createVitestRunSpecs(
   args: string[],
@@ -61,21 +41,6 @@ export function createVitestRunSpecs(
     baseEnv?: Record<string, string | undefined>;
     cwd?: string;
     tempDir?: string;
-  },
-): VitestRunSpec[];
-
-export function applyDefaultVitestNoOutputTimeout(
-  specs: VitestRunSpec[],
-  params?: {
-    env?: Record<string, string | undefined>;
-  },
-): VitestRunSpec[];
-
-export function applyDefaultMultiSpecVitestCachePaths(
-  specs: VitestRunSpec[],
-  params?: {
-    cwd?: string;
-    env?: Record<string, string | undefined>;
   },
 ): VitestRunSpec[];
 

@@ -1,20 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import type { DoctorConfigPreflightResult } from "../../doctor-config-preflight.js";
-
-const { migrateLegacyConfigMock, stripUnknownConfigKeysMock } = vi.hoisted(() => ({
-  migrateLegacyConfigMock: vi.fn(),
-  stripUnknownConfigKeysMock: vi.fn(),
-}));
-
-vi.mock("./legacy-config-migrate.js", () => ({
-  migrateLegacyConfig: migrateLegacyConfigMock,
-}));
-
-vi.mock("../../doctor-config-analysis.js", () => ({
-  stripUnknownConfigKeys: stripUnknownConfigKeysMock,
-}));
-
 import { applyLegacyCompatibilityStep, applyUnknownConfigKeyStep } from "./config-flow-steps.js";
 
 function createLegacyStepResult(
@@ -35,21 +21,7 @@ function createLegacyStepResult(
 }
 
 describe("doctor config flow steps", () => {
-  beforeEach(() => {
-    migrateLegacyConfigMock.mockReset();
-    migrateLegacyConfigMock.mockImplementation((config: OpenClawConfig) => ({
-      config,
-      changes: [],
-    }));
-    stripUnknownConfigKeysMock.mockReset();
-  });
-
   it("collects legacy compatibility issue lines and preview fix hints", () => {
-    migrateLegacyConfigMock.mockReturnValueOnce({
-      config: {},
-      changes: ["Moved heartbeat → agents.defaults.heartbeat."],
-    });
-
     const result = createLegacyStepResult({
       exists: true,
       parsed: { heartbeat: { enabled: true } },
@@ -102,11 +74,6 @@ describe("doctor config flow steps", () => {
   });
 
   it("removes unknown keys and adds preview hint", () => {
-    stripUnknownConfigKeysMock.mockReturnValueOnce({
-      config: {},
-      removed: ["bogus"],
-    });
-
     const result = applyUnknownConfigKeyStep({
       state: {
         cfg: {},

@@ -2,7 +2,6 @@ import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { logVerbose, shouldLogVerbose } from "../globals.js";
-import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { isAbortError } from "../infra/unhandled-rejections.js";
 import { fetchRemoteMedia, MediaFetchError } from "../media/fetch.js";
 import { isInboundPathAllowed, mergeInboundPathRoots } from "../media/inbound-path-policy.js";
@@ -52,7 +51,6 @@ function getDefaultLocalPathRoots(): readonly string[] {
 export type MediaAttachmentCacheOptions = {
   localPathRoots?: readonly string[];
   includeDefaultLocalPathRoots?: boolean;
-  ssrfPolicy?: SsrFPolicy;
 };
 
 function resolveRequestUrl(input: RequestInfo | URL): string {
@@ -69,12 +67,10 @@ export class MediaAttachmentCache {
   private readonly entries = new Map<number, AttachmentCacheEntry>();
   private readonly attachments: MediaAttachment[];
   private readonly localPathRoots: readonly string[];
-  private readonly ssrfPolicy: SsrFPolicy | undefined;
   private canonicalLocalPathRoots?: Promise<readonly string[]>;
 
   constructor(attachments: MediaAttachment[], options?: MediaAttachmentCacheOptions) {
     this.attachments = attachments;
-    this.ssrfPolicy = options?.ssrfPolicy;
     this.localPathRoots =
       options?.includeDefaultLocalPathRoots === false
         ? mergeInboundPathRoots(options.localPathRoots)
@@ -159,12 +155,7 @@ export class MediaAttachmentCache {
     try {
       const fetchImpl = (input: RequestInfo | URL, init?: RequestInit) =>
         fetchWithTimeout(resolveRequestUrl(input), init ?? {}, params.timeoutMs, globalThis.fetch);
-      const fetched = await fetchRemoteMedia({
-        url,
-        fetchImpl,
-        maxBytes: params.maxBytes,
-        ssrfPolicy: this.ssrfPolicy,
-      });
+      const fetched = await fetchRemoteMedia({ url, fetchImpl, maxBytes: params.maxBytes });
       entry.buffer = fetched.buffer;
       entry.bufferMime =
         entry.attachment.mime ??

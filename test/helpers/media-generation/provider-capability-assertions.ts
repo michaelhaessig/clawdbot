@@ -6,18 +6,6 @@ import type {
 } from "../../../src/plugins/types.js";
 import { listSupportedVideoGenerationModes } from "../../../src/video-generation/capabilities.js";
 
-function hasPositiveModeLimit(
-  value: number | undefined,
-  valuesByModel: Readonly<Record<string, number>> | undefined,
-): boolean {
-  return (
-    (value ?? 0) > 0 ||
-    Object.values(valuesByModel ?? {}).some(
-      (modelValue) => Number.isFinite(modelValue) && modelValue > 0,
-    )
-  );
-}
-
 export function expectExplicitVideoGenerationCapabilities(
   provider: VideoGenerationProviderPlugin,
 ): void {
@@ -40,16 +28,16 @@ export function expectExplicitVideoGenerationCapabilities(
 
   if (imageToVideo?.enabled) {
     expect(
-      hasPositiveModeLimit(imageToVideo.maxInputImages, imageToVideo.maxInputImagesByModel),
-      `${provider.id} imageToVideo.enabled requires maxInputImages or maxInputImagesByModel`,
-    ).toBe(true);
+      imageToVideo.maxInputImages ?? 0,
+      `${provider.id} imageToVideo.enabled requires maxInputImages`,
+    ).toBeGreaterThan(0);
     expect(supportedModes).toContain("imageToVideo");
   }
   if (videoToVideo?.enabled) {
     expect(
-      hasPositiveModeLimit(videoToVideo.maxInputVideos, videoToVideo.maxInputVideosByModel),
-      `${provider.id} videoToVideo.enabled requires maxInputVideos or maxInputVideosByModel`,
-    ).toBe(true);
+      videoToVideo.maxInputVideos ?? 0,
+      `${provider.id} videoToVideo.enabled requires maxInputVideos`,
+    ).toBeGreaterThan(0);
     expect(supportedModes).toContain("videoToVideo");
   }
 }

@@ -27,7 +27,6 @@ const browserConfigMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("openclaw/plugin-sdk/browser-config-runtime", () => ({
-  getRuntimeConfig: configMocks.loadConfig,
   loadConfig: configMocks.loadConfig,
 }));
 

@@ -1,4 +1,4 @@
-import { resolveThinkingDefaultForModel } from "../auto-reply/thinking.js";
+import { resolveThinkingDefaultForModel } from "../auto-reply/thinking.shared.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -8,7 +8,7 @@ import type { ModelCatalogEntry } from "./model-catalog.types.js";
 import { legacyModelKey, modelKey, normalizeProviderId } from "./model-selection-normalize.js";
 import { normalizeModelSelection } from "./model-selection-resolve.js";
 
-type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive" | "max";
+type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
 
 export function resolveThinkingDefault(params: {
   cfg: OpenClawConfig;
@@ -46,8 +46,7 @@ export function resolveThinkingDefault(params: {
     perModelThinking === "medium" ||
     perModelThinking === "high" ||
     perModelThinking === "xhigh" ||
-    perModelThinking === "adaptive" ||
-    perModelThinking === "max"
+    perModelThinking === "adaptive"
   ) {
     return perModelThinking;
   }

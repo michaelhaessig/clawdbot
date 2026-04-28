@@ -2,10 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
-import {
-  listBundledChannelLegacySessionSurfaces,
-  listBundledChannelLegacyStateMigrationDetectors,
-} from "../channels/plugins/bundled.js";
+import { listBundledChannelSetupPluginsByFeature } from "../channels/plugins/bundled.js";
 import type { ChannelLegacyStateMigrationPlan } from "../channels/plugins/types.core.js";
 import {
   resolveLegacyStateDirs,
@@ -89,7 +86,12 @@ function getLegacySessionSurfaces(): LegacySessionSurface[] {
   // Legacy migrations run on cold doctor/startup paths. Prefer the narrower
   // setup plugin surface here so session-key cleanup does not materialize full
   // bundled channel runtimes.
-  cachedLegacySessionSurfaces ??= [...listBundledChannelLegacySessionSurfaces()];
+  cachedLegacySessionSurfaces ??= listBundledChannelSetupPluginsByFeature(
+    "legacySessionSurfaces",
+  ).flatMap((plugin) => {
+    const surface = plugin.messaging;
+    return surface && typeof surface === "object" ? [surface] : [];
+  });
   return cachedLegacySessionSurfaces;
 }
 
@@ -219,8 +221,9 @@ function canonicalizeSessionKeyForAgent(params: {
     return normalizeLowercaseStringOrEmpty(`agent:${agentId}:subagent:${rest}`);
   }
   // Channel-owned legacy shapes must win before the generic group/channel
-  // fallback so plugin-specific legacy group keys can canonicalize to their
-  // owning channel instead of the generic `...:unknown:group:...` bucket.
+  // fallback. WhatsApp shipped channel-qualified group sessions, so
+  // `group:123@g.us` must canonicalize to `...:whatsapp:group:...`, not the
+  // generic `...:unknown:group:...` bucket.
   for (const surface of getLegacySessionSurfaces()) {
     const canonicalized = surface.canonicalizeLegacySessionKey?.({
       key: raw,
@@ -667,11 +670,10 @@ async function collectChannelLegacyStateMigrationPlans(params: {
   oauthDir: string;
 }): Promise<ChannelLegacyStateMigrationPlan[]> {
   const plans: ChannelLegacyStateMigrationPlan[] = [];
-  // Legacy state detection belongs on a narrow setup-entry surface so doctor
+  // Legacy state detection belongs on the lightweight setup surface so doctor
   // does not cold-load unrelated runtime channel code.
-  const detectors = listBundledChannelLegacyStateMigrationDetectors({ config: params.cfg });
-  for (const detectLegacyStateMigrations of detectors) {
-    const detected = await detectLegacyStateMigrations({
+  for (const plugin of listBundledChannelSetupPluginsByFeature("legacyStateMigrations")) {
+    const detected = await plugin.lifecycle?.detectLegacyStateMigrations?.({
       cfg: params.cfg,
       env: params.env,
       stateDir: params.stateDir,

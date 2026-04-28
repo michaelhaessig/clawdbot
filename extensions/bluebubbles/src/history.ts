@@ -1,6 +1,6 @@
 import { resolveBlueBubblesServerAccount } from "./account-resolve.js";
-import { createBlueBubblesClientFromParts } from "./client.js";
 import type { OpenClawConfig } from "./runtime-api.js";
+import { blueBubblesFetchWithTimeout, buildBlueBubblesApiUrl } from "./types.js";
 
 export type BlueBubblesHistoryEntry = {
   sender: string;
@@ -89,12 +89,7 @@ export async function fetchBlueBubblesHistory(
   } catch {
     return { entries: [], resolved: false };
   }
-  const client = createBlueBubblesClientFromParts({
-    baseUrl,
-    password,
-    allowPrivateNetwork,
-    timeoutMs: opts.timeoutMs ?? 10000,
-  });
+  const ssrfPolicy = allowPrivateNetwork ? { allowPrivateNetwork: true } : {};
 
   // Try different common API patterns for fetching messages
   const possiblePaths = [
@@ -105,11 +100,13 @@ export async function fetchBlueBubblesHistory(
 
   for (const path of possiblePaths) {
     try {
-      const res = await client.request({
-        method: "GET",
-        path,
-        timeoutMs: opts.timeoutMs ?? 10000,
-      });
+      const url = buildBlueBubblesApiUrl({ baseUrl, path, password });
+      const res = await blueBubblesFetchWithTimeout(
+        url,
+        { method: "GET" },
+        opts.timeoutMs ?? 10000,
+        ssrfPolicy,
+      );
 
       if (!res.ok) {
         continue; // Try next path

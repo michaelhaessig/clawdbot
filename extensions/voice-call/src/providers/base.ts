@@ -1,5 +1,4 @@
 import type {
-  AnswerCallInput,
   GetCallStatusInput,
   GetCallStatusResult,
   HangupCallInput,
@@ -7,7 +6,6 @@ import type {
   InitiateCallResult,
   PlayTtsInput,
   ProviderName,
-  SendDtmfInput,
   WebhookParseOptions,
   ProviderWebhookParseResult,
   StartListeningInput,
@@ -50,12 +48,6 @@ export interface VoiceCallProvider {
   initiateCall(input: InitiateCallInput): Promise<InitiateCallResult>;
 
   /**
-   * Answer an accepted inbound call when the provider requires an explicit
-   * answer command after the initial webhook.
-   */
-  answerCall?: (input: AnswerCallInput) => Promise<void>;
-
-  /**
    * Hang up an active call.
    */
   hangupCall(input: HangupCallInput): Promise<void>;
@@ -65,11 +57,6 @@ export interface VoiceCallProvider {
    * The provider should handle streaming if supported.
    */
   playTts(input: PlayTtsInput): Promise<void>;
-
-  /**
-   * Send DTMF digits to an active call.
-   */
-  sendDtmf?: (input: SendDtmfInput) => Promise<void>;
 
   /**
    * Start listening for user speech (activate STT).

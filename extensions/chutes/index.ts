@@ -13,7 +13,7 @@ import {
   applyChutesApiKeyConfig,
   applyChutesProviderConfig,
 } from "./onboard.js";
-import { buildChutesProvider, buildStaticChutesProvider } from "./provider-catalog.js";
+import { buildChutesProvider } from "./provider-catalog.js";
 
 const PROVIDER_ID = "chutes";
 
@@ -179,12 +179,6 @@ export default definePluginEntry({
             },
           };
         },
-      },
-      staticCatalog: {
-        order: "profile",
-        run: async () => ({
-          provider: buildStaticChutesProvider(),
-        }),
       },
     });
   },

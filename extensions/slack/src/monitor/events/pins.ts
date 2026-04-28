@@ -1,5 +1,4 @@
 import type { SlackEventMiddlewareArgs } from "@slack/bolt";
-import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/infra-runtime";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
 import type { SlackMonitorContext } from "../context.js";
@@ -46,7 +45,7 @@ async function handleSlackPinEvent(params: {
       },
     );
   } catch (err) {
-    ctx.runtime.error?.(danger(`slack ${errorLabel} handler failed: ${formatErrorMessage(err)}`));
+    ctx.runtime.error?.(danger(`slack ${errorLabel} handler failed: ${String(err)}`));
   }
 }
 

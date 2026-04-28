@@ -18,12 +18,7 @@ export function filterMessagingToolDuplicates(params: {
   if (sentTexts.length === 0) {
     return payloads;
   }
-  return payloads.filter((payload) => {
-    if (payload.mediaUrl || payload.mediaUrls?.length) {
-      return true;
-    }
-    return !isMessagingToolDuplicate(payload.text ?? "", sentTexts);
-  });
+  return payloads.filter((payload) => !isMessagingToolDuplicate(payload.text ?? "", sentTexts));
 }
 
 export function filterMessagingToolMediaDuplicates(params: {
@@ -62,10 +57,11 @@ export function filterMessagingToolMediaDuplicates(params: {
     if (!stripSingle && (!mediaUrls || filteredUrls?.length === mediaUrls.length)) {
       return payload;
     }
-    return Object.assign({}, payload, {
+    return {
+      ...payload,
       mediaUrl: stripSingle ? undefined : mediaUrl,
       mediaUrls: filteredUrls?.length ? filteredUrls : undefined,
-    });
+    };
   });
 }
 

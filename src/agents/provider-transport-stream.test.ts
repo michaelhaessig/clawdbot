@@ -76,7 +76,6 @@ describe("provider transport stream contracts", () => {
         id: "gemini-3.1-pro-preview",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         alias: "openclaw-google-generative-ai-transport",
-        providerOwnedRuntime: true,
       },
     ];
 
@@ -97,9 +96,6 @@ describe("provider transport stream contracts", () => {
 
       expect(isTransportAwareApiSupported(testCase.api)).toBe(true);
       expect(resolveTransportAwareSimpleApi(testCase.api)).toBe(testCase.alias);
-      if (testCase.providerOwnedRuntime) {
-        continue;
-      }
       expect(createBoundaryAwareStreamFnForModel(model)).toBeTypeOf("function");
       expect(createTransportAwareStreamFnForModel(model)).toBeTypeOf("function");
       expect(buildTransportAwareSimpleStreamFn(model)).toBeTypeOf("function");

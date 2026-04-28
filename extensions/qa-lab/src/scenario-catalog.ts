@@ -51,44 +51,6 @@ const qaScenarioExecutionSchema = z.object({
   config: qaScenarioConfigSchema.optional(),
 });
 
-const qaCoverageIdSchema = z
-  .string()
-  .trim()
-  .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, {
-    message: "coverage ids must use lowercase dotted or dashed tokens",
-  });
-
-const qaCoverageIdListSchema = z.array(qaCoverageIdSchema).min(1);
-
-const qaScenarioCoverageSchema = z
-  .object({
-    primary: qaCoverageIdListSchema,
-    secondary: qaCoverageIdListSchema.optional(),
-  })
-  .superRefine((coverage, ctx) => {
-    const seen = new Set<string>();
-    const coverageEntries = [
-      ["primary", coverage.primary],
-      ["secondary", coverage.secondary],
-    ] as const;
-    for (const [intent, ids] of coverageEntries) {
-      if (!ids) {
-        continue;
-      }
-      for (const [index, id] of ids.entries()) {
-        if (!seen.has(id)) {
-          seen.add(id);
-          continue;
-        }
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [intent, index],
-          message: `duplicate coverage id: ${id}`,
-        });
-      }
-    }
-  });
-
 const qaScenarioGatewayRuntimeSchema = z.object({
   forwardHostHome: z.boolean().optional(),
 });
@@ -176,9 +138,6 @@ const qaSeedScenarioSchema = z.object({
   title: z.string().trim().min(1),
   surface: z.string().trim().min(1),
   category: z.string().trim().min(1).optional(),
-  coverage: qaScenarioCoverageSchema.optional(),
-  surfaces: z.array(z.string().trim().min(1)).min(1).optional(),
-  risk: z.enum(["low", "medium", "high"]).optional(),
   capabilities: z.array(z.string().trim().min(1)).optional(),
   lane: z.record(z.string(), z.union([z.boolean(), z.string()])).optional(),
   riskLevel: z.string().trim().min(1).optional(),
@@ -230,9 +189,6 @@ const QA_SCENARIO_DIR_PATH = "qa/scenarios";
 const QA_PACK_FENCE_RE = /```ya?ml qa-pack\r?\n([\s\S]*?)\r?\n```/i;
 const QA_SCENARIO_FENCE_RE = /```ya?ml qa-scenario\r?\n([\s\S]*?)\r?\n```/i;
 const QA_FLOW_YAML_FENCE_RE = /```ya?ml qa-flow\r?\n([\s\S]*?)\r?\n```/i;
-const repoPathCache = new Map<string, string | null>();
-let qaScenarioMarkdownPathsCache: string[] | null = null;
-let qaScenarioPackCache: QaScenarioPack | null = null;
 
 function walkUpDirectories(start: string): string[] {
   const roots: string[] = [];
@@ -248,10 +204,6 @@ function walkUpDirectories(start: string): string[] {
 }
 
 function resolveRepoPath(relativePath: string, kind: "file" | "directory" = "file"): string | null {
-  const cacheKey = `${kind}:${relativePath}`;
-  if (repoPathCache.has(cacheKey)) {
-    return repoPathCache.get(cacheKey) ?? null;
-  }
   for (const dir of walkUpDirectories(import.meta.dirname)) {
     const candidate = path.join(dir, relativePath);
     if (!fs.existsSync(candidate)) {
@@ -259,11 +211,9 @@ function resolveRepoPath(relativePath: string, kind: "file" | "directory" = "fil
     }
     const stat = fs.statSync(candidate);
     if ((kind === "file" && stat.isFile()) || (kind === "directory" && stat.isDirectory())) {
-      repoPathCache.set(cacheKey, candidate);
       return candidate;
     }
   }
-  repoPathCache.set(cacheKey, null);
   return null;
 }
 
@@ -329,21 +279,17 @@ export function readQaScenarioPackMarkdown(): string {
 }
 
 export function readQaScenarioPack(): QaScenarioPack {
-  if (qaScenarioPackCache) {
-    return qaScenarioPackCache;
-  }
   const packMarkdown = readTextFile(QA_SCENARIO_PACK_INDEX_PATH).trim();
   if (!packMarkdown) {
     // The QA scenario pack is optional in npm distributions.  Return an empty
     // pack so completion cache updates and other consumers don't crash when
     // the qa/scenarios/ directory is not shipped with the package.
-    qaScenarioPackCache = {
+    return {
       version: 1,
       agent: { identityMarkdown: DEFAULT_QA_AGENT_IDENTITY_MARKDOWN },
       kickoffTask: "QA scenarios not available in this distribution.",
       scenarios: [],
     };
-    return qaScenarioPackCache;
   }
   const parsedPack = parseQaYamlWithContext(
     qaScenarioPackSchema,
@@ -381,26 +327,18 @@ export function readQaScenarioPack(): QaScenarioPack {
     }
     seenScenarioIds.add(scenario.id);
   }
-  qaScenarioPackCache = {
+  return {
     ...parsedPack,
     scenarios,
   };
-  return qaScenarioPackCache;
 }
 
 export function listQaScenarioMarkdownPaths(): string[] {
-  if (qaScenarioMarkdownPathsCache) {
-    return qaScenarioMarkdownPathsCache;
-  }
   const resolved = resolveRepoPath(QA_SCENARIO_DIR_PATH, "directory");
   if (!resolved) {
     return [];
   }
-  qaScenarioMarkdownPathsCache = listQaScenarioMarkdownPathsInDirectory(
-    resolved,
-    QA_SCENARIO_DIR_PATH,
-  ).toSorted();
-  return qaScenarioMarkdownPathsCache;
+  return listQaScenarioMarkdownPathsInDirectory(resolved, QA_SCENARIO_DIR_PATH).toSorted();
 }
 
 function listQaScenarioMarkdownPathsInDirectory(

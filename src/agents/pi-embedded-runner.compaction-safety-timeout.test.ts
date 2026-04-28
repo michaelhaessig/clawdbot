@@ -146,7 +146,7 @@ describe("resolveCompactionTimeoutMs", () => {
   it("returns default for NaN", () => {
     expect(
       resolveCompactionTimeoutMs({
-        agents: { defaults: { compaction: { timeoutSeconds: Number.NaN } } },
+        agents: { defaults: { compaction: { timeoutSeconds: NaN } } },
       }),
     ).toBe(EMBEDDED_COMPACTION_TIMEOUT_MS);
   });

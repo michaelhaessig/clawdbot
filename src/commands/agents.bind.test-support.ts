@@ -19,8 +19,6 @@ export const replaceConfigFileMock: Mock<(...args: unknown[]) => Promise<unknown
       previousHash: null,
       snapshot: {} as never,
       nextConfig: params.nextConfig,
-      afterWrite: { mode: "auto" },
-      followUp: { mode: "auto", requiresRestart: false },
     };
   },
 ) as Mock<(...args: unknown[]) => Promise<unknown>>;

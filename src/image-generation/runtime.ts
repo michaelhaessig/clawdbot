@@ -1,6 +1,5 @@
 import { describeFailoverError, isFailoverError } from "../agents/failover-error.js";
 import type { FallbackAttempt } from "../agents/model-fallback.types.js";
-import { resolveAgentModelTimeoutMsValue } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -35,9 +34,6 @@ export function listRuntimeImageGenerationProviders(params?: { config?: OpenClaw
 export async function generateImage(
   params: GenerateImageParams,
 ): Promise<GenerateImageRuntimeResult> {
-  const timeoutMs =
-    params.timeoutMs ??
-    resolveAgentModelTimeoutMsValue(params.cfg.agents?.defaults?.imageGenerationModel);
   const candidates = resolveCapabilityModelCandidates({
     cfg: params.cfg,
     modelConfig: params.cfg.agents?.defaults?.imageGenerationModel,
@@ -63,9 +59,6 @@ export async function generateImage(
         error,
       });
       lastError = new Error(error);
-      log.warn(
-        `image-generation candidate failed: ${candidate.provider}/${candidate.model}: ${error}`,
-      );
       continue;
     }
 
@@ -75,9 +68,6 @@ export async function generateImage(
         size: params.size,
         aspectRatio: params.aspectRatio,
         resolution: params.resolution,
-        quality: params.quality,
-        outputFormat: params.outputFormat,
-        background: params.background,
         inputImages: params.inputImages,
       });
       const result: ImageGenerationResult = await provider.generateImage({
@@ -91,12 +81,7 @@ export async function generateImage(
         size: sanitized.size,
         aspectRatio: sanitized.aspectRatio,
         resolution: sanitized.resolution,
-        quality: sanitized.quality,
-        outputFormat: sanitized.outputFormat,
-        background: sanitized.background,
         inputImages: params.inputImages,
-        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-        providerOptions: params.providerOptions,
       });
       if (!Array.isArray(result.images) || result.images.length === 0) {
         throw new Error("Image generation provider returned no images.");
@@ -127,11 +112,7 @@ export async function generateImage(
         status: described?.status,
         code: described?.code,
       });
-      log.warn(
-        `image-generation candidate failed: ${candidate.provider}/${candidate.model}: ${
-          described?.message ?? formatErrorMessage(err)
-        }`,
-      );
+      log.debug(`image-generation candidate failed: ${candidate.provider}/${candidate.model}`);
     }
   }
 

@@ -16,13 +16,11 @@ export const createChannelPluginBase: typeof createChannelPluginBaseFromCore = (
 export {
   buildChannelConfigSchema,
   buildChannelOutboundSessionRoute,
-  buildThreadAwareOutboundSessionRoute,
   clearAccountEntryFields,
   createChatChannelPlugin,
   defineChannelPluginEntry,
   defineSetupPluginEntry,
   parseOptionalDelimitedEntries,
-  recoverCurrentThreadSessionId,
   stripChannelTargetPrefix,
   stripTargetKindPrefix,
   tryReadSecretFileSync,

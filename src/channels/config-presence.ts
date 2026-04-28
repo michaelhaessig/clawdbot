@@ -24,13 +24,6 @@ type ChannelPresenceOptions = {
   };
 };
 
-export type ChannelPresenceSignalSource = "config" | "env" | "persisted-auth";
-
-export type ChannelPresenceSignal = {
-  channelId: string;
-  source: ChannelPresenceSignalSource;
-};
-
 export function hasMeaningfulChannelConfig(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
@@ -83,30 +76,6 @@ export function listPotentialConfiguredChannelIds(
   env: NodeJS.ProcessEnv = process.env,
   options: ChannelPresenceOptions = {},
 ): string[] {
-  return [
-    ...new Set(
-      listPotentialConfiguredChannelPresenceSignals(cfg, env, options).map(
-        (signal) => signal.channelId,
-      ),
-    ),
-  ];
-}
-
-export function listPotentialConfiguredChannelPresenceSignals(
-  cfg: OpenClawConfig,
-  env: NodeJS.ProcessEnv = process.env,
-  options: ChannelPresenceOptions = {},
-): ChannelPresenceSignal[] {
-  const signals: ChannelPresenceSignal[] = [];
-  const seenSignals = new Set<string>();
-  const addSignal = (channelId: string, source: ChannelPresenceSignalSource) => {
-    const key = `${source}:${channelId}`;
-    if (seenSignals.has(key)) {
-      return;
-    }
-    seenSignals.add(key);
-    signals.push({ channelId, source });
-  };
   const configuredChannelIds = new Set<string>();
   const channelIds = listBundledChannelPluginIds();
   const channelEnvPrefixes = listChannelEnvPrefixes(channelIds);
@@ -118,7 +87,6 @@ export function listPotentialConfiguredChannelPresenceSignals(
       }
       if (hasMeaningfulChannelConfig(value)) {
         configuredChannelIds.add(key);
-        addSignal(key, "config");
       }
     }
   }
@@ -130,7 +98,6 @@ export function listPotentialConfiguredChannelPresenceSignals(
     for (const [prefix, channelId] of channelEnvPrefixes) {
       if (key.startsWith(prefix)) {
         configuredChannelIds.add(channelId);
-        addSignal(channelId, "env");
       }
     }
   }
@@ -139,12 +106,11 @@ export function listPotentialConfiguredChannelPresenceSignals(
     for (const channelId of listPersistedAuthStateChannelIds(options)) {
       if (hasPersistedAuthState({ channelId, cfg, env, options })) {
         configuredChannelIds.add(channelId);
-        addSignal(channelId, "persisted-auth");
       }
     }
   }
 
-  return signals.filter((signal) => configuredChannelIds.has(signal.channelId));
+  return [...configuredChannelIds];
 }
 
 function hasEnvConfiguredChannel(

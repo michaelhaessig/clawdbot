@@ -2,7 +2,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Command } from "commander";
 import { buildGatewayConnectionDetails } from "../gateway/call.js";
 import { isLoopbackHost } from "../gateway/net.js";
-import { readConnectPairingRequiredMessage } from "../gateway/protocol/connect-error-details.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { readConfiguredLogTail } from "../logging/log-tail.js";
 import { parseLogLine } from "../logging/parse-log-line.js";
@@ -97,7 +96,7 @@ function normalizeErrorMessage(error: unknown): string {
 
 function shouldUseLocalLogsFallback(opts: LogsCliOptions, error: unknown): boolean {
   const message = normalizeLowercaseStringOrEmpty(normalizeErrorMessage(error));
-  if (!readConnectPairingRequiredMessage(message)) {
+  if (!message.includes("pairing required")) {
     return false;
   }
   if (typeof opts.url === "string" && opts.url.trim().length > 0) {

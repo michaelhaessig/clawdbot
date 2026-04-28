@@ -1,3 +1,4 @@
+import { getRuntimeConfigSnapshot } from "openclaw/plugin-sdk/config-runtime";
 import {
   jsonResult,
   readCache,
@@ -7,7 +8,6 @@ import {
   resolveTimeoutSeconds,
   writeCache,
 } from "openclaw/plugin-sdk/provider-web-search";
-import { getRuntimeConfigSnapshot } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { isXaiToolEnabled, resolveXaiToolApiKey } from "./src/tool-auth-shared.js";
 import { resolveEffectiveXSearchConfig } from "./src/x-search-config.js";
 import {

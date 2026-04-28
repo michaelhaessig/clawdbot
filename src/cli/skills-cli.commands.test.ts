@@ -105,7 +105,6 @@ vi.mock("../runtime.js", () => ({
 }));
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: () => mocks.loadConfigMock(),
   loadConfig: () => mocks.loadConfigMock(),
 }));
 

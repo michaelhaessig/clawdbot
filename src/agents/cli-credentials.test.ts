@@ -12,7 +12,8 @@ let resetCliCredentialCachesForTest: typeof import("./cli-credentials.js").reset
 let writeClaudeCliKeychainCredentials: typeof import("./cli-credentials.js").writeClaudeCliKeychainCredentials;
 let writeClaudeCliCredentials: typeof import("./cli-credentials.js").writeClaudeCliCredentials;
 let readCodexCliCredentials: typeof import("./cli-credentials.js").readCodexCliCredentials;
-let readGeminiCliCredentialsCached: typeof import("./cli-credentials.js").readGeminiCliCredentialsCached;
+let writeCodexCliCredentials: typeof import("./cli-credentials.js").writeCodexCliCredentials;
+let writeCodexCliFileCredentials: typeof import("./cli-credentials.js").writeCodexCliFileCredentials;
 
 function mockExistingClaudeKeychainItem() {
   execFileSyncMock.mockImplementation((file: unknown, args: unknown) => {
@@ -75,7 +76,8 @@ describe("cli credentials", () => {
       writeClaudeCliKeychainCredentials,
       writeClaudeCliCredentials,
       readCodexCliCredentials,
-      readGeminiCliCredentialsCached,
+      writeCodexCliCredentials,
+      writeCodexCliFileCredentials,
     } = await import("./cli-credentials.js"));
   });
 
@@ -253,7 +255,6 @@ describe("cli credentials", () => {
       expect(cmd).toContain(accountHash);
       return JSON.stringify({
         tokens: {
-          id_token: "keychain-id-token",
           access_token: createJwtWithExp(expSeconds),
           refresh_token: "keychain-refresh",
         },
@@ -268,7 +269,6 @@ describe("cli credentials", () => {
       refresh: "keychain-refresh",
       provider: "openai-codex",
       expires: expSeconds * 1000,
-      idToken: "keychain-id-token",
     });
   });
 
@@ -286,7 +286,6 @@ describe("cli credentials", () => {
       authPath,
       JSON.stringify({
         tokens: {
-          id_token: "file-id-token",
           access_token: createJwtWithExp(expSeconds),
           refresh_token: "file-refresh",
         },
@@ -301,7 +300,6 @@ describe("cli credentials", () => {
       refresh: "file-refresh",
       provider: "openai-codex",
       expires: expSeconds * 1000,
-      idToken: "file-id-token",
     });
   });
 
@@ -365,66 +363,109 @@ describe("cli credentials", () => {
     }
   });
 
-  it("lifts Google account identity from the Gemini id_token", () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gemini-"));
+  it("updates existing Codex auth.json in place", () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-codex-write-"));
+    process.env.CODEX_HOME = tempHome;
     try {
-      const credPath = path.join(tempHome, ".gemini", "oauth_creds.json");
-      fs.mkdirSync(path.dirname(credPath), { recursive: true, mode: 0o700 });
-      const idTokenPayload = Buffer.from(
-        JSON.stringify({ sub: "google-account-42", email: "user@example.com" }),
-      ).toString("base64url");
-      const idToken = `header.${idTokenPayload}.signature`;
+      fs.mkdirSync(tempHome, { recursive: true, mode: 0o700 });
+      const authPath = path.join(tempHome, "auth.json");
       fs.writeFileSync(
-        credPath,
-        JSON.stringify({
-          access_token: "gemini-access",
-          refresh_token: "gemini-refresh",
-          id_token: idToken,
-          expiry_date: Date.parse("2026-04-25T12:00:00Z"),
-        }),
+        authPath,
+        JSON.stringify(
+          {
+            auth_mode: "chatgpt",
+            OPENAI_API_KEY: "sk-existing",
+            tokens: {
+              id_token: "id-token",
+              access_token: "old-access",
+              refresh_token: "old-refresh",
+              account_id: "acct-old",
+            },
+            last_refresh: "2026-03-01T00:00:00.000Z",
+          },
+          null,
+          2,
+        ),
         "utf8",
       );
 
-      const creds = readGeminiCliCredentialsCached({ homeDir: tempHome, ttlMs: 0 });
-
-      expect(creds).toMatchObject({
-        type: "oauth",
-        provider: "google-gemini-cli",
-        access: "gemini-access",
-        refresh: "gemini-refresh",
-        accountId: "google-account-42",
-        email: "user@example.com",
+      const ok = writeCodexCliFileCredentials({
+        access: "new-access",
+        refresh: "new-refresh",
+        expires: Date.now() + 60_000,
+        accountId: "acct-new",
       });
+
+      expect(ok).toBe(true);
+      const persisted = JSON.parse(fs.readFileSync(authPath, "utf8")) as Record<string, unknown>;
+      expect(persisted).toMatchObject({
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: "sk-existing",
+      });
+      expect(persisted.tokens).toMatchObject({
+        id_token: "id-token",
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        account_id: "acct-new",
+      });
+      expect(typeof persisted.last_refresh).toBe("string");
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
   });
 
-  it("reads Gemini credentials without identity fields when id_token is absent", () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gemini-noid-"));
+  it("prefers the existing Codex keychain entry over auth.json on darwin writes", () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-codex-keychain-write-"));
+    process.env.CODEX_HOME = tempHome;
     try {
-      const credPath = path.join(tempHome, ".gemini", "oauth_creds.json");
-      fs.mkdirSync(path.dirname(credPath), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        credPath,
-        JSON.stringify({
-          access_token: "gemini-access",
-          refresh_token: "gemini-refresh",
-          expiry_date: Date.parse("2026-04-25T12:00:00Z"),
-        }),
-        "utf8",
+      const expSeconds = Math.floor(Date.parse("2026-03-26T12:34:56Z") / 1000);
+      execSyncMock.mockImplementation((command: unknown) => {
+        const cmd = String(command);
+        expect(cmd).toContain("Codex Auth");
+        return JSON.stringify({
+          auth_mode: "chatgpt",
+          tokens: {
+            id_token: "id-token",
+            access_token: createJwtWithExp(expSeconds),
+            refresh_token: "old-refresh",
+            account_id: "acct-old",
+          },
+          last_refresh: "2026-03-01T00:00:00.000Z",
+        });
+      });
+
+      const ok = writeCodexCliCredentials(
+        {
+          access: "new-access",
+          refresh: "new-refresh",
+          expires: Date.now() + 60_000,
+          accountId: "acct-new",
+        },
+        {
+          platform: "darwin",
+          execSync: execSyncMock,
+          execFileSync: execFileSyncMock,
+        },
       );
 
-      const creds = readGeminiCliCredentialsCached({ homeDir: tempHome, ttlMs: 0 });
-
-      expect(creds).toMatchObject({
-        type: "oauth",
-        provider: "google-gemini-cli",
-        access: "gemini-access",
-        refresh: "gemini-refresh",
+      expect(ok).toBe(true);
+      expect(execFileSyncMock).toHaveBeenCalledTimes(1);
+      const addCall = getAddGenericPasswordCall();
+      expect(addCall?.[0]).toBe("security");
+      const payload = (() => {
+        const args = (addCall?.[1] as string[] | undefined) ?? [];
+        const valueIndex = args.indexOf("-w");
+        return valueIndex >= 0 ? args[valueIndex + 1] : undefined;
+      })();
+      expect(payload).toBeDefined();
+      const parsed = JSON.parse(String(payload)) as Record<string, unknown>;
+      expect(parsed.tokens).toMatchObject({
+        id_token: "id-token",
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        account_id: "acct-new",
       });
-      expect(creds?.accountId).toBeUndefined();
-      expect(creds?.email).toBeUndefined();
+      expect(parsed.auth_mode).toBe("chatgpt");
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

@@ -20,7 +20,6 @@ export {
   normalizeMainKey,
   normalizeOptionalAccountId,
   parseAgentSessionKey,
-  parseThreadSessionSuffix,
   resolveAgentIdFromSessionKey,
   resolveThreadSessionKeys,
   sanitizeAgentId,

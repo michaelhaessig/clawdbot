@@ -29,9 +29,7 @@ export function logGatewayStartup(params: {
     typeof params.startupStartedAt === "number" ? Date.now() - params.startupStartedAt : null;
   const startupDurationLabel =
     startupDurationMs == null ? null : `${(startupDurationMs / 1000).toFixed(1)}s`;
-  params.log.info(
-    `http server listening (${formatReadyDetails(params.loadedPluginIds, startupDurationLabel)})`,
-  );
+  params.log.info(`ready (${formatReadyDetails(params.loadedPluginIds, startupDurationLabel)})`);
   params.log.info(`log file: ${getResolvedLoggerSettings().file}`);
   if (params.isNixMode) {
     params.log.info("gateway: running in Nix mode (config managed externally)");

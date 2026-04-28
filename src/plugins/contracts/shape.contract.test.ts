@@ -3,7 +3,7 @@ import {
   createPluginRegistryFixture,
   registerVirtualTestPlugin,
 } from "../../../test/helpers/plugins/contracts-testkit.js";
-import { buildPluginShapeSummary } from "../inspect-shape.js";
+import { buildAllPluginInspectReports } from "../status.js";
 
 describe("plugin shape compatibility matrix", () => {
   it("keeps legacy hook-only, plain capability, and hybrid capability shapes explicit", () => {
@@ -94,13 +94,13 @@ describe("plugin shape compatibility matrix", () => {
       },
     });
 
-    const report = {
-      workspaceDir: "/virtual-workspace",
-      ...registry.registry,
-    };
-    const inspect = report.plugins.map((plugin) =>
-      Object.assign({ plugin }, buildPluginShapeSummary({ plugin, report })),
-    );
+    const inspect = buildAllPluginInspectReports({
+      config,
+      report: {
+        workspaceDir: "/virtual-workspace",
+        ...registry.registry,
+      },
+    });
 
     expect(
       inspect.map((entry) => ({

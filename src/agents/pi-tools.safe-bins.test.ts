@@ -143,12 +143,13 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   ModelRegistry: vi.fn(),
   SessionManager: vi.fn(),
   SettingsManager: vi.fn(),
-  createCodingTools: vi.fn(() => []),
+  codingTools: [],
   createEditTool: vi.fn(),
   createReadTool: vi.fn(),
   createWriteTool: vi.fn(),
   estimateTokens: vi.fn(() => 0),
   formatSkillsForPrompt: vi.fn(() => ""),
+  readTool: undefined,
 }));
 
 vi.mock("../infra/exec-approvals.js", async () => {
@@ -230,7 +231,6 @@ async function withSafeBinsExecTool(
     await withEnvAsync(
       {
         OPENCLAW_SHELL_ENV_TIMEOUT_MS: "1",
-        PATH: "/usr/bin:/bin",
         SHELL: "/bin/sh",
       },
       async () => {

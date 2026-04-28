@@ -24,10 +24,6 @@ export type CommandContext = {
   to?: string;
   /** Internal marker to prevent duplicate reset-hook emission across command pipelines. */
   resetHookTriggered?: boolean;
-  /** Internal marker for prompt reload without session rollover. */
-  softResetTriggered?: boolean;
-  /** Optional tail to append after a soft reset startup prompt. */
-  softResetTail?: string;
 };
 
 export type HandleCommandsParams = {
@@ -53,7 +49,6 @@ export type HandleCommandsParams = {
   opts?: GetReplyOptions;
   defaultGroupActivation: () => "always" | "mention";
   resolvedThinkLevel?: ThinkLevel;
-  resolvedFastMode?: boolean;
   resolvedVerboseLevel: VerboseLevel;
   resolvedReasoningLevel: ReasoningLevel;
   resolvedElevatedLevel?: ElevatedLevel;

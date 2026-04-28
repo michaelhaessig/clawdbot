@@ -8,6 +8,8 @@ read_when:
 title: "OAuth"
 ---
 
+# OAuth
+
 OpenClaw supports “subscription auth” via OAuth for providers that offer it
 (notably **OpenAI Codex (ChatGPT OAuth)**). For Anthropic, the practical split
 is now:
@@ -44,10 +46,9 @@ To reduce that, OpenClaw treats `auth-profiles.json` as a **token sink**:
 
 - the runtime reads credentials from **one place**
 - we can keep multiple profiles and route them deterministically
-- external CLI reuse is provider-specific: Codex CLI can bootstrap an empty
-  `openai-codex:default` profile, but once OpenClaw has a local OAuth profile,
-  the local refresh token is canonical; other integrations can remain
-  externally managed and re-read their CLI auth store
+- when credentials are reused from an external CLI like Codex CLI, OpenClaw
+  mirrors them with provenance and re-reads that external source instead of
+  rotating the refresh token itself
 
 ## Storage (where tokens live)
 
@@ -129,11 +130,8 @@ At runtime:
 
 - if `expires` is in the future → use the stored access token
 - if expired → refresh (under a file lock) and overwrite the stored credentials
-- exception: some external CLI credentials stay externally managed; OpenClaw
-  re-reads those CLI auth stores instead of spending copied refresh tokens.
-  Codex CLI bootstrap is intentionally narrower: it seeds an empty
-  `openai-codex:default` profile, then OpenClaw-owned refreshes keep the local
-  profile canonical.
+- exception: reused external CLI credentials stay externally managed; OpenClaw
+  re-reads the CLI auth store and never spends the copied refresh token itself
 
 The refresh flow is automatic; you generally don't need to manage tokens manually.
 
@@ -171,8 +169,8 @@ How to see what profile IDs exist:
 
 Related docs:
 
-- [Model failover](/concepts/model-failover) (rotation + cooldown rules)
-- [Slash commands](/tools/slash-commands) (command surface)
+- [/concepts/model-failover](/concepts/model-failover) (rotation + cooldown rules)
+- [/tools/slash-commands](/tools/slash-commands) (command surface)
 
 ## Related
 

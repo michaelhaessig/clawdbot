@@ -49,7 +49,7 @@ describe("handleControlUiHttpRequest auto-detected root", () => {
       resolveControlUiRootSyncMock.mockReturnValue(tmp);
 
       const { res, end } = makeMockHttpResponse();
-      const handled = await handleControlUiHttpRequest(
+      const handled = handleControlUiHttpRequest(
         { url: "/assets/app.hl.js", method: "GET" } as IncomingMessage,
         res,
       );
@@ -70,7 +70,7 @@ describe("handleControlUiHttpRequest auto-detected root", () => {
       resolveControlUiRootSyncMock.mockReturnValue(tmp);
 
       const { res, end } = makeMockHttpResponse();
-      const handled = await handleControlUiHttpRequest(
+      const handled = handleControlUiHttpRequest(
         { url: "/dashboard", method: "GET" } as IncomingMessage,
         res,
       );
@@ -91,7 +91,7 @@ describe("handleControlUiHttpRequest auto-detected root", () => {
       resolveControlUiRootSyncMock.mockReturnValue(tmp);
 
       const { res } = makeMockHttpResponse();
-      const handled = await handleControlUiHttpRequest(
+      const handled = handleControlUiHttpRequest(
         { url: "/assets/app.hl.js", method: "GET" } as IncomingMessage,
         res,
       );

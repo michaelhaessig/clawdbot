@@ -25,7 +25,6 @@ export async function resolveOutboundAttachmentFromUrl(
     media.contentType ?? undefined,
     "outbound",
     maxBytes,
-    media.fileName,
   );
   return { path: saved.path, contentType: saved.contentType };
 }

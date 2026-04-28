@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSendCfgThreadingRuntime,
   expectProvidedCfgSkipsRuntimeLoad,
+  expectRuntimeCfgFallback,
 } from "../../../test/helpers/plugins/send-config.js";
 
 const hoisted = vi.hoisted(() => ({
@@ -24,12 +25,6 @@ vi.mock("./send.runtime.js", () => {
     fetchWithSsrFGuard: hoisted.mockFetchGuard,
     generateNextcloudTalkSignature: hoisted.generateNextcloudTalkSignature,
     getNextcloudTalkRuntime: () => createSendCfgThreadingRuntime(hoisted),
-    requireRuntimeConfig: (cfg: unknown, context: string) => {
-      if (cfg) {
-        return cfg;
-      }
-      throw new Error(`${context} requires a resolved runtime config`);
-    },
     resolveNextcloudTalkAccount: hoisted.resolveNextcloudTalkAccount,
     resolveMarkdownTableMode: hoisted.resolveMarkdownTableMode,
     ssrfPolicyFromPrivateNetworkOptIn: hoisted.ssrfPolicyFromPrivateNetworkOptIn,
@@ -138,16 +133,21 @@ describe("nextcloud-talk send cfg threading", () => {
     });
   });
 
-  it("fails hard for sendReaction when cfg is omitted", async () => {
+  it("falls back to runtime cfg for sendReaction when cfg is omitted", async () => {
+    const runtimeCfg = { source: "runtime" } as const;
+    hoisted.loadConfig.mockReturnValueOnce(runtimeCfg);
     fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
 
-    await expect(
-      sendReactionNextcloudTalk("room:ops", "m-1", "👍", {
-        accountId: "default",
-      } as never),
-    ).rejects.toThrow("Nextcloud Talk send requires a resolved runtime config");
+    const result = await sendReactionNextcloudTalk("room:ops", "m-1", "👍", {
+      accountId: "default",
+    });
 
-    expect(hoisted.loadConfig).not.toHaveBeenCalled();
-    expect(hoisted.resolveNextcloudTalkAccount).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true });
+    expectRuntimeCfgFallback({
+      loadConfig: hoisted.loadConfig,
+      resolveAccount: hoisted.resolveNextcloudTalkAccount,
+      cfg: runtimeCfg,
+      accountId: "default",
+    });
   });
 });

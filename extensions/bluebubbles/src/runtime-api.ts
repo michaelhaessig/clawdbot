@@ -54,7 +54,7 @@ export {
   resolveWebhookTargetWithAuthOrRejectSync,
   withResolvedWebhookRequestPipeline,
 } from "openclaw/plugin-sdk/webhook-ingress";
-export { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/context-visibility-runtime";
+export { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/config-runtime";
 export {
   evaluateSupplementalContextVisibility,
   shouldIncludeSupplementalContext,

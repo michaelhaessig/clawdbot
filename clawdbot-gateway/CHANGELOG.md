@@ -1,8 +1,8 @@
 # Changelog
 
-## 3.1.8
+## 3.1.8 — withdrawn
 
-- Sync upstream to `v2026.4.26` / `be8c24633a` (2026-04-28)
+The 3.1.8 build hung in the gateway `config.auth` startup phase on aarch64 HA hosts, blocking Telegram and WhatsApp. Reverted in the repo back to v3.1.7's tree (upstream `474b08bfbd`); v3.1.8 image remains in GHCR but is unsupported.
 
 ## 3.1.7
 

@@ -13,8 +13,8 @@ import {
   resolveTtsPrefsPath,
   type ResolvedTtsConfig,
 } from "openclaw/plugin-sdk/agent-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import type { DiscordAccountConfig, TtsConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { DiscordAccountConfig, TtsConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
@@ -777,7 +777,6 @@ export class DiscordVoiceManager {
     );
 
     const prompt = formatVoiceIngressPrompt(transcript, speaker.label);
-    const modelOverride = normalizeOptionalString(this.params.discordConfig.voice?.model);
 
     const result = await agentCommandFromIngress(
       {
@@ -786,8 +785,7 @@ export class DiscordVoiceManager {
         agentId: entry.route.agentId,
         messageChannel: "discord",
         senderIsOwner: speaker.senderIsOwner,
-        allowModelOverride: Boolean(modelOverride),
-        model: modelOverride,
+        allowModelOverride: false,
         deliver: false,
       },
       this.params.runtime,

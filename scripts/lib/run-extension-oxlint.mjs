@@ -28,10 +28,7 @@ export function runExtensionOxlint(params) {
     );
 
     if (extensionFiles.length === 0) {
-      console.log(params.emptyMessage);
-      if (params.allowEmpty === true) {
-        return;
-      }
+      console.error(params.emptyMessage);
       process.exit(1);
     }
 
@@ -130,9 +127,6 @@ function collectTypeScriptFiles(directoryPath) {
   for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
     const entryPath = path.join(directoryPath, entry.name);
     if (entry.isDirectory()) {
-      if (shouldSkipExtensionLintDirectory(entry.name)) {
-        continue;
-      }
       files.push(...collectTypeScriptFiles(entryPath));
       continue;
     }
@@ -149,8 +143,4 @@ function collectTypeScriptFiles(directoryPath) {
   }
 
   return files;
-}
-
-function shouldSkipExtensionLintDirectory(name) {
-  return name === "node_modules";
 }

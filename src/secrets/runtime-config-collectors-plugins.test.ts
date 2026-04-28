@@ -8,17 +8,12 @@ import {
   type SecretDefaults,
 } from "./runtime-shared.js";
 
-const { loadPluginManifestRegistryForPluginRegistryMock } = vi.hoisted(() => ({
-  loadPluginManifestRegistryForPluginRegistryMock: vi.fn(),
+const { loadPluginManifestRegistryMock } = vi.hoisted(() => ({
+  loadPluginManifestRegistryMock: vi.fn(),
 }));
 
-vi.mock("../plugins/plugin-registry.js", () => ({
-  loadPluginManifestRegistryForPluginRegistry: loadPluginManifestRegistryForPluginRegistryMock,
-}));
-
-vi.mock("../plugins/bundled-plugin-metadata.js", () => ({
-  findBundledPluginMetadataById: () => undefined,
-  listBundledPluginMetadata: () => [],
+vi.mock("../plugins/manifest-registry.js", () => ({
+  loadPluginManifestRegistry: loadPluginManifestRegistryMock,
 }));
 
 function asConfig(value: unknown): OpenClawConfig {
@@ -40,50 +35,10 @@ function loadablePluginOrigins(entries: Array<[string, PluginOrigin]>) {
   return new Map(entries);
 }
 
-function createAcpxMcpSecretConfig(params: {
-  plugins?: Record<string, unknown>;
-  entry?: Record<string, unknown>;
-}): OpenClawConfig {
-  return asConfig({
-    plugins: {
-      ...params.plugins,
-      entries: {
-        acpx: {
-          ...params.entry,
-          config: {
-            mcpServers: {
-              s1: { command: "node", env: { K: envRef("K") } },
-            },
-          },
-        },
-      },
-    },
-  });
-}
-
-function collectAcpxConfigAssignments(config: OpenClawConfig): ResolverContext {
-  const context = makeContext(config);
-  collectPluginConfigAssignments({
-    config,
-    defaults: undefined,
-    context,
-    loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
-  });
-  return context;
-}
-
-function expectInactiveAcpxConfig(config: OpenClawConfig): void {
-  const context = collectAcpxConfigAssignments(config);
-  expect(context.assignments).toHaveLength(0);
-  expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
-    true,
-  );
-}
-
 describe("collectPluginConfigAssignments", () => {
   beforeEach(() => {
-    loadPluginManifestRegistryForPluginRegistryMock.mockReset();
-    loadPluginManifestRegistryForPluginRegistryMock.mockReturnValue({
+    loadPluginManifestRegistryMock.mockReset();
+    loadPluginManifestRegistryMock.mockReturnValue({
       plugins: [
         {
           id: "acpx",
@@ -270,43 +225,172 @@ describe("collectPluginConfigAssignments", () => {
   });
 
   it("skips assignments when plugins.enabled is false", () => {
-    expectInactiveAcpxConfig(
-      createAcpxMcpSecretConfig({
-        plugins: { enabled: false },
-        entry: { enabled: true },
-      }),
+    const config = asConfig({
+      plugins: {
+        enabled: false,
+        entries: {
+          acpx: {
+            enabled: true,
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const context = makeContext(config);
+
+    collectPluginConfigAssignments({
+      config,
+      defaults: undefined,
+      context,
+      loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
+    });
+
+    expect(context.assignments).toHaveLength(0);
+    expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
+      true,
     );
   });
 
   it("skips assignments when entry.enabled is false", () => {
-    expectInactiveAcpxConfig(createAcpxMcpSecretConfig({ entry: { enabled: false } }));
+    const config = asConfig({
+      plugins: {
+        entries: {
+          acpx: {
+            enabled: false,
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const context = makeContext(config);
+
+    collectPluginConfigAssignments({
+      config,
+      defaults: undefined,
+      context,
+      loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
+    });
+
+    expect(context.assignments).toHaveLength(0);
+    expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
+      true,
+    );
   });
 
   it("treats bundled acpx SecretRef surfaces as inactive until enabled", () => {
-    expectInactiveAcpxConfig(createAcpxMcpSecretConfig({ plugins: { enabled: true } }));
+    const config = asConfig({
+      plugins: {
+        enabled: true,
+        entries: {
+          acpx: {
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const context = makeContext(config);
+
+    collectPluginConfigAssignments({
+      config,
+      defaults: undefined,
+      context,
+      loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
+    });
+
+    expect(context.assignments).toHaveLength(0);
+    expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
+      true,
+    );
   });
 
   it("skips assignments when plugin is in denylist", () => {
-    expectInactiveAcpxConfig(
-      createAcpxMcpSecretConfig({
-        plugins: { deny: ["acpx"] },
-        entry: { enabled: true },
-      }),
+    const config = asConfig({
+      plugins: {
+        deny: ["acpx"],
+        entries: {
+          acpx: {
+            enabled: true,
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const context = makeContext(config);
+
+    collectPluginConfigAssignments({
+      config,
+      defaults: undefined,
+      context,
+      loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
+    });
+
+    expect(context.assignments).toHaveLength(0);
+    expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
+      true,
     );
   });
 
   it("skips assignments when allowlist is set and plugin is not in it", () => {
-    expectInactiveAcpxConfig(
-      createAcpxMcpSecretConfig({
-        plugins: { allow: ["other-plugin"] },
-        entry: { enabled: true },
-      }),
+    const config = asConfig({
+      plugins: {
+        allow: ["other-plugin"],
+        entries: {
+          acpx: {
+            enabled: true,
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const context = makeContext(config);
+
+    collectPluginConfigAssignments({
+      config,
+      defaults: undefined,
+      context,
+      loadablePluginOrigins: loadablePluginOrigins([["acpx", "bundled"]]),
+    });
+
+    expect(context.assignments).toHaveLength(0);
+    expect(context.warnings.some((w) => w.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE")).toBe(
+      true,
     );
   });
 
   it("collects assignments when plugin is in allowlist", () => {
-    const config = createAcpxMcpSecretConfig({
-      plugins: { allow: ["acpx"] },
+    const config = asConfig({
+      plugins: {
+        allow: ["acpx"],
+        entries: {
+          acpx: {
+            config: {
+              mcpServers: {
+                s1: { command: "node", env: { K: envRef("K") } },
+              },
+            },
+          },
+        },
+      },
     });
     const context = makeContext(config);
 
@@ -452,7 +536,7 @@ describe("collectPluginConfigAssignments", () => {
   });
 
   it("collects manifest-declared SecretRef surfaces for non-acpx plugins", () => {
-    loadPluginManifestRegistryForPluginRegistryMock.mockReturnValue({
+    loadPluginManifestRegistryMock.mockReturnValue({
       plugins: [
         {
           id: "other",

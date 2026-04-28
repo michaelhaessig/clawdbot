@@ -1,4 +1,4 @@
-import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/context-visibility-runtime";
+import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/config-runtime";
 import {
   evaluateSupplementalContextVisibility,
   type ContextVisibilityDecision,

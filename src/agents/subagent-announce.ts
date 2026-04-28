@@ -23,7 +23,6 @@ import {
   resolveSubagentAnnounceTimeoutMs,
   resolveSubagentCompletionOrigin,
 } from "./subagent-announce-delivery.js";
-import type { SubagentAnnounceDeliveryResult } from "./subagent-announce-dispatch.js";
 import { resolveAnnounceOrigin } from "./subagent-announce-origin.js";
 import {
   applySubagentWaitOutcome,
@@ -39,7 +38,7 @@ import {
 import {
   callGateway,
   isEmbeddedPiRunActive,
-  getRuntimeConfig,
+  loadConfig,
   waitForEmbeddedPiRunEnd,
 } from "./subagent-announce.runtime.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
@@ -48,13 +47,13 @@ import { isAnnounceSkip } from "./tools/sessions-send-tokens.js";
 
 type SubagentAnnounceDeps = {
   callGateway: typeof callGateway;
-  getRuntimeConfig: typeof getRuntimeConfig;
+  loadConfig: typeof loadConfig;
   loadSubagentRegistryRuntime: typeof loadSubagentRegistryRuntime;
 };
 
 const defaultSubagentAnnounceDeps: SubagentAnnounceDeps = {
   callGateway,
-  getRuntimeConfig,
+  loadConfig,
   loadSubagentRegistryRuntime,
 };
 
@@ -172,7 +171,7 @@ async function wakeSubagentRunAfterDescendants(params: {
     return false;
   }
 
-  const cfg = subagentAnnounceDeps.getRuntimeConfig();
+  const cfg = subagentAnnounceDeps.loadConfig();
   const announceTimeoutMs = resolveSubagentAnnounceTimeoutMs(cfg);
   const wakeMessage = buildDescendantWakeMessage({
     findings: params.findings,
@@ -245,7 +244,6 @@ export async function runSubagentAnnounceFlow(params: {
   wakeOnDescendantSettle?: boolean;
   signal?: AbortSignal;
   bestEffortDeliver?: boolean;
-  onDeliveryResult?: (delivery: SubagentAnnounceDeliveryResult) => void;
 }): Promise<boolean> {
   let didAnnounce = false;
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
@@ -287,12 +285,7 @@ export async function runSubagentAnnounceFlow(params: {
     if (!outcome) {
       outcome = { status: "unknown" };
     }
-    const failedTerminalOutcome = outcome.status === "error";
-    const allowFailedOutputCapture =
-      !failedTerminalOutcome || (!params.roundOneReply && !params.fallbackReply);
-    if (failedTerminalOutcome) {
-      reply = undefined;
-    }
+
     let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
     const requesterIsInternalSession = () =>
       requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
@@ -374,18 +367,16 @@ export async function runSubagentAnnounceFlow(params: {
     }
 
     if (!childCompletionFindings) {
-      const fallbackReply = failedTerminalOutcome
-        ? undefined
-        : normalizeOptionalString(params.fallbackReply);
+      const fallbackReply = normalizeOptionalString(params.fallbackReply);
       const fallbackIsSilent =
         Boolean(fallbackReply) &&
         (isAnnounceSkip(fallbackReply) || isSilentReplyText(fallbackReply, SILENT_REPLY_TOKEN));
 
-      if (!reply && allowFailedOutputCapture) {
+      if (!reply) {
         reply = await readSubagentOutput(params.childSessionKey, outcome);
       }
 
-      if (!reply?.trim() && allowFailedOutputCapture) {
+      if (!reply?.trim()) {
         reply = await readLatestSubagentOutputWithRetry({
           sessionKey: params.childSessionKey,
           maxWaitMs: params.timeoutMs,
@@ -564,7 +555,6 @@ export async function runSubagentAnnounceFlow(params: {
       directIdempotencyKey,
       signal: params.signal,
     });
-    params.onDeliveryResult?.(delivery);
     didAnnounce = delivery.delivered;
     if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
       defaultRuntime.error?.(

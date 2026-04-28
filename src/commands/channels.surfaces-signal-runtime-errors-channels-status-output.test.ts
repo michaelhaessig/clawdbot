@@ -33,9 +33,6 @@ describe("channels command", () => {
 
   it("surfaces Signal runtime errors in channels status output", () => {
     const lines = formatGatewayChannelsStatusLines({
-      channelLabels: {
-        signal: "Signal",
-      },
       channelAccounts: {
         signal: [
           {
@@ -64,9 +61,6 @@ describe("channels command", () => {
       ]),
     );
     const lines = formatGatewayChannelsStatusLines({
-      channelLabels: {
-        imessage: "iMessage",
-      },
       channelAccounts: {
         imessage: [
           {

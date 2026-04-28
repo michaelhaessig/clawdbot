@@ -1,18 +1,17 @@
 {
   "name": "@openclaw/nostr",
-  "version": "2026.4.25",
+  "version": "2026.4.16",
   "description": "OpenClaw Nostr channel plugin for NIP-04 encrypted DMs",
   "type": "module",
   "dependencies": {
-    "nostr-tools": "^2.23.3",
-    "zod": "^4.3.6"
+    "nostr-tools": "^2.23.3"
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.4.25"
+    "openclaw": ">=2026.4.16"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -32,17 +31,7 @@
       "docsLabel": "nostr",
       "blurb": "Decentralized protocol; encrypted DMs via NIP-04.",
       "order": 55,
-      "quickstartAllowFrom": true,
-      "cliAddOptions": [
-        {
-          "flags": "--private-key <key>",
-          "description": "Nostr private key (nsec... or hex)"
-        },
-        {
-          "flags": "--relay-urls <list>",
-          "description": "Nostr relay URLs (comma-separated)"
-        }
-      ]
+      "quickstartAllowFrom": true
     },
     "install": {
       "npmSpec": "@openclaw/nostr",
@@ -50,10 +39,10 @@
       "minHostVersion": ">=2026.4.10"
     },
     "compat": {
-      "pluginApi": ">=2026.4.25"
+      "pluginApi": ">=2026.4.16"
     },
     "build": {
-      "openclawVersion": "2026.4.25"
+      "openclawVersion": "2026.4.16"
     },
     "bundle": {
       "stageRuntimeDependencies": true

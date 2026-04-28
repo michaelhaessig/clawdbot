@@ -13,7 +13,7 @@ import {
   waitForCompactionCount,
 } from "./pi-embedded-subscribe.compaction-test-helpers.js";
 import {
-  handleCompactionEnd,
+  handleAutoCompactionEnd,
   reconcileSessionStoreCompactionCountAfterSuccess,
 } from "./pi-embedded-subscribe.handlers.compaction.js";
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
@@ -52,8 +52,6 @@ function createCompactionContext(params: {
       compactionCount += 1;
     },
     getCompactionCount: () => compactionCount,
-    noteCompactionTokensAfter: vi.fn(),
-    getLastCompactionTokensAfter: vi.fn(() => undefined),
   } as unknown as EmbeddedPiSubscribeContext;
 }
 
@@ -114,7 +112,7 @@ describe("reconcileSessionStoreCompactionCountAfterSuccess", () => {
   });
 });
 
-describe("handleCompactionEnd", () => {
+describe("handleAutoCompactionEnd", () => {
   it("reconciles the session store after a successful compaction end event", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-compaction-handler-"));
     const storePath = path.join(tmp, "sessions.json");
@@ -131,8 +129,8 @@ describe("handleCompactionEnd", () => {
       initialCount: 1,
     });
 
-    handleCompactionEnd(ctx, {
-      type: "compaction_end",
+    handleAutoCompactionEnd(ctx, {
+      type: "auto_compaction_end",
       result: { kept: 12 },
       willRetry: false,
       aborted: false,
@@ -145,6 +143,5 @@ describe("handleCompactionEnd", () => {
     });
 
     expect(await readCompactionCount(storePath, sessionKey)).toBe(2);
-    expect(ctx.noteCompactionTokensAfter).toHaveBeenCalledWith(undefined);
   });
 });

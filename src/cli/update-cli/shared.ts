@@ -22,7 +22,6 @@ import { defaultRuntime } from "../../runtime.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { theme } from "../../terminal/theme.js";
 import { pathExists } from "../../utils.js";
-import { COMPLETION_SKIP_PLUGIN_COMMANDS_ENV } from "../completion-runtime.js";
 
 export type UpdateCommandOptions = {
   json?: boolean;
@@ -259,8 +258,6 @@ export async function resolveGlobalManager(params: {
   return byPresence ?? "npm";
 }
 
-const COMPLETION_CACHE_WRITE_TIMEOUT_MS = 30_000;
-
 export async function tryWriteCompletionCache(root: string, jsonMode: boolean): Promise<void> {
   const binPath = path.join(root, "openclaw.mjs");
   if (!(await pathExists(binPath))) {
@@ -269,12 +266,8 @@ export async function tryWriteCompletionCache(root: string, jsonMode: boolean): 
 
   const result = spawnSync(resolveNodeRunner(), [binPath, "completion", "--write-state"], {
     cwd: root,
-    env: {
-      ...process.env,
-      [COMPLETION_SKIP_PLUGIN_COMMANDS_ENV]: "1",
-    },
+    env: process.env,
     encoding: "utf-8",
-    timeout: COMPLETION_CACHE_WRITE_TIMEOUT_MS,
   });
 
   if (result.error) {

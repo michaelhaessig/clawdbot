@@ -1,7 +1,6 @@
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { ensureContextEnginesInitialized } from "../../context-engine/init.js";
 import { resolveContextEngine } from "../../context-engine/registry.js";
-import type { ContextEngineRuntimeContext } from "../../context-engine/types.js";
 import {
   captureCompactionCheckpointSnapshot,
   cleanupCompactionCheckpointSnapshot,
@@ -26,10 +25,6 @@ import {
   buildEmbeddedCompactionRuntimeContext,
   resolveEmbeddedCompactionTarget,
 } from "./compaction-runtime-context.js";
-import {
-  rotateTranscriptAfterCompaction,
-  shouldRotateCompactionTranscript,
-} from "./compaction-successor-transcript.js";
 import { runContextEngineMaintenance } from "./context-engine-maintenance.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
@@ -45,55 +40,8 @@ import type { EmbeddedPiCompactResult } from "./types.js";
 export async function compactEmbeddedPiSession(
   params: CompactEmbeddedPiSessionParams,
 ): Promise<EmbeddedPiCompactResult> {
-  ensureRuntimePluginsLoaded({
-    config: params.config,
-    workspaceDir: params.workspaceDir,
-    allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
-  });
-  ensureContextEnginesInitialized();
-  const contextEngine = await resolveContextEngine(params.config);
-  const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
-  let contextTokenBudget = params.contextTokenBudget;
-  if (!contextTokenBudget || !Number.isFinite(contextTokenBudget) || contextTokenBudget <= 0) {
-    const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
-      config: params.config,
-      provider: params.provider,
-      modelId: params.model,
-      authProfileId: params.authProfileId,
-      defaultProvider: DEFAULT_PROVIDER,
-      defaultModel: DEFAULT_MODEL,
-    });
-    const ceProvider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
-    const ceModelId = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
-    const { model: ceModel } = await resolveModelAsync(
-      ceProvider,
-      ceModelId,
-      agentDir,
-      params.config,
-    );
-    const ceRuntimeModel = ceModel as ProviderRuntimeModel | undefined;
-    contextTokenBudget = resolveContextWindowInfo({
-      cfg: params.config,
-      provider: ceProvider,
-      modelId: ceModelId,
-      modelContextTokens: readPiModelContextTokens(ceModel),
-      modelContextWindow: ceRuntimeModel?.contextWindow,
-      defaultTokens: DEFAULT_CONTEXT_TOKENS,
-    }).tokens;
-  }
-  const contextEngineRuntimeContext = buildCompactionContextEngineRuntimeContext({
-    params,
-    agentDir,
-    contextTokenBudget,
-  });
-  const harnessResult = await maybeCompactAgentHarnessSession({
-    ...params,
-    contextEngine,
-    contextTokenBudget,
-    contextEngineRuntimeContext,
-  });
+  const harnessResult = await maybeCompactAgentHarnessSession(params);
   if (harnessResult) {
-    await contextEngine.dispose?.();
     return harnessResult;
   }
   const sessionLane = resolveSessionLane(params.sessionKey?.trim() || params.sessionId);
@@ -102,9 +50,44 @@ export async function compactEmbeddedPiSession(
     params.enqueue ?? ((task, opts) => enqueueCommandInLane(globalLane, task, opts));
   return enqueueCommandInLane(sessionLane, () =>
     enqueueGlobal(async () => {
+      ensureRuntimePluginsLoaded({
+        config: params.config,
+        workspaceDir: params.workspaceDir,
+        allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
+      });
+      ensureContextEnginesInitialized();
+      const contextEngine = await resolveContextEngine(params.config);
       let checkpointSnapshot: CapturedCompactionCheckpointSnapshot | null = null;
       let checkpointSnapshotRetained = false;
       try {
+        const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
+        const resolvedCompactionTarget = resolveEmbeddedCompactionTarget({
+          config: params.config,
+          provider: params.provider,
+          modelId: params.model,
+          authProfileId: params.authProfileId,
+          defaultProvider: DEFAULT_PROVIDER,
+          defaultModel: DEFAULT_MODEL,
+        });
+        // Resolve token budget from the effective compaction model so engine-
+        // owned /compact implementations see the same target as the runtime.
+        const ceProvider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
+        const ceModelId = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
+        const { model: ceModel } = await resolveModelAsync(
+          ceProvider,
+          ceModelId,
+          agentDir,
+          params.config,
+        );
+        const ceRuntimeModel = ceModel as ProviderRuntimeModel | undefined;
+        const ceCtxInfo = resolveContextWindowInfo({
+          cfg: params.config,
+          provider: ceProvider,
+          modelId: ceModelId,
+          modelContextTokens: readPiModelContextTokens(ceModel),
+          modelContextWindow: ceRuntimeModel?.contextWindow,
+          defaultTokens: DEFAULT_CONTEXT_TOKENS,
+        });
         // When the context engine owns compaction, its compact() implementation
         // bypasses compactEmbeddedPiSessionDirect (which fires the hooks internally).
         // Fire before_compaction / after_compaction hooks here so plugin subscribers
@@ -132,7 +115,32 @@ export async function compactEmbeddedPiSession(
           workspaceDir: resolveUserPath(params.workspaceDir),
           messageProvider: resolvedMessageProvider,
         };
-        const runtimeContext = contextEngineRuntimeContext;
+        const runtimeContext = {
+          ...params,
+          ...buildEmbeddedCompactionRuntimeContext({
+            sessionKey: params.sessionKey,
+            messageChannel: params.messageChannel,
+            messageProvider: params.messageProvider,
+            agentAccountId: params.agentAccountId,
+            currentChannelId: params.currentChannelId,
+            currentThreadTs: params.currentThreadTs,
+            currentMessageId: params.currentMessageId,
+            authProfileId: params.authProfileId,
+            workspaceDir: params.workspaceDir,
+            agentDir,
+            config: params.config,
+            skillsSnapshot: params.skillsSnapshot,
+            senderIsOwner: params.senderIsOwner,
+            senderId: params.senderId,
+            provider: params.provider,
+            modelId: params.model,
+            thinkLevel: params.thinkLevel,
+            reasoningLevel: params.reasoningLevel,
+            bashElevated: params.bashElevated,
+            extraSystemPrompt: params.extraSystemPrompt,
+            ownerNumbers: params.ownerNumbers,
+          }),
+        };
         // Engine-owned compaction doesn't load the transcript at this level, so
         // message counts are unavailable. We pass sessionFile so hook subscribers
         // can read the transcript themselves if they need exact counts.
@@ -155,53 +163,22 @@ export async function compactEmbeddedPiSession(
           sessionId: params.sessionId,
           sessionKey: params.sessionKey,
           sessionFile: params.sessionFile,
-          tokenBudget: contextTokenBudget,
+          tokenBudget: ceCtxInfo.tokens,
           currentTokenCount: params.currentTokenCount,
           compactionTarget: params.trigger === "manual" ? "threshold" : "budget",
           customInstructions: params.customInstructions,
           force: params.trigger === "manual",
           runtimeContext,
         });
-        const delegatedSessionId = result.result?.sessionId;
-        const delegatedSessionFile = result.result?.sessionFile;
-        const delegatedRotatedTranscript =
-          (typeof delegatedSessionId === "string" && delegatedSessionId !== params.sessionId) ||
-          (typeof delegatedSessionFile === "string" && delegatedSessionFile !== params.sessionFile);
-        let postCompactionSessionId = delegatedSessionId ?? params.sessionId;
-        let postCompactionSessionFile = delegatedSessionFile ?? params.sessionFile;
-        let postCompactionLeafId: string | undefined;
         if (result.ok && result.compacted) {
-          if (shouldRotateCompactionTranscript(params.config) && !delegatedRotatedTranscript) {
-            try {
-              const rotation = await rotateTranscriptAfterCompaction({
-                sessionManager: SessionManager.open(params.sessionFile),
-                sessionFile: params.sessionFile,
-              });
-              if (rotation.rotated) {
-                postCompactionSessionId = rotation.sessionId ?? postCompactionSessionId;
-                postCompactionSessionFile = rotation.sessionFile ?? postCompactionSessionFile;
-                postCompactionLeafId = rotation.leafId;
-                log.info(
-                  `[compaction] rotated active transcript after context-engine compaction ` +
-                    `(sessionKey=${params.sessionKey ?? params.sessionId})`,
-                );
-              }
-            } catch (err) {
-              log.warn("failed to rotate compacted transcript", {
-                errorMessage: formatErrorMessage(err),
-              });
-            }
-          }
           if (params.config && params.sessionKey && checkpointSnapshot) {
             try {
-              const postLeafId =
-                postCompactionLeafId ??
-                SessionManager.open(postCompactionSessionFile).getLeafId() ??
-                undefined;
+              const postCompactionSession = SessionManager.open(params.sessionFile);
+              const postLeafId = postCompactionSession.getLeafId() ?? undefined;
               const storedCheckpoint = await persistSessionCompactionCheckpoint({
                 cfg: params.config,
                 sessionKey: params.sessionKey,
-                sessionId: postCompactionSessionId,
+                sessionId: params.sessionId,
                 reason: resolveSessionCompactionCheckpointReason({
                   trigger: params.trigger,
                 }),
@@ -210,7 +187,7 @@ export async function compactEmbeddedPiSession(
                 firstKeptEntryId: result.result?.firstKeptEntryId,
                 tokensBefore: result.result?.tokensBefore,
                 tokensAfter: result.result?.tokensAfter,
-                postSessionFile: postCompactionSessionFile,
+                postSessionFile: params.sessionFile,
                 postLeafId,
                 postEntryId: postLeafId,
               });
@@ -223,9 +200,9 @@ export async function compactEmbeddedPiSession(
           }
           await runContextEngineMaintenance({
             contextEngine,
-            sessionId: postCompactionSessionId,
+            sessionId: params.sessionId,
             sessionKey: params.sessionKey,
-            sessionFile: postCompactionSessionFile,
+            sessionFile: params.sessionFile,
             reason: "compaction",
             runtimeContext,
           });
@@ -234,7 +211,7 @@ export async function compactEmbeddedPiSession(
           await runPostCompactionSideEffects({
             config: params.config,
             sessionKey: params.sessionKey,
-            sessionFile: postCompactionSessionFile,
+            sessionFile: params.sessionFile,
           });
         }
         if (
@@ -244,18 +221,14 @@ export async function compactEmbeddedPiSession(
           hookRunner.runAfterCompaction
         ) {
           try {
-            const afterHookCtx = {
-              ...hookCtx,
-              sessionId: postCompactionSessionId,
-            };
             await hookRunner.runAfterCompaction(
               {
                 messageCount: -1,
                 compactedCount: -1,
                 tokenCount: result.result?.tokensAfter,
-                sessionFile: postCompactionSessionFile,
+                sessionFile: params.sessionFile,
               },
-              afterHookCtx,
+              hookCtx,
             );
           } catch (err) {
             log.warn("after_compaction hook failed", {
@@ -274,12 +247,6 @@ export async function compactEmbeddedPiSession(
                 tokensBefore: result.result.tokensBefore,
                 tokensAfter: result.result.tokensAfter,
                 details: result.result.details,
-                ...(postCompactionSessionId !== params.sessionId
-                  ? { sessionId: postCompactionSessionId }
-                  : {}),
-                ...(postCompactionSessionFile !== params.sessionFile
-                  ? { sessionFile: postCompactionSessionFile }
-                  : {}),
               }
             : undefined,
         };
@@ -291,39 +258,4 @@ export async function compactEmbeddedPiSession(
       }
     }),
   );
-}
-
-function buildCompactionContextEngineRuntimeContext(params: {
-  params: CompactEmbeddedPiSessionParams;
-  agentDir: string;
-  contextTokenBudget?: number;
-}): ContextEngineRuntimeContext {
-  return {
-    ...params.params,
-    ...buildEmbeddedCompactionRuntimeContext({
-      sessionKey: params.params.sessionKey,
-      messageChannel: params.params.messageChannel,
-      messageProvider: params.params.messageProvider,
-      agentAccountId: params.params.agentAccountId,
-      currentChannelId: params.params.currentChannelId,
-      currentThreadTs: params.params.currentThreadTs,
-      currentMessageId: params.params.currentMessageId,
-      authProfileId: params.params.authProfileId,
-      workspaceDir: params.params.workspaceDir,
-      agentDir: params.agentDir,
-      config: params.params.config,
-      skillsSnapshot: params.params.skillsSnapshot,
-      senderIsOwner: params.params.senderIsOwner,
-      senderId: params.params.senderId,
-      provider: params.params.provider,
-      modelId: params.params.model,
-      thinkLevel: params.params.thinkLevel,
-      reasoningLevel: params.params.reasoningLevel,
-      bashElevated: params.params.bashElevated,
-      extraSystemPrompt: params.params.extraSystemPrompt,
-      ownerNumbers: params.params.ownerNumbers,
-    }),
-    tokenBudget: params.contextTokenBudget,
-    currentTokenCount: params.params.currentTokenCount,
-  };
 }

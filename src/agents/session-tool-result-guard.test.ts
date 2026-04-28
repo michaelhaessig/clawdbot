@@ -111,18 +111,6 @@ describe("installSessionToolResultGuard", () => {
     expectPersistedRoles(sm, ["assistant", "toolResult"]);
   });
 
-  it("uses configured text for synthetic tool results", () => {
-    const sm = SessionManager.inMemory();
-    const guard = installSessionToolResultGuard(sm, {
-      missingToolResultText: "aborted",
-    });
-
-    sm.appendMessage(toolCallMessage);
-    guard.flushPendingToolResults();
-
-    expect(getToolResultText(getPersistedMessages(sm))).toBe("aborted");
-  });
-
   it("clears pending tool calls without inserting synthetic tool results", () => {
     const sm = SessionManager.inMemory();
     const guard = installSessionToolResultGuard(sm);

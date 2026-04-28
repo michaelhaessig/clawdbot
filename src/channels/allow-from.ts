@@ -28,7 +28,7 @@ export function resolveGroupAllowFromSources(params: {
 
 export function firstDefined<T>(...values: Array<T | undefined>) {
   for (const value of values) {
-    if (value !== undefined) {
+    if (typeof value !== "undefined") {
       return value;
     }
   }

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { loadJsonFile, saveJsonFile } from "openclaw/plugin-sdk/json-store";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 
 const CACHE_VERSION = 1;
 
@@ -40,10 +41,6 @@ function saveCache(cache: StickerCache): void {
   saveJsonFile(getCacheFile(), cache);
 }
 
-function normalizeStickerSearchText(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
 /**
  * Get a cached sticker by its unique ID.
  */
@@ -66,12 +63,12 @@ export function cacheSticker(sticker: CachedSticker): void {
  */
 export function searchStickers(query: string, limit = 10): CachedSticker[] {
   const cache = loadCache();
-  const queryLower = normalizeStickerSearchText(query);
+  const queryLower = normalizeLowercaseStringOrEmpty(query);
   const results: Array<{ sticker: CachedSticker; score: number }> = [];
 
   for (const sticker of Object.values(cache.stickers)) {
     let score = 0;
-    const descLower = normalizeStickerSearchText(sticker.description);
+    const descLower = normalizeLowercaseStringOrEmpty(sticker.description);
 
     // Exact substring match in description
     if (descLower.includes(queryLower)) {
@@ -93,7 +90,7 @@ export function searchStickers(query: string, limit = 10): CachedSticker[] {
     }
 
     // Set name match
-    if (normalizeStickerSearchText(sticker.setName).includes(queryLower)) {
+    if (normalizeLowercaseStringOrEmpty(sticker.setName).includes(queryLower)) {
       score += 3;
     }
 

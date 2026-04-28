@@ -30,7 +30,7 @@ import { ensureControlUiAssetsBuilt } from "../infra/control-ui-assets.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { restoreTerminalState } from "../terminal/restore.js";
-import { launchTuiCli } from "../tui/tui-launch.js";
+import { runTui } from "../tui/tui.js";
 import { resolveUserPath } from "../utils.js";
 import { listConfiguredWebSearchProviders } from "../web-search/runtime.js";
 import type { WizardPrompter } from "./prompts.js";
@@ -48,15 +48,6 @@ type FinalizeOnboardingOptions = {
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
 };
-
-type OnboardSearchModule = typeof import("../commands/onboard-search.js");
-
-let onboardSearchModulePromise: Promise<OnboardSearchModule> | undefined;
-
-function loadOnboardSearchModule(): Promise<OnboardSearchModule> {
-  onboardSearchModulePromise ??= import("../commands/onboard-search.js");
-  return onboardSearchModulePromise;
-}
 
 export async function finalizeSetupWizard(
   options: FinalizeOnboardingOptions,
@@ -242,7 +233,6 @@ export async function finalizeSetupWizard(
       port: settings.port,
       customBindHost: nextConfig.gateway?.customBindHost,
       basePath: undefined,
-      tlsEnabled: nextConfig.gateway?.tls?.enabled === true,
     });
     // Daemon install/restart can briefly flap the WS; wait a bit so health check doesn't false-fail.
     gatewayProbe = await waitForGatewayReachable({
@@ -320,7 +310,6 @@ export async function finalizeSetupWizard(
     port: settings.port,
     customBindHost: settings.customBindHost,
     basePath: controlUiBasePath,
-    tlsEnabled: nextConfig.gateway?.tls?.enabled === true,
   });
   const authedUrl =
     settings.authMode === "token" && settings.gatewayToken
@@ -387,7 +376,7 @@ export async function finalizeSetupWizard(
   let hatchChoice: "tui" | "web" | "later" | null = null;
   let launchedTui = false;
 
-  if (!opts.skipUi) {
+  if (!opts.skipUi && gatewayProbe.ok) {
     if (hasBootstrap) {
       await prompter.note(
         [
@@ -400,44 +389,39 @@ export async function finalizeSetupWizard(
       );
     }
 
-    if (gatewayProbe.ok) {
-      await prompter.note(
-        [
-          "Gateway token: shared auth for the Gateway + Control UI.",
-          "Stored in: $OPENCLAW_CONFIG_PATH (default: ~/.openclaw/openclaw.json) under gateway.auth.token, or in OPENCLAW_GATEWAY_TOKEN.",
-          `View token: ${formatCliCommand("openclaw config get gateway.auth.token")}`,
-          `Generate token: ${formatCliCommand("openclaw doctor --generate-gateway-token")}`,
-          "Web UI keeps dashboard URL tokens in memory for the current tab and strips them from the URL after load.",
-          `Open the dashboard anytime: ${formatCliCommand("openclaw dashboard --no-open")}`,
-          "If prompted: paste the token into Control UI settings (or use the tokenized dashboard URL).",
-        ].join("\n"),
-        "Token",
-      );
-    }
-
-    const hatchOptions: { value: "tui" | "web" | "later"; label: string }[] = [
-      { value: "tui", label: "Hatch in Terminal (recommended)" },
-      ...(gatewayProbe.ok ? [{ value: "web" as const, label: "Open the Web UI" }] : []),
-      { value: "later", label: "Do this later" },
-    ];
+    await prompter.note(
+      [
+        "Gateway token: shared auth for the Gateway + Control UI.",
+        "Stored in: $OPENCLAW_CONFIG_PATH (default: ~/.openclaw/openclaw.json) under gateway.auth.token, or in OPENCLAW_GATEWAY_TOKEN.",
+        `View token: ${formatCliCommand("openclaw config get gateway.auth.token")}`,
+        `Generate token: ${formatCliCommand("openclaw doctor --generate-gateway-token")}`,
+        "Web UI keeps dashboard URL tokens in memory for the current tab and strips them from the URL after load.",
+        `Open the dashboard anytime: ${formatCliCommand("openclaw dashboard --no-open")}`,
+        "If prompted: paste the token into Control UI settings (or use the tokenized dashboard URL).",
+      ].join("\n"),
+      "Token",
+    );
 
     hatchChoice = await prompter.select({
       message: "How do you want to hatch your bot?",
-      options: hatchOptions,
+      options: [
+        { value: "tui", label: "Hatch in TUI (recommended)" },
+        { value: "web", label: "Open the Web UI" },
+        { value: "later", label: "Do this later" },
+      ],
       initialValue: "tui",
     });
 
     if (hatchChoice === "tui") {
       restoreTerminalState("pre-setup tui", { resumeStdinIfPaused: true });
-      try {
-        await launchTuiCli({
-          local: true,
-          deliver: false,
-          message: hasBootstrap ? "Wake up, my friend!" : undefined,
-        });
-      } finally {
-        restoreTerminalState("post-setup tui", { resumeStdinIfPaused: true });
-      }
+      await runTui({
+        url: links.wsUrl,
+        token: settings.authMode === "token" ? settings.gatewayToken : undefined,
+        password: settings.authMode === "password" ? resolvedGatewayPassword : "",
+        // Safety: setup TUI should not auto-deliver to lastProvider/lastTo.
+        deliver: false,
+        message: hasBootstrap ? "Wake up, my friend!" : undefined,
+      });
       launchedTui = true;
     } else if (hatchChoice === "web") {
       const browserSupport = await detectBrowserOpenSupport();
@@ -538,7 +522,8 @@ export async function finalizeSetupWizard(
   const webSearchEnabled = nextConfig.tools?.web?.search?.enabled;
   const configuredSearchProviders = listConfiguredWebSearchProviders({ config: nextConfig });
   if (webSearchProvider) {
-    const { resolveExistingKey, hasExistingKey, hasKeyInEnv } = await loadOnboardSearchModule();
+    const { resolveExistingKey, hasExistingKey, hasKeyInEnv } =
+      await import("../commands/onboard-search.js");
     const entry = configuredSearchProviders.find((e) => e.id === webSearchProvider);
     const label = entry?.label ?? webSearchProvider;
     const storedKey = entry ? resolveExistingKey(nextConfig, webSearchProvider) : undefined;
@@ -600,7 +585,7 @@ export async function finalizeSetupWizard(
   } else {
     // Legacy configs may have a working key (e.g. apiKey or BRAVE_API_KEY) without
     // an explicit provider. Runtime auto-detects these, so avoid saying "skipped".
-    const { hasExistingKey, hasKeyInEnv } = await loadOnboardSearchModule();
+    const { hasExistingKey, hasKeyInEnv } = await import("../commands/onboard-search.js");
     const legacyDetected = configuredSearchProviders.find(
       (e) => hasExistingKey(nextConfig, e.id) || hasKeyInEnv(e),
     );

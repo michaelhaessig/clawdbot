@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import {
   calculateCost,
@@ -59,14 +60,6 @@ type AnthropicTransportModel = Model<"anthropic-messages"> & {
 type AnthropicTransportOptions = AnthropicOptions &
   Pick<SimpleStreamOptions, "reasoning" | "thinkingBudgets">;
 type AnthropicAdaptiveEffort = NonNullable<AnthropicOptions["effort"]> | "xhigh";
-type AnthropicMessagesClient = {
-  messages: {
-    stream(
-      params: Record<string, unknown>,
-      options?: { signal?: AbortSignal },
-    ): AsyncIterable<Record<string, unknown>>;
-  };
-};
 
 type TransportContentBlock =
   | { type: "text"; text: string; index?: number }
@@ -395,28 +388,15 @@ function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
   if (!tools) {
     return [];
   }
-  return tools.flatMap((tool) => {
-    // Main quarantine happens when plugin tools materialize; this keeps Anthropic
-    // safe for direct/custom tool arrays that bypass the plugin registry.
-    const parameters =
-      tool.parameters && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)
-        ? (tool.parameters as Record<string, unknown>)
-        : undefined;
-    if (!parameters) {
-      return [];
-    }
-    return [
-      {
-        name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
-        description: tool.description,
-        input_schema: {
-          type: "object",
-          properties: parameters.properties || {},
-          required: parameters.required || [],
-        },
-      },
-    ];
-  });
+  return tools.map((tool) => ({
+    name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
+    description: tool.description,
+    input_schema: {
+      type: "object",
+      properties: tool.parameters.properties || {},
+      required: tool.parameters.required || [],
+    },
+  }));
 }
 
 function mapStopReason(reason: string | undefined): string {
@@ -439,96 +419,6 @@ function mapStopReason(reason: string | undefined): string {
   }
 }
 
-function resolveAnthropicMessagesUrl(baseUrl?: string): string {
-  const normalized = (baseUrl?.trim() || "https://api.anthropic.com").replace(/\/+$/, "");
-  return normalized.endsWith("/v1") ? `${normalized}/messages` : `${normalized}/v1/messages`;
-}
-
-async function* parseAnthropicSseBody(
-  body: ReadableStream<Uint8Array>,
-): AsyncIterable<Record<string, unknown>> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer = `${buffer}${decoder.decode(value, { stream: true })}`.replaceAll("\r\n", "\n");
-      let frameEnd = buffer.indexOf("\n\n");
-      while (frameEnd >= 0) {
-        const frame = buffer.slice(0, frameEnd);
-        buffer = buffer.slice(frameEnd + 2);
-        const data = frame
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data && data !== "[DONE]") {
-          yield JSON.parse(data) as Record<string, unknown>;
-        }
-        frameEnd = buffer.indexOf("\n\n");
-      }
-    }
-    const tail = `${buffer}${decoder.decode()}`.replaceAll("\r\n", "\n").trim();
-    if (tail) {
-      const data = tail
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart())
-        .join("\n");
-      if (data && data !== "[DONE]") {
-        yield JSON.parse(data) as Record<string, unknown>;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function createAnthropicMessagesClient(params: {
-  apiKey?: string | null;
-  authToken?: string;
-  baseURL?: string;
-  defaultHeaders?: Record<string, string>;
-  fetch: typeof fetch;
-}): AnthropicMessagesClient {
-  const url = resolveAnthropicMessagesUrl(params.baseURL);
-  return {
-    messages: {
-      async *stream(body: Record<string, unknown>, options?: { signal?: AbortSignal }) {
-        const headers = mergeTransportHeaders(
-          {
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01",
-            ...(params.apiKey ? { "x-api-key": params.apiKey } : {}),
-            ...(params.authToken ? { authorization: `Bearer ${params.authToken}` } : {}),
-          },
-          params.defaultHeaders,
-        );
-        const response = await params.fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-          signal: options?.signal,
-        });
-        if (!response.ok) {
-          const detail = await response.text().catch(() => "");
-          throw new Error(
-            detail || `Anthropic Messages request failed with HTTP ${response.status}`,
-          );
-        }
-        if (!response.body) {
-          return;
-        }
-        yield* parseAnthropicSseBody(response.body);
-      },
-    },
-  };
-}
-
 function createAnthropicTransportClient(params: {
   model: AnthropicTransportModel;
   context: Context;
@@ -542,10 +432,11 @@ function createAnthropicTransportClient(params: {
   if (model.provider === "github-copilot") {
     const betaFeatures = needsInterleavedBeta ? ["interleaved-thinking-2025-05-14"] : [];
     return {
-      client: createAnthropicMessagesClient({
+      client: new Anthropic({
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
+        dangerouslyAllowBrowser: true,
         defaultHeaders: mergeTransportHeaders(
           {
             accept: "application/json",
@@ -570,10 +461,11 @@ function createAnthropicTransportClient(params: {
   }
   if (isAnthropicOAuthToken(apiKey)) {
     return {
-      client: createAnthropicMessagesClient({
+      client: new Anthropic({
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
+        dangerouslyAllowBrowser: true,
         defaultHeaders: mergeTransportHeaders(
           {
             accept: "application/json",
@@ -591,9 +483,10 @@ function createAnthropicTransportClient(params: {
     };
   }
   return {
-    client: createAnthropicMessagesClient({
+    client: new Anthropic({
       apiKey,
       baseURL: model.baseUrl,
+      dangerouslyAllowBrowser: true,
       defaultHeaders: mergeTransportHeaders(
         {
           accept: "application/json",
@@ -783,16 +676,12 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
           params = nextParams as Record<string, unknown>;
         }
         const anthropicStream = client.messages.stream(
-          { ...params, stream: true },
+          { ...params, stream: true } as never,
           transportOptions.signal ? { signal: transportOptions.signal } : undefined,
-        );
+        ) as AsyncIterable<Record<string, unknown>>;
         stream.push({ type: "start", partial: output as never });
         const blocks = output.content;
         for await (const event of anthropicStream) {
-          if (event.type === "error") {
-            const error = event.error as { message?: string } | undefined;
-            throw new Error(error?.message || "Anthropic Messages stream failed");
-          }
           if (event.type === "message_start") {
             const message = event.message as
               | { id?: string; usage?: Record<string, unknown> }

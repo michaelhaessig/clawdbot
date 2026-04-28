@@ -1,37 +1,30 @@
 import fs from "node:fs";
-import { performance } from "node:perf_hooks";
-import { formatMs } from "./lib/check-timing-summary.mjs";
 import { acquireLocalHeavyCheckLockSync } from "./lib/local-heavy-check-runtime.mjs";
+import { isCiLikeEnv, resolveLocalFullSuiteProfile } from "./lib/vitest-local-scheduling.mjs";
+import { spawnPnpmRunner } from "./pnpm-runner.mjs";
 import {
-  isCiLikeEnv,
-  resolveLocalFullSuiteProfile,
-  resolveLocalVitestEnv,
-} from "./lib/vitest-local-scheduling.mjs";
-import {
-  createShardTimingSample,
-  readShardTimings,
-  writeShardTimings,
-} from "./lib/vitest-shard-timings.mjs";
-import {
+  forwardVitestOutput,
+  installVitestNoOutputWatchdog,
   resolveVitestCliEntry,
   resolveVitestNodeArgs,
-  resolveVitestSpawnParams,
-  spawnWatchedVitestProcess,
+  resolveVitestNoOutputTimeoutMs,
+  shouldSuppressVitestStderrLine,
 } from "./run-vitest.mjs";
 import {
-  applyDefaultMultiSpecVitestCachePaths,
-  applyDefaultVitestNoOutputTimeout,
   applyParallelVitestCachePaths,
   buildFullSuiteVitestRunPlans,
   createVitestRunSpecs,
-  listFullExtensionVitestProjectConfigs,
   parseTestProjectsArgs,
   resolveParallelFullSuiteConcurrency,
   resolveChangedTargetArgs,
   shouldAcquireLocalHeavyCheckLock,
-  shouldRetryVitestNoOutputTimeout,
   writeVitestIncludeFile,
 } from "./test-projects.test-support.mjs";
+import {
+  forwardSignalToVitestProcessGroup,
+  installVitestProcessGroupCleanup,
+  shouldUseDetachedVitestProcessGroup,
+} from "./vitest-process-group.mjs";
 
 // Keep this shim so `pnpm test -- src/foo.test.ts` still forwards filters
 // cleanly instead of leaking pnpm's passthrough sentinel to Vitest.
@@ -48,13 +41,9 @@ const FULL_SUITE_CONFIG_WEIGHT = new Map([
   ["test/vitest/vitest.agents.config.ts", 170],
   ["test/vitest/vitest.extension-voice-call.config.ts", 169],
   ["test/vitest/vitest.extensions.config.ts", 168],
-  ["test/vitest/vitest.extension-provider-openai.config.ts", 167],
+  ["test/vitest/vitest.extension-channels.config.ts", 167],
   ["test/vitest/vitest.runtime-config.config.ts", 166],
-  ["test/vitest/vitest.contracts-channel-config.config.ts", 85],
-  ["test/vitest/vitest.contracts-channel-surface.config.ts", 60],
-  ["test/vitest/vitest.contracts-channel-session.config.ts", 50],
-  ["test/vitest/vitest.contracts-channel-registry.config.ts", 35],
-  ["test/vitest/vitest.contracts-plugin.config.ts", 20],
+  ["test/vitest/vitest.contracts.config.ts", 165],
   ["test/vitest/vitest.tasks.config.ts", 165],
   ["test/vitest/vitest.channels.config.ts", 164],
   ["test/vitest/vitest.unit-fast.config.ts", 160],
@@ -65,7 +54,6 @@ const FULL_SUITE_CONFIG_WEIGHT = new Map([
   ["test/vitest/vitest.wizard.config.ts", 130],
   ["test/vitest/vitest.unit-src.config.ts", 125],
   ["test/vitest/vitest.extension-matrix.config.ts", 100],
-  ["test/vitest/vitest.extension-discord.config.ts", 98],
   ["test/vitest/vitest.extension-providers.config.ts", 96],
   ["test/vitest/vitest.extension-telegram.config.ts", 94],
   ["test/vitest/vitest.extension-whatsapp.config.ts", 92],
@@ -74,7 +62,6 @@ const FULL_SUITE_CONFIG_WEIGHT = new Map([
   ["test/vitest/vitest.media.config.ts", 84],
   ["test/vitest/vitest.plugins.config.ts", 82],
   ["test/vitest/vitest.bundled.config.ts", 80],
-  ["test/vitest/vitest.extension-slack.config.ts", 78],
   ["test/vitest/vitest.commands-light.config.ts", 48],
   ["test/vitest/vitest.plugin-sdk.config.ts", 46],
   ["test/vitest/vitest.auto-reply-top-level.config.ts", 45],
@@ -91,9 +78,6 @@ const FULL_SUITE_CONFIG_WEIGHT = new Map([
   ["test/vitest/vitest.extension-feishu.config.ts", 18],
   ["test/vitest/vitest.extension-mattermost.config.ts", 16],
   ["test/vitest/vitest.extension-messaging.config.ts", 14],
-  ["test/vitest/vitest.extension-imessage.config.ts", 13],
-  ["test/vitest/vitest.extension-line.config.ts", 12],
-  ["test/vitest/vitest.extension-signal.config.ts", 11],
   ["test/vitest/vitest.extension-acpx.config.ts", 10],
   ["test/vitest/vitest.extension-diffs.config.ts", 8],
   ["test/vitest/vitest.extension-memory.config.ts", 6],
@@ -122,29 +106,51 @@ function runVitestSpec(spec) {
   if (spec.includeFilePath && spec.includePatterns) {
     writeVitestIncludeFile(spec.includeFilePath, spec.includePatterns);
   }
-  let noOutputTimedOut = false;
   return new Promise((resolve, reject) => {
-    const { child, teardown } = spawnWatchedVitestProcess({
+    const child = spawnPnpmRunner({
+      cwd: process.cwd(),
+      detached: shouldUseDetachedVitestProcessGroup(),
       pnpmArgs: spec.pnpmArgs,
       env: spec.env,
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+    const teardownChildCleanup = installVitestProcessGroupCleanup({ child });
+    const teardownNoOutputWatchdog = installVitestNoOutputWatchdog({
+      streams: [child.stdout, child.stderr],
+      timeoutMs: resolveVitestNoOutputTimeoutMs(spec.env),
       label: spec.config,
-      onNoOutputTimeout: () => {
-        noOutputTimedOut = true;
+      log: (message) => {
+        console.error(message);
       },
-      spawnParams: {
-        cwd: process.cwd(),
-        ...resolveVitestSpawnParams(spec.env),
+      onTimeout: () => {
+        forwardSignalToVitestProcessGroup({
+          child,
+          signal: "SIGTERM",
+          kill: process.kill.bind(process),
+        });
+      },
+      onForceKill: () => {
+        forwardSignalToVitestProcessGroup({
+          child,
+          signal: "SIGKILL",
+          kill: process.kill.bind(process),
+        });
       },
     });
 
+    forwardVitestOutput(child.stdout, process.stdout);
+    forwardVitestOutput(child.stderr, process.stderr, shouldSuppressVitestStderrLine);
+
     child.on("exit", (code, signal) => {
-      teardown();
+      teardownChildCleanup();
+      teardownNoOutputWatchdog();
       cleanupVitestRunSpec(spec);
-      resolve({ code: code ?? (signal ? 143 : 1), noOutputTimedOut, signal });
+      resolve({ code: code ?? 1, signal });
     });
 
     child.on("error", (error) => {
-      teardown();
+      teardownChildCleanup();
+      teardownNoOutputWatchdog();
       cleanupVitestRunSpec(spec);
       reject(error);
     });
@@ -165,86 +171,20 @@ function applyDefaultParallelVitestWorkerBudget(specs, env) {
   }));
 }
 
-async function runLoggedVitestSpec(spec) {
-  console.error(`[test] starting ${spec.config}`);
-  const startedAt = performance.now();
-  let result = await runVitestSpec(spec);
-  if (result.noOutputTimedOut && !spec.watchMode && shouldRetryVitestNoOutputTimeout(spec.env)) {
-    console.error(`[test] retrying ${spec.config} after no-output timeout`);
-    result = await runVitestSpec(spec);
-  }
-  const durationMs = performance.now() - startedAt;
-  if (result.noOutputTimedOut && result.signal) {
-    console.error(`[test] ${spec.config} exceeded no-output timeout`);
-    return {
-      ...result,
-      code: result.code || 143,
-      signal: null,
-      timing: null,
-    };
-  }
-  if (result.signal) {
-    console.error(`[test] ${spec.config} exited by signal ${result.signal}`);
-    releaseLockOnce();
-    process.kill(process.pid, result.signal);
-    return null;
-  }
-  return {
-    ...result,
-    timing: createShardTimingSample(spec, durationMs),
-  };
-}
-
-function resolveConfigSortWeight(config, shardTimings) {
-  return shardTimings.get(config) ?? (FULL_SUITE_CONFIG_WEIGHT.get(config) ?? 0) * 1000;
-}
-
-function interleaveSlowAndFastSpecs(sortedSpecs) {
-  const ordered = [];
-  let slowIndex = 0;
-  let fastIndex = sortedSpecs.length - 1;
-  while (slowIndex <= fastIndex) {
-    ordered.push(sortedSpecs[slowIndex]);
-    slowIndex += 1;
-    if (slowIndex <= fastIndex) {
-      ordered.push(sortedSpecs[fastIndex]);
-      fastIndex -= 1;
-    }
-  }
-  return ordered;
-}
-
-function orderFullSuiteSpecsForParallelRun(specs, shardTimings = new Map()) {
-  const hasMatchingShardTiming = specs.some((spec) => shardTimings.has(spec.config));
-  const sortedSpecs = specs.toSorted((a, b) => {
+function orderFullSuiteSpecsForParallelRun(specs) {
+  return specs.toSorted((a, b) => {
     const weightDelta =
-      resolveConfigSortWeight(b.config, shardTimings) -
-      resolveConfigSortWeight(a.config, shardTimings);
+      (FULL_SUITE_CONFIG_WEIGHT.get(b.config) ?? 0) - (FULL_SUITE_CONFIG_WEIGHT.get(a.config) ?? 0);
     if (weightDelta !== 0) {
       return weightDelta;
     }
     return a.config.localeCompare(b.config);
   });
-  return hasMatchingShardTiming ? interleaveSlowAndFastSpecs(sortedSpecs) : sortedSpecs;
-}
-
-function isFullExtensionsProjectRun(specs) {
-  const fullExtensionProjectConfigs = new Set(listFullExtensionVitestProjectConfigs());
-  return (
-    specs.length > 1 &&
-    specs.every(
-      (spec) =>
-        spec.watchMode === false &&
-        spec.includePatterns === null &&
-        fullExtensionProjectConfigs.has(spec.config),
-    )
-  );
 }
 
 async function runVitestSpecsParallel(specs, concurrency) {
   let nextIndex = 0;
   let exitCode = 0;
-  const timings = [];
 
   const runWorker = async () => {
     for (;;) {
@@ -254,38 +194,35 @@ async function runVitestSpecsParallel(specs, concurrency) {
       if (!spec) {
         return;
       }
-      const result = await runLoggedVitestSpec(spec);
-      if (!result) {
+      console.error(`[test] starting ${spec.config}`);
+      const result = await runVitestSpec(spec);
+      if (result.signal) {
+        console.error(`[test] ${spec.config} exited by signal ${result.signal}`);
+        releaseLockOnce();
+        process.kill(process.pid, result.signal);
         return;
       }
       if (result.code !== 0) {
         exitCode = exitCode || result.code;
       }
-      if (result.timing) {
-        timings.push(result.timing);
-      }
     }
   };
 
   await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
-  return { exitCode, timings };
+  return exitCode;
 }
 
 async function main() {
-  const suiteStartedAt = performance.now();
   const args = process.argv.slice(2);
-  const baseEnv = resolveLocalVitestEnv(process.env);
   const { targetArgs } = parseTestProjectsArgs(args, process.cwd());
   const changedTargetArgs =
-    targetArgs.length === 0
-      ? resolveChangedTargetArgs(args, process.cwd(), undefined, { env: baseEnv })
-      : null;
-  const rawRunSpecs =
+    targetArgs.length === 0 ? resolveChangedTargetArgs(args, process.cwd()) : null;
+  const runSpecs =
     targetArgs.length === 0 && changedTargetArgs === null
       ? buildFullSuiteVitestRunPlans(args, process.cwd()).map((plan) => ({
           config: plan.config,
           continueOnFailure: true,
-          env: baseEnv,
+          env: process.env,
           includeFilePath: null,
           includePatterns: null,
           pnpmArgs: [
@@ -301,24 +238,14 @@ async function main() {
           watchMode: plan.watchMode,
         }))
       : createVitestRunSpecs(args, {
-          baseEnv,
+          baseEnv: process.env,
           cwd: process.cwd(),
         });
-  const runSpecs = applyDefaultMultiSpecVitestCachePaths(
-    applyDefaultVitestNoOutputTimeout(rawRunSpecs, { env: baseEnv }),
-    { cwd: process.cwd(), env: baseEnv },
-  );
 
-  if (runSpecs.length === 0) {
-    console.error("[test] no changed test targets; skipping Vitest.");
-    printTestSummary("skipped", 0, performance.now() - suiteStartedAt);
-    return;
-  }
-
-  releaseLock = shouldAcquireLocalHeavyCheckLock(runSpecs, baseEnv)
+  releaseLock = shouldAcquireLocalHeavyCheckLock(runSpecs, process.env)
     ? acquireLocalHeavyCheckLockSync({
         cwd: process.cwd(),
-        env: baseEnv,
+        env: process.env,
         toolName: "test",
       })
     : () => {};
@@ -327,29 +254,22 @@ async function main() {
     targetArgs.length === 0 &&
     changedTargetArgs === null &&
     !runSpecs.some((spec) => spec.watchMode);
-  const isExplicitParallelMultiConfigRun =
-    Boolean(baseEnv.OPENCLAW_TEST_PROJECTS_PARALLEL) &&
-    runSpecs.length > 1 &&
-    !runSpecs.some((spec) => spec.watchMode);
-  const isParallelShardRun =
-    isFullSuiteRun || isFullExtensionsProjectRun(runSpecs) || isExplicitParallelMultiConfigRun;
-  if (isParallelShardRun) {
-    const concurrency = resolveParallelFullSuiteConcurrency(runSpecs.length, baseEnv);
+  if (isFullSuiteRun) {
+    const concurrency = resolveParallelFullSuiteConcurrency(runSpecs.length, process.env);
     if (concurrency > 1) {
-      const localFullSuiteProfile = resolveLocalFullSuiteProfile(baseEnv);
-      const shardTimings = readShardTimings(process.cwd(), baseEnv);
+      const localFullSuiteProfile = resolveLocalFullSuiteProfile(process.env);
       const parallelSpecs = applyDefaultParallelVitestWorkerBudget(
-        applyParallelVitestCachePaths(orderFullSuiteSpecsForParallelRun(runSpecs, shardTimings), {
+        applyParallelVitestCachePaths(orderFullSuiteSpecsForParallelRun(runSpecs), {
           cwd: process.cwd(),
-          env: baseEnv,
+          env: process.env,
         }),
-        baseEnv,
+        process.env,
       );
       if (
-        !isCiLikeEnv(baseEnv) &&
-        !baseEnv.OPENCLAW_TEST_PROJECTS_PARALLEL &&
-        !baseEnv.OPENCLAW_VITEST_MAX_WORKERS &&
-        !baseEnv.OPENCLAW_TEST_WORKERS &&
+        !isCiLikeEnv(process.env) &&
+        !process.env.OPENCLAW_TEST_PROJECTS_PARALLEL &&
+        !process.env.OPENCLAW_VITEST_MAX_WORKERS &&
+        !process.env.OPENCLAW_TEST_WORKERS &&
         localFullSuiteProfile.shardParallelism === 10 &&
         localFullSuiteProfile.vitestMaxWorkers === 2
       ) {
@@ -358,16 +278,9 @@ async function main() {
       console.error(
         `[test] running ${parallelSpecs.length} Vitest shards with parallelism ${concurrency}`,
       );
-      const { exitCode: parallelExitCode, timings } = await runVitestSpecsParallel(
-        parallelSpecs,
-        concurrency,
-      );
-      writeShardTimings(timings, process.cwd(), baseEnv);
-      printTestSummary(
-        parallelExitCode === 0 ? "passed" : "failed",
-        parallelSpecs.length,
-        performance.now() - suiteStartedAt,
-        "Vitest summaries above are per-shard, not aggregate totals.",
+      const parallelExitCode = await runVitestSpecsParallel(parallelSpecs, concurrency);
+      console.error(
+        `[test] completed ${parallelSpecs.length} Vitest shards; Vitest summaries above are per-shard, not aggregate totals.`,
       );
       releaseLockOnce();
       if (parallelExitCode !== 0) {
@@ -378,42 +291,28 @@ async function main() {
   }
 
   let exitCode = 0;
-  const timings = [];
   for (const spec of runSpecs) {
-    const result = await runLoggedVitestSpec(spec);
-    if (!result) {
+    console.error(`[test] starting ${spec.config}`);
+    const result = await runVitestSpec(spec);
+    if (result.signal) {
+      console.error(`[test] ${spec.config} exited by signal ${result.signal}`);
+      releaseLockOnce();
+      process.kill(process.pid, result.signal);
       return;
-    }
-    if (result.timing) {
-      timings.push(result.timing);
     }
     if (result.code !== 0) {
       exitCode = exitCode || result.code;
       if (spec.continueOnFailure !== true) {
-        printTestSummary("failed", timings.length, performance.now() - suiteStartedAt);
         releaseLockOnce();
         process.exit(result.code);
       }
     }
   }
-  writeShardTimings(timings, process.cwd(), baseEnv);
-  printTestSummary(
-    exitCode === 0 ? "passed" : "failed",
-    timings.length,
-    performance.now() - suiteStartedAt,
-  );
 
   releaseLockOnce();
   if (exitCode !== 0) {
     process.exit(exitCode);
   }
-}
-
-function printTestSummary(status, shardCount, durationMs, detail) {
-  const suffix = detail ? `; ${detail}` : "";
-  console.error(
-    `[test] ${status} ${shardCount} Vitest shard${shardCount === 1 ? "" : "s"} in ${formatMs(durationMs)}${suffix}`,
-  );
 }
 
 main().catch((error) => {

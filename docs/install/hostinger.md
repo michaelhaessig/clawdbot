@@ -7,6 +7,8 @@ read_when:
 title: "Hostinger"
 ---
 
+# Hostinger
+
 Run a persistent OpenClaw Gateway on [Hostinger](https://www.hostinger.com/openclaw) via a **1-Click** managed deployment or a **VPS** install.
 
 ## Prerequisites
@@ -89,10 +91,4 @@ Send "Hi" to your assistant on the channel you connected. OpenClaw will reply an
 ## Next steps
 
 - [Channels](/channels) -- connect Telegram, WhatsApp, Discord, and more
-- [Gateway configuration](/gateway/configuration) -- all config options
-
-## Related
-
-- [Install overview](/install)
-- [VPS hosting](/vps)
-- [DigitalOcean](/install/digitalocean)
+- [Gateway configuration](/gateway/configuration) -- all config optionss

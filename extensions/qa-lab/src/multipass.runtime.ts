@@ -71,7 +71,6 @@ export type QaMultipassPlan = {
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  thinkingDefault?: string;
   scenarioIds: string[];
   forwardedEnv: Record<string, string>;
   hostCodexHomePath?: string;
@@ -238,8 +237,6 @@ export function createQaMultipassPlan(params: {
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  thinkingDefault?: string;
-  allowFailures?: boolean;
   scenarioIds?: string[];
   concurrency?: number;
   image?: string;
@@ -278,8 +275,6 @@ export function createQaMultipassPlan(params: {
       ...(params.primaryModel ? ["--model", params.primaryModel] : []),
       ...(params.alternateModel ? ["--alt-model", params.alternateModel] : []),
       ...(params.fastMode ? ["--fast"] : []),
-      ...(params.thinkingDefault ? ["--thinking", params.thinkingDefault] : []),
-      ...(params.allowFailures ? ["--allow-failures"] : []),
       ...(params.concurrency ? ["--concurrency", String(params.concurrency)] : []),
     ],
     scenarioIds,
@@ -304,7 +299,6 @@ export function createQaMultipassPlan(params: {
     primaryModel: params.primaryModel,
     alternateModel: params.alternateModel,
     fastMode: params.fastMode,
-    thinkingDefault: params.thinkingDefault,
     scenarioIds,
     forwardedEnv,
     hostCodexHomePath,
@@ -550,7 +544,6 @@ export async function runQaMultipass(params: {
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
-  allowFailures?: boolean;
   scenarioIds?: string[];
   concurrency?: number;
   image?: string;

@@ -1,5 +1,6 @@
 import { DEFAULT_PROVIDER } from "../../agents/defaults.js";
 import { buildAllowedModelSet } from "../../agents/model-selection.js";
+import { loadConfig } from "../../config/config.js";
 import {
   ErrorCodes,
   errorShape,
@@ -23,7 +24,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
     }
     try {
       const catalog = await context.loadGatewayModelCatalog();
-      const cfg = context.getRuntimeConfig();
+      const cfg = loadConfig();
       const { allowedCatalog } = buildAllowedModelSet({
         cfg,
         catalog,

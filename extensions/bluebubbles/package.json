@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/bluebubbles",
-  "version": "2026.4.25",
+  "version": "2026.4.16",
   "description": "OpenClaw BlueBubbles channel plugin",
   "type": "module",
   "devDependencies": {
@@ -8,7 +8,7 @@
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.4.25"
+    "openclaw": ">=2026.4.16"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -35,13 +35,7 @@
         "imessage"
       ],
       "systemImage": "bubble.left.and.text.bubble.right",
-      "order": 75,
-      "cliAddOptions": [
-        {
-          "flags": "--webhook-path <path>",
-          "description": "BlueBubbles webhook path"
-        }
-      ]
+      "order": 75
     },
     "install": {
       "npmSpec": "@openclaw/bluebubbles",
@@ -49,10 +43,10 @@
       "minHostVersion": ">=2026.4.10"
     },
     "compat": {
-      "pluginApi": ">=2026.4.25"
+      "pluginApi": ">=2026.4.16"
     },
     "build": {
-      "openclawVersion": "2026.4.25"
+      "openclawVersion": "2026.4.16"
     },
     "release": {
       "publishToClawHub": true,

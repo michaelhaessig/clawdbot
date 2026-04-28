@@ -1,24 +1,9 @@
 import type { ChannelSetupWizard } from "openclaw/plugin-sdk/setup";
-import {
-  DEFAULT_ACCOUNT_ID,
-  setSetupChannelEnabled,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk/setup";
-import { listWhatsAppAccountIds, resolveWhatsAppAuthDir } from "./accounts.js";
-import { formatWhatsAppWebAuthStatusState, readWebAuthState } from "./auth-store.js";
-import { finalizeWhatsAppSetup } from "./setup-finalize.js";
+import { DEFAULT_ACCOUNT_ID, setSetupChannelEnabled } from "openclaw/plugin-sdk/setup";
+import { listWhatsAppAccountIds } from "./accounts.js";
+import { detectWhatsAppLinked, finalizeWhatsAppSetup } from "./setup-finalize.js";
 
 const channel = "whatsapp" as const;
-
-type WhatsAppSetupLinkState = "linked" | "not-linked" | "unstable";
-
-async function readWhatsAppSetupLinkState(
-  cfg: OpenClawConfig,
-  accountId: string,
-): Promise<WhatsAppSetupLinkState> {
-  const { authDir } = resolveWhatsAppAuthDir({ cfg, accountId });
-  return await readWebAuthState(authDir);
-}
 
 export const whatsappSetupWizard: ChannelSetupWizard = {
   channel,
@@ -31,7 +16,7 @@ export const whatsappSetupWizard: ChannelSetupWizard = {
     unconfiguredScore: 4,
     resolveConfigured: async ({ cfg, accountId }) => {
       for (const resolvedAccountId of accountId ? [accountId] : listWhatsAppAccountIds(cfg)) {
-        if ((await readWhatsAppSetupLinkState(cfg, resolvedAccountId)) === "linked") {
+        if (await detectWhatsAppLinked(cfg, resolvedAccountId)) {
           return true;
         }
       }
@@ -43,19 +28,16 @@ export const whatsappSetupWizard: ChannelSetupWizard = {
           (accountId ? [accountId] : listWhatsAppAccountIds(cfg)).map(
             async (resolvedAccountId) => ({
               accountId: resolvedAccountId,
-              state: await readWhatsAppSetupLinkState(cfg, resolvedAccountId),
+              linked: await detectWhatsAppLinked(cfg, resolvedAccountId),
             }),
           ),
         )
-      ).find((entry) => entry.state === "linked" || entry.state === "unstable");
-      const labelAccountId = accountId ?? linkedAccountId?.accountId;
+      ).find((entry) => entry.linked)?.accountId;
+      const labelAccountId = accountId ?? linkedAccountId;
       const label = labelAccountId
         ? `WhatsApp (${labelAccountId === DEFAULT_ACCOUNT_ID ? "default" : labelAccountId})`
         : "WhatsApp";
-      const stateLabel = configured
-        ? formatWhatsAppWebAuthStatusState("linked")
-        : formatWhatsAppWebAuthStatusState(linkedAccountId?.state ?? "not-linked");
-      return [`${label}: ${stateLabel}`];
+      return [`${label}: ${configured ? "linked" : "not linked"}`];
     },
   },
   resolveShouldPromptAccountIds: ({ shouldPromptAccountIds }) => shouldPromptAccountIds,

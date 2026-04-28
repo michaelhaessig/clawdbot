@@ -1,50 +1,33 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const loadPluginRegistrySnapshotMock = vi.hoisted(() => vi.fn());
-const loadPluginManifestRegistryForInstalledIndexMock = vi.hoisted(() => vi.fn());
+const loadPluginManifestRegistryMock = vi.hoisted(() => vi.fn());
 
-vi.mock("./plugin-registry.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./plugin-registry.js")>()),
-  loadPluginRegistrySnapshot: loadPluginRegistrySnapshotMock,
-}));
-vi.mock("./manifest-registry-installed.js", () => ({
-  loadPluginManifestRegistryForInstalledIndex: loadPluginManifestRegistryForInstalledIndexMock,
+vi.mock("./manifest-registry.js", () => ({
+  loadPluginManifestRegistry: loadPluginManifestRegistryMock,
 }));
 
 afterEach(() => {
-  loadPluginRegistrySnapshotMock.mockReset();
-  loadPluginManifestRegistryForInstalledIndexMock.mockReset();
+  loadPluginManifestRegistryMock.mockReset();
 });
 
 describe("setup-registry runtime fallback", () => {
-  it("uses bundled registry cliBackends when the setup-registry runtime is unavailable", async () => {
-    loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [],
-      plugins: [
-        {
-          pluginId: "openai",
-          origin: "bundled",
-          enabled: true,
-        },
-        {
-          pluginId: "disabled",
-          origin: "bundled",
-          enabled: false,
-        },
-        {
-          pluginId: "local",
-          origin: "workspace",
-          enabled: true,
-        },
-      ],
-    });
-    loadPluginManifestRegistryForInstalledIndexMock.mockReturnValue({
+  it("uses bundled manifest cliBackends when the setup-registry runtime is unavailable", async () => {
+    loadPluginManifestRegistryMock.mockReturnValue({
       diagnostics: [],
       plugins: [
         {
           id: "openai",
           origin: "bundled",
-          cliBackends: ["Codex-CLI", "legacy-openai-cli"],
+          cliBackends: ["legacy-openai-cli"],
+          setup: {
+            cliBackends: ["Codex-CLI"],
+            requiresRuntime: true,
+          },
+        },
+        {
+          id: "local",
+          origin: "workspace",
+          cliBackends: ["local-cli"],
         },
       ],
     });
@@ -59,24 +42,22 @@ describe("setup-registry runtime fallback", () => {
       backend: { id: "Codex-CLI" },
     });
     expect(resolvePluginSetupCliBackendRuntime({ backend: "local-cli" })).toBeUndefined();
-    expect(resolvePluginSetupCliBackendRuntime({ backend: "disabled-cli" })).toBeUndefined();
-    expect(loadPluginRegistrySnapshotMock).toHaveBeenCalledTimes(1);
-    expect(loadPluginRegistrySnapshotMock).toHaveBeenCalledWith({ cache: true });
-    expect(loadPluginManifestRegistryForInstalledIndexMock).toHaveBeenCalledWith({
-      index: expect.objectContaining({
-        plugins: expect.arrayContaining([expect.objectContaining({ pluginId: "openai" })]),
-      }),
-    });
+    expect(loadPluginManifestRegistryMock).toHaveBeenCalledTimes(1);
+    expect(loadPluginManifestRegistryMock).toHaveBeenCalledWith({ cache: true });
   });
 
   it("preserves fail-closed setup lookup when the runtime module explicitly declines to resolve", async () => {
-    loadPluginRegistrySnapshotMock.mockReturnValue({
+    loadPluginManifestRegistryMock.mockReturnValue({
       diagnostics: [],
       plugins: [
         {
-          pluginId: "openai",
+          id: "openai",
           origin: "bundled",
-          enabled: true,
+          cliBackends: ["legacy-openai-cli"],
+          setup: {
+            cliBackends: ["Codex-CLI"],
+            requiresRuntime: true,
+          },
         },
       ],
     });
@@ -89,6 +70,6 @@ describe("setup-registry runtime fallback", () => {
     });
 
     expect(resolvePluginSetupCliBackendRuntime({ backend: "codex-cli" })).toBeUndefined();
-    expect(loadPluginRegistrySnapshotMock).not.toHaveBeenCalled();
+    expect(loadPluginManifestRegistryMock).not.toHaveBeenCalled();
   });
 });

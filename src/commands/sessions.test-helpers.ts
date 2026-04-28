@@ -18,7 +18,6 @@ const sessionsConfigState = vi.hoisted(() => ({
 }));
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: () => sessionsConfigState.loadConfig(),
   loadConfig: () => sessionsConfigState.loadConfig(),
 }));
 

@@ -1,4 +1,3 @@
-import { setSafeTimeout } from "../../utils/timer-delay.js";
 import type { DedupeEntry } from "../server-shared.js";
 
 export type AgentWaitTerminalSnapshot = {
@@ -195,7 +194,8 @@ export async function waitForTerminalGatewayDedupe(params: {
       return;
     }
 
-    timeoutHandle = setSafeTimeout(() => finish(null), params.timeoutMs);
+    const timeoutDelayMs = Math.max(1, Math.min(Math.floor(params.timeoutMs), 2_147_483_647));
+    timeoutHandle = setTimeout(() => finish(null), timeoutDelayMs);
     timeoutHandle.unref?.();
 
     onAbort = () => finish(null);

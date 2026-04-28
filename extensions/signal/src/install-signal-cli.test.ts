@@ -141,13 +141,6 @@ describe("extractSignalCliArchive", () => {
     }
   }
 
-  async function expectExtractedSignalCli(archivePath: string, extractDir: string) {
-    await extractSignalCliArchive(archivePath, extractDir, 5_000);
-
-    const extracted = await fs.readFile(path.join(extractDir, "root", "signal-cli"), "utf-8");
-    expect(extracted).toBe("bin");
-  }
-
   it("rejects zip slip path traversal", async () => {
     await withArchiveWorkspace(async (workDir) => {
       const archivePath = path.join(workDir, "bad.zip");
@@ -174,7 +167,10 @@ describe("extractSignalCliArchive", () => {
       zip.file("root/signal-cli", "bin");
       await fs.writeFile(archivePath, await zip.generateAsync({ type: "nodebuffer" }));
 
-      await expectExtractedSignalCli(archivePath, extractDir);
+      await extractSignalCliArchive(archivePath, extractDir, 5_000);
+
+      const extracted = await fs.readFile(path.join(extractDir, "root", "signal-cli"), "utf-8");
+      expect(extracted).toBe("bin");
     });
   });
 
@@ -188,7 +184,10 @@ describe("extractSignalCliArchive", () => {
       await tar.c({ cwd: workDir, file: archivePath, gzip: true }, ["root"]);
 
       await fs.mkdir(extractDir, { recursive: true });
-      await expectExtractedSignalCli(archivePath, extractDir);
+      await extractSignalCliArchive(archivePath, extractDir, 5_000);
+
+      const extracted = await fs.readFile(path.join(extractDir, "root", "signal-cli"), "utf-8");
+      expect(extracted).toBe("bin");
     });
   });
 });

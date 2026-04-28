@@ -76,9 +76,7 @@ export function resolveRunWorkspaceDir(params: {
   sessionKey?: string;
   agentId?: string;
   config?: OpenClawConfig;
-  env?: NodeJS.ProcessEnv;
 }): ResolveRunWorkspaceResult {
-  const env = params.env ?? process.env;
   const requested = params.workspaceDir;
   const { agentId, agentIdSource } = resolveRunAgentId({
     sessionKey: params.sessionKey,
@@ -93,7 +91,7 @@ export function resolveRunWorkspaceDir(params: {
         logWarn("Control/format characters stripped from workspaceDir (OC-19 hardening).");
       }
       return {
-        workspaceDir: resolveUserPath(sanitized, env),
+        workspaceDir: resolveUserPath(sanitized),
         usedFallback: false,
         agentId,
         agentIdSource,
@@ -103,13 +101,13 @@ export function resolveRunWorkspaceDir(params: {
 
   const fallbackReason: WorkspaceFallbackReason =
     requested == null ? "missing" : typeof requested === "string" ? "blank" : "invalid_type";
-  const fallbackWorkspace = resolveAgentWorkspaceDir(params.config ?? {}, agentId, env);
+  const fallbackWorkspace = resolveAgentWorkspaceDir(params.config ?? {}, agentId);
   const sanitizedFallback = sanitizeForPromptLiteral(fallbackWorkspace);
   if (sanitizedFallback !== fallbackWorkspace) {
     logWarn("Control/format characters stripped from fallback workspaceDir (OC-19 hardening).");
   }
   return {
-    workspaceDir: resolveUserPath(sanitizedFallback, env),
+    workspaceDir: resolveUserPath(sanitizedFallback),
     usedFallback: true,
     fallbackReason,
     agentId,

@@ -103,7 +103,7 @@ vi.mock("openclaw/plugin-sdk/command-auth", () => ({
       hasControlCommand && authorizers.some((entry) => entry.allowed || !entry.configured),
   }),
 }));
-vi.mock("openclaw/plugin-sdk/runtime-group-policy", () => ({
+vi.mock("openclaw/plugin-sdk/config-runtime", () => ({
   resolveAllowlistProviderRuntimeGroupPolicy: ({
     groupPolicy,
     defaultGroupPolicy,

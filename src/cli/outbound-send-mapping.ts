@@ -1,22 +1,12 @@
-import {
-  resolveLegacyOutboundSendDepKeys,
-  type OutboundSendDeps,
-} from "../infra/outbound/send-deps.js";
+import { normalizeAnyChannelId } from "../channels/registry.js";
+import type { OutboundSendDeps } from "../infra/outbound/send-deps.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 /**
  * CLI-internal send function sources, keyed by channel ID.
  * Each value is a lazily-loaded send function for that channel.
  */
-export const CLI_OUTBOUND_SEND_FACTORY: unique symbol = Symbol.for(
-  "openclaw.cliOutboundSendFactory",
-) as never;
-
-export type CliOutboundSendFactory = (channelId: string) => unknown;
-export type CliOutboundSendSource = {
-  [channelId: string]: unknown;
-  [CLI_OUTBOUND_SEND_FACTORY]?: CliOutboundSendFactory;
-};
+export type CliOutboundSendSource = { [channelId: string]: unknown };
 
 function normalizeLegacyChannelStem(raw: string): string {
   const normalized = normalizeLowercaseStringOrEmpty(
@@ -34,16 +24,24 @@ function resolveChannelIdFromLegacySourceKey(key: string): string | undefined {
     return undefined;
   }
   const normalizedStem = normalizeLegacyChannelStem(match[1] ?? "");
-  return normalizedStem || undefined;
+  return normalizeAnyChannelId(normalizedStem) ?? (normalizedStem || undefined);
 }
 
-function resolveChannelIdFromLegacyOutboundKey(key: string): string | undefined {
-  const match = key.match(/^send(.+)$/);
-  if (!match) {
-    return undefined;
+function resolveLegacyDepKeysForChannel(channelId: string): string[] {
+  const compact = channelId.replace(/[^a-z0-9]+/gi, "");
+  if (!compact) {
+    return [];
   }
-  const normalizedStem = normalizeLegacyChannelStem(match[1] ?? "");
-  return normalizedStem || undefined;
+  const pascal = compact.charAt(0).toUpperCase() + compact.slice(1);
+  const keys = new Set<string>();
+  keys.add(`send${pascal}`);
+  if (pascal.startsWith("I") && pascal.length > 1) {
+    keys.add(`sendI${pascal.slice(1)}`);
+  }
+  if (pascal.startsWith("Ms") && pascal.length > 2) {
+    keys.add(`sendMS${pascal.slice(2)}`);
+  }
+  return [...keys];
 }
 
 /**
@@ -52,7 +50,6 @@ function resolveChannelIdFromLegacyOutboundKey(key: string): string | undefined 
  */
 export function createOutboundSendDepsFromCliSource(deps: CliOutboundSendSource): OutboundSendDeps {
   const outbound: OutboundSendDeps = { ...deps };
-  const sendFactory = deps[CLI_OUTBOUND_SEND_FACTORY];
 
   for (const legacySourceKey of Object.keys(deps)) {
     const channelId = resolveChannelIdFromLegacySourceKey(legacySourceKey);
@@ -70,43 +67,12 @@ export function createOutboundSendDepsFromCliSource(deps: CliOutboundSendSource)
     if (sourceValue === undefined) {
       continue;
     }
-    for (const legacyDepKey of resolveLegacyOutboundSendDepKeys(channelId)) {
+    for (const legacyDepKey of resolveLegacyDepKeysForChannel(channelId)) {
       if (outbound[legacyDepKey] === undefined) {
         outbound[legacyDepKey] = sourceValue;
       }
     }
   }
 
-  if (!sendFactory) {
-    return outbound;
-  }
-
-  const resolveFactoryValue = (key: string): unknown => {
-    const channelId =
-      outbound[key] === undefined ? (resolveChannelIdFromLegacyOutboundKey(key) ?? key) : key;
-    if (!channelId || channelId === "then" || channelId === "toJSON") {
-      return undefined;
-    }
-    const value = sendFactory(channelId);
-    if (value !== undefined) {
-      outbound[channelId] = value;
-      for (const legacyDepKey of resolveLegacyOutboundSendDepKeys(channelId)) {
-        outbound[legacyDepKey] ??= value;
-      }
-    }
-    return value;
-  };
-
-  return new Proxy(outbound, {
-    get(target, property, receiver) {
-      if (typeof property !== "string") {
-        return Reflect.get(target, property, receiver);
-      }
-      const existing = Reflect.get(target, property, receiver);
-      if (existing !== undefined) {
-        return existing;
-      }
-      return resolveFactoryValue(property);
-    },
-  });
+  return outbound;
 }

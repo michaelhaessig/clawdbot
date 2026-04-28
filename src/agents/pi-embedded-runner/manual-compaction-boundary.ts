@@ -40,7 +40,6 @@ function replaceLatestCompactionBoundary(params: {
 
 export async function hardenManualCompactionBoundary(params: {
   sessionFile: string;
-  preserveRecentTail?: boolean;
 }): Promise<HardenedManualCompactionBoundary> {
   const sessionManager = SessionManager.open(params.sessionFile) as Partial<SessionManagerLike>;
   if (
@@ -61,19 +60,6 @@ export async function hardenManualCompactionBoundary(params: {
     const sessionContext = sessionManager.buildSessionContext();
     return {
       applied: false,
-      leafId:
-        typeof sessionManager.getLeafId === "function"
-          ? (sessionManager.getLeafId() ?? undefined)
-          : undefined,
-      messages: sessionContext.messages,
-    };
-  }
-
-  if (params.preserveRecentTail) {
-    const sessionContext = sessionManager.buildSessionContext();
-    return {
-      applied: false,
-      firstKeptEntryId: leaf.firstKeptEntryId,
       leafId:
         typeof sessionManager.getLeafId === "function"
           ? (sessionManager.getLeafId() ?? undefined)

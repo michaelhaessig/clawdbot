@@ -5,8 +5,6 @@ export type MemorySearchResult = {
   startLine: number;
   endLine: number;
   score: number;
-  vectorScore?: number;
-  textScore?: number;
   snippet: string;
   source: MemorySource;
   citation?: string;
@@ -15,10 +13,6 @@ export type MemorySearchResult = {
 export type MemoryEmbeddingProbeResult = {
   ok: boolean;
   error?: string;
-  checked?: boolean;
-  cached?: boolean;
-  checkedAtMs?: number;
-  cacheExpiresAtMs?: number;
 };
 
 export type MemorySyncProgressUpdate = {
@@ -67,12 +61,7 @@ export type MemoryProviderStatus = {
 export interface MemorySearchManager {
   search(
     query: string,
-    opts?: {
-      maxResults?: number;
-      minScore?: number;
-      sessionKey?: string;
-      sources?: MemorySource[];
-    },
+    opts?: { maxResults?: number; minScore?: number; sessionKey?: string },
   ): Promise<MemorySearchResult[]>;
   readFile(params: {
     relPath: string;
@@ -86,7 +75,6 @@ export interface MemorySearchManager {
     sessionFiles?: string[];
     progress?: (update: MemorySyncProgressUpdate) => void;
   }): Promise<void>;
-  getCachedEmbeddingAvailability?(): MemoryEmbeddingProbeResult | null;
   probeEmbeddingAvailability(): Promise<MemoryEmbeddingProbeResult>;
   probeVectorAvailability(): Promise<boolean>;
   close?(): Promise<void>;

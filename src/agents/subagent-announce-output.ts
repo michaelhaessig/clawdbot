@@ -6,7 +6,7 @@ import {
 } from "./subagent-announce-capture.js";
 import {
   callGateway,
-  getRuntimeConfig,
+  loadConfig,
   loadSessionStore,
   resolveAgentIdFromSessionKey,
   resolveStorePath,
@@ -19,13 +19,13 @@ const FAST_TEST_RETRY_INTERVAL_MS = 8;
 
 type SubagentAnnounceOutputDeps = {
   callGateway: typeof callGateway;
-  getRuntimeConfig: typeof getRuntimeConfig;
+  loadConfig: typeof loadConfig;
   readLatestAssistantReply: typeof readLatestAssistantReply;
 };
 
 const defaultSubagentAnnounceOutputDeps: SubagentAnnounceOutputDeps = {
   callGateway,
-  getRuntimeConfig,
+  loadConfig,
   readLatestAssistantReply,
 };
 
@@ -58,36 +58,7 @@ export type AgentWaitResult = {
 export type SubagentRunOutcome = {
   status: "ok" | "error" | "timeout" | "unknown";
   error?: string;
-  startedAt?: number;
-  endedAt?: number;
-  elapsedMs?: number;
 };
-
-function readFiniteNumber(value: number | undefined): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-export function withSubagentOutcomeTiming(
-  outcome: SubagentRunOutcome,
-  timing: {
-    startedAt?: number;
-    endedAt?: number;
-  },
-): SubagentRunOutcome {
-  const startedAt = readFiniteNumber(timing.startedAt) ?? readFiniteNumber(outcome.startedAt);
-  const endedAt = readFiniteNumber(timing.endedAt) ?? readFiniteNumber(outcome.endedAt);
-  const nextTiming: Pick<SubagentRunOutcome, "startedAt" | "endedAt" | "elapsedMs"> = {};
-  if (typeof startedAt === "number") {
-    nextTiming.startedAt = startedAt;
-  }
-  if (typeof endedAt === "number") {
-    nextTiming.endedAt = endedAt;
-  }
-  if (typeof startedAt === "number" && typeof endedAt === "number") {
-    nextTiming.elapsedMs = Math.max(0, endedAt - startedAt);
-  }
-  return { ...outcome, ...nextTiming };
-}
 
 function extractToolResultText(content: unknown): string {
   if (typeof content === "string") {
@@ -152,9 +123,6 @@ function extractSubagentOutputText(message: unknown): string {
   const role = (message as { role?: unknown }).role;
   const content = (message as { content?: unknown }).content;
   if (role === "assistant") {
-    if (typeof content === "string") {
-      return sanitizeTextContent(content);
-    }
     return extractAssistantText(message) ?? "";
   }
   if (role === "toolResult" || role === "tool") {
@@ -329,36 +297,33 @@ export function applySubagentWaitOutcome(params: {
     startedAt: params.startedAt,
     endedAt: params.endedAt,
   };
-  if (typeof params.wait?.startedAt === "number" && typeof next.startedAt !== "number") {
+  const waitError = typeof params.wait?.error === "string" ? params.wait.error : undefined;
+  if (params.wait?.status === "timeout") {
+    next.outcome = { status: "timeout" };
+  } else if (params.wait?.status === "error") {
+    next.outcome = { status: "error", error: waitError };
+  } else if (params.wait?.status === "ok") {
+    next.outcome = { status: "ok" };
+  }
+  if (typeof params.wait?.startedAt === "number" && !next.startedAt) {
     next.startedAt = params.wait.startedAt;
   }
-  if (typeof params.wait?.endedAt === "number" && typeof next.endedAt !== "number") {
+  if (typeof params.wait?.endedAt === "number" && !next.endedAt) {
     next.endedAt = params.wait.endedAt;
   }
-  const waitError = typeof params.wait?.error === "string" ? params.wait.error : undefined;
-  let outcome = next.outcome;
-  if (params.wait?.status === "timeout") {
-    outcome = { status: "timeout" };
-  } else if (params.wait?.status === "error") {
-    outcome = { status: "error", error: waitError };
-  } else if (params.wait?.status === "ok") {
-    outcome = { status: "ok" };
-  }
-  next.outcome = outcome ? withSubagentOutcomeTiming(outcome, next) : undefined;
   return next;
 }
 
 export async function captureSubagentCompletionReply(
   sessionKey: string,
-  options?: { waitForReply?: boolean; outcome?: SubagentRunOutcome },
+  options?: { waitForReply?: boolean },
 ): Promise<string | undefined> {
   return await captureSubagentCompletionReplyUsing({
     sessionKey,
     waitForReply: options?.waitForReply,
     maxWaitMs: isFastTestMode() ? 50 : 1_500,
     retryIntervalMs: isFastTestMode() ? FAST_TEST_RETRY_INTERVAL_MS : 100,
-    readSubagentOutput: async (nextSessionKey) =>
-      await readSubagentOutput(nextSessionKey, options?.outcome),
+    readSubagentOutput: async (nextSessionKey) => await readSubagentOutput(nextSessionKey),
   });
 }
 
@@ -523,7 +488,7 @@ export async function buildCompactAnnounceStatsLine(params: {
   startedAt?: number;
   endedAt?: number;
 }) {
-  const cfg = subagentAnnounceOutputDeps.getRuntimeConfig();
+  const cfg = subagentAnnounceOutputDeps.loadConfig();
   const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
   const storePath = resolveStorePath(cfg.session?.store, { agentId });
   let entry = loadSessionStore(storePath)[params.sessionKey];

@@ -5,8 +5,7 @@ import {
   completeTaskRunByRunId,
   createRunningTaskRun,
   failTaskRunByRunId,
-} from "../../tasks/detached-task-runtime.js";
-import { createCronExecutionId } from "../run-id.js";
+} from "../../tasks/task-executor.js";
 import type { CronJob, CronJobCreate, CronJobPatch } from "../types.js";
 import {
   applyJobPatch,
@@ -21,13 +20,6 @@ import {
   recomputeNextRuns,
   recomputeNextRunsForMaintenance,
 } from "./jobs.js";
-import type {
-  CronJobsEnabledFilter,
-  CronJobsSortBy,
-  CronListPageOptions,
-  CronListPageResult,
-  CronSortDir,
-} from "./list-page-types.js";
 import { locked } from "./locked.js";
 import type { CronServiceState } from "./state.js";
 import { ensureLoaded, persist, warnIfDisabled } from "./store.js";
@@ -42,55 +34,28 @@ import {
   wake,
 } from "./timer.js";
 
-const STARTUP_INTERRUPTED_ERROR = "cron: job interrupted by gateway restart";
+type CronJobsEnabledFilter = "all" | "enabled" | "disabled";
+type CronJobsSortBy = "nextRunAtMs" | "updatedAtMs" | "name";
+type CronSortDir = "asc" | "desc";
 
-type InterruptedStartupRun = {
-  jobId: string;
-  runAtMs: number;
-  durationMs: number;
+export type CronListPageOptions = {
+  includeDisabled?: boolean;
+  limit?: number;
+  offset?: number;
+  query?: string;
+  enabled?: CronJobsEnabledFilter;
+  sortBy?: CronJobsSortBy;
+  sortDir?: CronSortDir;
 };
 
-function markInterruptedStartupRun(params: {
-  state: CronServiceState;
-  job: CronJob;
-  runningAtMs: number;
-  nowMs: number;
-}): InterruptedStartupRun {
-  const { job, runningAtMs, nowMs } = params;
-  const previousErrors =
-    typeof job.state.consecutiveErrors === "number" && Number.isFinite(job.state.consecutiveErrors)
-      ? Math.max(0, Math.floor(job.state.consecutiveErrors))
-      : 0;
-
-  params.state.deps.log.warn(
-    { jobId: job.id, runningAtMs },
-    "cron: marking interrupted running job failed on startup",
-  );
-
-  job.state.runningAtMs = undefined;
-  job.state.lastRunAtMs = runningAtMs;
-  job.state.lastRunStatus = "error";
-  job.state.lastStatus = "error";
-  job.state.lastError = STARTUP_INTERRUPTED_ERROR;
-  job.state.lastDurationMs = Math.max(0, nowMs - runningAtMs);
-  job.state.consecutiveErrors = previousErrors + 1;
-  job.state.lastDelivered = false;
-  job.state.lastDeliveryStatus = "unknown";
-  job.state.lastDeliveryError = STARTUP_INTERRUPTED_ERROR;
-  job.state.nextRunAtMs = undefined;
-  job.updatedAtMs = nowMs;
-
-  if (job.schedule.kind === "at") {
-    job.enabled = false;
-  }
-
-  return {
-    jobId: job.id,
-    runAtMs: runningAtMs,
-    durationMs: job.state.lastDurationMs,
-  };
-}
-
+export type CronListPageResult = {
+  jobs: ReturnType<typeof sortJobs>;
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
 function mergeManualRunSnapshotAfterReload(params: {
   state: CronServiceState;
   jobId: string;
@@ -139,34 +104,34 @@ export async function start(state: CronServiceState) {
     return;
   }
 
-  const interruptedJobIds = new Set<string>();
-  const interruptedRuns: InterruptedStartupRun[] = [];
-  let markedAnyInterruptedRun = false;
+  const interruptedOneShotIds = new Set<string>();
+  let clearedAnyRunningMarker = false;
   await locked(state, async () => {
     await ensureLoaded(state, { skipRecompute: true });
     const jobs = state.store?.jobs ?? [];
     for (const job of jobs) {
-      job.state ??= {};
       if (typeof job.state.runningAtMs === "number") {
-        const nowMs = state.deps.nowMs();
-        const interrupted = markInterruptedStartupRun({
-          state,
-          job,
-          runningAtMs: job.state.runningAtMs,
-          nowMs,
-        });
-        interruptedJobIds.add(job.id);
-        interruptedRuns.push(interrupted);
-        markedAnyInterruptedRun = true;
+        state.deps.log.warn(
+          { jobId: job.id, runningAtMs: job.state.runningAtMs },
+          "cron: clearing stale running marker on startup",
+        );
+        job.state.runningAtMs = undefined;
+        clearedAnyRunningMarker = true;
+        // One-shot jobs are not retried after interruption; recurring jobs
+        // (cron/every) are eligible for startup catch-up so they don't
+        // require a second restart to recover (#60495).
+        if (job.schedule.kind === "at") {
+          interruptedOneShotIds.add(job.id);
+        }
       }
     }
-    if (markedAnyInterruptedRun) {
+    if (clearedAnyRunningMarker) {
       await persist(state);
     }
   });
 
   await runMissedJobs(state, {
-    skipJobIds: interruptedJobIds.size > 0 ? interruptedJobIds : undefined,
+    skipJobIds: interruptedOneShotIds.size > 0 ? interruptedOneShotIds : undefined,
   });
 
   await locked(state, async () => {
@@ -177,21 +142,6 @@ export async function start(state: CronServiceState) {
     const changed = recomputeNextRuns(state);
     if (changed) {
       await persist(state);
-    }
-    for (const interrupted of interruptedRuns) {
-      const job = state.store?.jobs.find((entry) => entry.id === interrupted.jobId);
-      emit(state, {
-        jobId: interrupted.jobId,
-        action: "finished",
-        status: "error",
-        error: STARTUP_INTERRUPTED_ERROR,
-        delivered: false,
-        deliveryStatus: "unknown",
-        deliveryError: STARTUP_INTERRUPTED_ERROR,
-        runAtMs: interrupted.runAtMs,
-        durationMs: interrupted.durationMs,
-        nextRunAtMs: job?.state.nextRunAtMs,
-      });
     }
     armTimer(state);
     state.deps.log.info(
@@ -444,6 +394,10 @@ type ManualRunPreflightResult =
 
 let nextManualRunId = 1;
 
+function createCronTaskRunId(jobId: string, startedAt: number): string {
+  return `cron:${jobId}:${startedAt}`;
+}
+
 async function skipInvalidPersistedManualRun(params: {
   state: CronServiceState;
   job: CronJob;
@@ -491,7 +445,7 @@ function tryCreateManualTaskRun(params: {
   job: CronJob;
   startedAt: number;
 }): string | undefined {
-  const runId = createCronExecutionId(params.job.id, params.startedAt);
+  const runId = createCronTaskRunId(params.job.id, params.startedAt);
   try {
     createRunningTaskRun({
       runtime: "cron",
@@ -643,7 +597,7 @@ async function prepareManualRun(
       job,
       startedAt: preflight.now,
     });
-    const executionJob = structuredClone(job);
+    const executionJob = JSON.parse(JSON.stringify(job)) as CronJob;
     return {
       ok: true,
       ran: true,
@@ -707,7 +661,6 @@ async function finishPreparedManualRun(
       delivered: coreResult.delivered,
       deliveryStatus: job.state.lastDeliveryStatus,
       deliveryError: job.state.lastDeliveryError,
-      delivery: coreResult.delivery,
       sessionId: coreResult.sessionId,
       sessionKey: coreResult.sessionKey,
       runAtMs: startedAt,

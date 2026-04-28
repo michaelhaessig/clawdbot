@@ -158,7 +158,6 @@ describe("agent-runner-utils", () => {
         Provider: "OpenAI",
         To: "channel-1",
         SenderId: "sender-1",
-        MemberRoleIds: ["admin", " ", "operator"],
       },
       hasRepliedRef: undefined,
       provider: "anthropic",
@@ -174,7 +173,6 @@ describe("agent-runner-utils", () => {
       agentId: run.agentId,
       messageProvider: "openai",
       messageTo: "channel-1",
-      memberRoleIds: ["admin", "operator"],
     });
     expect(resolved.senderContext).toEqual({
       senderId: "sender-1",

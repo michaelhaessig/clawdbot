@@ -116,32 +116,19 @@ final class MacNodeModeCoordinator {
         }
     }
 
-    nonisolated static func resolvedCaps(
-        browserControlEnabled: Bool,
-        cameraEnabled: Bool,
-        locationMode: OpenClawLocationMode,
-        connectionMode: AppState.ConnectionMode) -> [String]
-    {
+    private func currentCaps() -> [String] {
         var caps: [String] = [OpenClawCapability.canvas.rawValue, OpenClawCapability.screen.rawValue]
-        if browserControlEnabled, connectionMode == .local {
+        if OpenClawConfigFile.browserControlEnabled() {
             caps.append(OpenClawCapability.browser.rawValue)
         }
-        if cameraEnabled {
+        if UserDefaults.standard.object(forKey: cameraEnabledKey) as? Bool ?? false {
             caps.append(OpenClawCapability.camera.rawValue)
         }
-        if locationMode != .off {
+        let rawLocationMode = UserDefaults.standard.string(forKey: locationModeKey) ?? "off"
+        if OpenClawLocationMode(rawValue: rawLocationMode) != .off {
             caps.append(OpenClawCapability.location.rawValue)
         }
         return caps
-    }
-
-    private func currentCaps() -> [String] {
-        let rawLocationMode = UserDefaults.standard.string(forKey: locationModeKey) ?? "off"
-        return Self.resolvedCaps(
-            browserControlEnabled: OpenClawConfigFile.browserControlEnabled(),
-            cameraEnabled: UserDefaults.standard.object(forKey: cameraEnabledKey) as? Bool ?? false,
-            locationMode: OpenClawLocationMode(rawValue: rawLocationMode) ?? .off,
-            connectionMode: AppStateStore.shared.connectionMode)
     }
 
     private func currentPermissions() async -> [String: Bool] {
@@ -149,7 +136,7 @@ final class MacNodeModeCoordinator {
         return Dictionary(uniqueKeysWithValues: statuses.map { ($0.key.rawValue, $0.value) })
     }
 
-    nonisolated static func resolvedCommands(caps: [String]) -> [String] {
+    private func currentCommands(caps: [String]) -> [String] {
         var commands: [String] = [
             OpenClawCanvasCommand.present.rawValue,
             OpenClawCanvasCommand.hide.rawValue,
@@ -182,10 +169,6 @@ final class MacNodeModeCoordinator {
         }
 
         return commands
-    }
-
-    private func currentCommands(caps: [String]) -> [String] {
-        Self.resolvedCommands(caps: caps)
     }
 
     private func buildSessionBox(url: URL) -> WebSocketSessionBox? {

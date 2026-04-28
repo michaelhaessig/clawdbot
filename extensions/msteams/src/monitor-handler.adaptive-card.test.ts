@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig, RuntimeEnv } from "../runtime-api.js";
+import type { OpenClawConfig, PluginRuntime, RuntimeEnv } from "../runtime-api.js";
 import type { MSTeamsConversationStore } from "./conversation-store.js";
 import {
   type MSTeamsActivityHandler,
   type MSTeamsMessageHandlerDeps,
   registerMSTeamsHandlers,
 } from "./monitor-handler.js";
-import { installMSTeamsTestRuntime } from "./monitor-handler.test-helpers.js";
+import { setMSTeamsRuntime } from "./runtime.js";
 import type { MSTeamsTurnContext } from "./sdk-types.js";
 
 const runtimeApiMockState = vi.hoisted(() => ({
@@ -17,8 +17,10 @@ const runtimeApiMockState = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("openclaw/plugin-sdk/inbound-reply-dispatch", () => {
+vi.mock("../runtime-api.js", async () => {
+  const actual = await vi.importActual<typeof import("../runtime-api.js")>("../runtime-api.js");
   return {
+    ...actual,
     dispatchReplyFromConfigWithSettledDispatcher:
       runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher,
   };
@@ -33,7 +35,43 @@ vi.mock("./reply-dispatcher.js", () => ({
 }));
 
 function createDeps(): MSTeamsMessageHandlerDeps {
-  installMSTeamsTestRuntime();
+  setMSTeamsRuntime({
+    logging: { shouldLogVerbose: () => false },
+    system: { enqueueSystemEvent: vi.fn() },
+    channel: {
+      debounce: {
+        resolveInboundDebounceMs: () => 0,
+        createInboundDebouncer: <T>(params: {
+          onFlush: (entries: T[]) => Promise<void>;
+        }): { enqueue: (entry: T) => Promise<void> } => ({
+          enqueue: async (entry: T) => {
+            await params.onFlush([entry]);
+          },
+        }),
+      },
+      pairing: {
+        readAllowFromStore: vi.fn(async () => []),
+        upsertPairingRequest: vi.fn(async () => null),
+      },
+      text: {
+        hasControlCommand: () => false,
+      },
+      routing: {
+        resolveAgentRoute: ({ peer }: { peer: { kind: string; id: string } }) => ({
+          sessionKey: `msteams:${peer.kind}:${peer.id}`,
+          agentId: "default",
+          accountId: "default",
+        }),
+      },
+      reply: {
+        formatAgentEnvelope: ({ body }: { body: string }) => body,
+        finalizeInboundContext: <T extends Record<string, unknown>>(ctx: T) => ctx,
+      },
+      session: {
+        recordInboundSession: vi.fn(async () => undefined),
+      },
+    },
+  } as unknown as PluginRuntime);
 
   return {
     cfg: {} as OpenClawConfig,

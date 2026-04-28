@@ -2,7 +2,7 @@
 summary: "CLI reference for `openclaw docs` (search the live docs index)"
 read_when:
   - You want to search the live OpenClaw docs from the terminal
-title: "Docs"
+title: "docs"
 ---
 
 # `openclaw docs`
@@ -26,7 +26,3 @@ Notes:
 
 - With no query, `openclaw docs` opens the live docs search entrypoint.
 - Multi-word queries are passed through as one search request.
-
-## Related
-
-- [CLI reference](/cli)

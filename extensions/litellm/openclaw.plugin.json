@@ -21,9 +21,6 @@
       "cliDescription": "LiteLLM API key"
     }
   ],
-  "contracts": {
-    "imageGenerationProviders": ["litellm"]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

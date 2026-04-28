@@ -26,9 +26,7 @@ const createLocationMessage = (location: {
 });
 
 describe("deliverLineAutoReply", () => {
-  const LINE_TEST_CFG = { channels: { line: { accounts: { acc: {} } } } };
   const baseDeliveryParams = {
-    cfg: LINE_TEST_CFG,
     to: "line:user:1",
     replyToken: "token",
     replyTokenUsed: false,
@@ -91,14 +89,13 @@ describe("deliverLineAutoReply", () => {
     expect(result.replyTokenUsed).toBe(true);
     expect(replyMessageLine).toHaveBeenCalledTimes(1);
     expect(replyMessageLine).toHaveBeenCalledWith("token", [{ type: "text", text: "hello" }], {
-      cfg: LINE_TEST_CFG,
       accountId: "acc",
     });
     expect(pushMessagesLine).toHaveBeenCalledTimes(1);
     expect(pushMessagesLine).toHaveBeenCalledWith(
       "line:user:1",
       [createFlexMessage("Card", { type: "bubble" })],
-      { cfg: LINE_TEST_CFG, accountId: "acc" },
+      { accountId: "acc" },
     );
     expect(createQuickReplyItems).not.toHaveBeenCalled();
   });
@@ -131,7 +128,7 @@ describe("deliverLineAutoReply", () => {
           quickReply: { items: ["A"] },
         },
       ],
-      { cfg: LINE_TEST_CFG, accountId: "acc" },
+      { accountId: "acc" },
     );
     expect(pushMessagesLine).not.toHaveBeenCalled();
     expect(createQuickReplyItems).toHaveBeenCalledWith(["A"]);
@@ -163,7 +160,7 @@ describe("deliverLineAutoReply", () => {
     expect(pushMessagesLine).toHaveBeenCalledWith(
       "line:user:1",
       [createFlexMessage("Card", { type: "bubble" })],
-      { cfg: LINE_TEST_CFG, accountId: "acc" },
+      { accountId: "acc" },
     );
     expect(replyMessageLine).toHaveBeenCalledWith(
       "token",
@@ -174,7 +171,7 @@ describe("deliverLineAutoReply", () => {
           quickReply: { items: ["A"] },
         },
       ],
-      { cfg: LINE_TEST_CFG, accountId: "acc" },
+      { accountId: "acc" },
     );
     const pushOrder = pushMessagesLine.mock.invocationCallOrder[0];
     const replyOrder = replyMessageLine.mock.invocationCallOrder[0];
@@ -206,7 +203,7 @@ describe("deliverLineAutoReply", () => {
     expect(pushMessagesLine).toHaveBeenCalledWith(
       "line:user:1",
       [createFlexMessage("Card", { type: "bubble" })],
-      { cfg: LINE_TEST_CFG, accountId: "acc" },
+      { accountId: "acc" },
     );
   });
 });

@@ -14,32 +14,6 @@ import {
 
 installQueueRuntimeErrorSilencer();
 
-const collectSettings: QueueSettings = {
-  mode: "collect",
-  debounceMs: 0,
-  cap: 50,
-  dropPolicy: "summarize",
-};
-
-function createFollowupCollector(expectedCalls = 1): {
-  calls: FollowupRun[];
-  done: ReturnType<typeof createDeferred<void>>;
-  runFollowup: (run: FollowupRun) => Promise<void>;
-} {
-  const calls: FollowupRun[] = [];
-  const done = createDeferred<void>();
-  return {
-    calls,
-    done,
-    runFollowup: async (run: FollowupRun) => {
-      calls.push(run);
-      if (calls.length >= expectedCalls) {
-        done.resolve();
-      }
-    },
-  };
-}
-
 describe("followup queue deduplication", () => {
   beforeEach(() => {
     resetRecentQueuedMessageIdDedupe();
@@ -47,7 +21,21 @@ describe("followup queue deduplication", () => {
 
   it("deduplicates messages with same Discord message_id", async () => {
     const key = `test-dedup-message-id-${Date.now()}`;
-    const { calls, done, runFollowup } = createFollowupCollector();
+    const calls: FollowupRun[] = [];
+    const done = createDeferred<void>();
+    const expectedCalls = 1;
+    const runFollowup = async (run: FollowupRun) => {
+      calls.push(run);
+      if (calls.length >= expectedCalls) {
+        done.resolve();
+      }
+    };
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -57,7 +45,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "discord",
         originatingTo: "channel:123",
       }),
-      collectSettings,
+      settings,
     );
     expect(first).toBe(true);
 
@@ -69,7 +57,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "discord",
         originatingTo: "channel:123",
       }),
-      collectSettings,
+      settings,
     );
     expect(second).toBe(false);
 
@@ -81,7 +69,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "discord",
         originatingTo: "channel:123",
       }),
-      collectSettings,
+      settings,
     );
     expect(third).toBe(true);
 
@@ -92,7 +80,18 @@ describe("followup queue deduplication", () => {
 
   it("deduplicates same message_id after queue drain restarts", async () => {
     const key = `test-dedup-after-drain-${Date.now()}`;
-    const { calls, done, runFollowup } = createFollowupCollector();
+    const calls: FollowupRun[] = [];
+    const done = createDeferred<void>();
+    const runFollowup = async (run: FollowupRun) => {
+      calls.push(run);
+      done.resolve();
+    };
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -102,7 +101,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "signal",
         originatingTo: "+10000000000",
       }),
-      collectSettings,
+      settings,
     );
     expect(first).toBe(true);
 
@@ -117,7 +116,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "signal",
         originatingTo: "+10000000000",
       }),
-      collectSettings,
+      settings,
     );
 
     expect(redelivery).toBe(false);
@@ -135,7 +134,18 @@ describe("followup queue deduplication", () => {
     );
     const { clearSessionQueues } = await import("./queue.js");
     const key = `test-dedup-cross-module-${Date.now()}`;
-    const { calls, done, runFollowup } = createFollowupCollector();
+    const calls: FollowupRun[] = [];
+    const done = createDeferred<void>();
+    const runFollowup = async (run: FollowupRun) => {
+      calls.push(run);
+      done.resolve();
+    };
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     enqueueA.resetRecentQueuedMessageIdDedupe();
     enqueueB.resetRecentQueuedMessageIdDedupe();
@@ -150,7 +160,7 @@ describe("followup queue deduplication", () => {
             originatingChannel: "signal",
             originatingTo: "+10000000000",
           }),
-          collectSettings,
+          settings,
         ),
       ).toBe(true);
 
@@ -167,7 +177,7 @@ describe("followup queue deduplication", () => {
             originatingChannel: "signal",
             originatingTo: "+10000000000",
           }),
-          collectSettings,
+          settings,
         ),
       ).toBe(false);
       expect(calls).toHaveLength(1);
@@ -180,7 +190,18 @@ describe("followup queue deduplication", () => {
 
   it("does not collide recent message-id keys when routing contains delimiters", async () => {
     const key = `test-dedup-key-collision-${Date.now()}`;
-    const { done, runFollowup } = createFollowupCollector();
+    const calls: FollowupRun[] = [];
+    const done = createDeferred<void>();
+    const runFollowup = async (run: FollowupRun) => {
+      calls.push(run);
+      done.resolve();
+    };
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -190,7 +211,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "signal|group",
         originatingTo: "peer",
       }),
-      collectSettings,
+      settings,
     );
     expect(first).toBe(true);
 
@@ -205,13 +226,19 @@ describe("followup queue deduplication", () => {
         originatingChannel: "signal",
         originatingTo: "group|peer",
       }),
-      collectSettings,
+      settings,
     );
     expect(second).toBe(true);
   });
 
   it("deduplicates exact prompt when routing matches and no message id", async () => {
     const key = `test-dedup-whatsapp-${Date.now()}`;
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -220,7 +247,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
     );
     expect(first).toBe(true);
 
@@ -231,7 +258,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
     );
     expect(second).toBe(true);
 
@@ -242,13 +269,19 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
     );
     expect(third).toBe(true);
   });
 
   it("does not deduplicate across different providers without message id", async () => {
     const key = `test-dedup-cross-provider-${Date.now()}`;
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -257,7 +290,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
     );
     expect(first).toBe(true);
 
@@ -268,13 +301,19 @@ describe("followup queue deduplication", () => {
         originatingChannel: "discord",
         originatingTo: "channel:123",
       }),
-      collectSettings,
+      settings,
     );
     expect(second).toBe(true);
   });
 
   it("can opt-in to prompt-based dedupe when message id is absent", async () => {
     const key = `test-dedup-prompt-mode-${Date.now()}`;
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
 
     const first = enqueueFollowupRun(
       key,
@@ -283,7 +322,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
       "prompt",
     );
     expect(first).toBe(true);
@@ -295,7 +334,7 @@ describe("followup queue deduplication", () => {
         originatingChannel: "whatsapp",
         originatingTo: "+1234567890",
       }),
-      collectSettings,
+      settings,
       "prompt",
     );
     expect(second).toBe(false);

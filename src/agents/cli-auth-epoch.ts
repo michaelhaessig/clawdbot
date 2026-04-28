@@ -5,29 +5,23 @@ import type { AuthProfileCredential, AuthProfileStore } from "./auth-profiles/ty
 import {
   readClaudeCliCredentialsCached,
   readCodexCliCredentialsCached,
-  readGeminiCliCredentialsCached,
   type ClaudeCliCredential,
   type CodexCliCredential,
-  type GeminiCliCredential,
 } from "./cli-credentials.js";
 
 type CliAuthEpochDeps = {
   readClaudeCliCredentialsCached: typeof readClaudeCliCredentialsCached;
   readCodexCliCredentialsCached: typeof readCodexCliCredentialsCached;
-  readGeminiCliCredentialsCached: typeof readGeminiCliCredentialsCached;
   loadAuthProfileStoreForRuntime: typeof loadAuthProfileStoreForRuntime;
 };
 
 const defaultCliAuthEpochDeps: CliAuthEpochDeps = {
   readClaudeCliCredentialsCached,
   readCodexCliCredentialsCached,
-  readGeminiCliCredentialsCached,
   loadAuthProfileStoreForRuntime,
 };
 
 const cliAuthEpochDeps: CliAuthEpochDeps = { ...defaultCliAuthEpochDeps };
-
-export const CLI_AUTH_EPOCH_VERSION = 4;
 
 export function setCliAuthEpochTestDeps(overrides: Partial<CliAuthEpochDeps>): void {
   Object.assign(cliAuthEpochDeps, overrides);
@@ -45,46 +39,28 @@ function encodeUnknown(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function encodeOAuthIdentity(credential: {
-  type: "oauth";
-  provider: string;
-  clientId?: string;
-  email?: string;
-  enterpriseUrl?: string;
-  projectId?: string;
-  accountId?: string;
-}): string {
-  return JSON.stringify([
-    "oauth",
-    credential.provider,
-    credential.clientId ?? null,
-    credential.email ?? null,
-    credential.enterpriseUrl ?? null,
-    credential.projectId ?? null,
-    credential.accountId ?? null,
-  ]);
-}
-
 function encodeClaudeCredential(credential: ClaudeCliCredential): string {
   if (credential.type === "oauth") {
-    return encodeOAuthIdentity(credential);
+    return JSON.stringify([
+      "oauth",
+      credential.provider,
+      credential.access,
+      credential.refresh,
+      credential.expires,
+    ]);
   }
-  return JSON.stringify(["token", credential.provider, credential.token]);
+  return JSON.stringify(["token", credential.provider, credential.token, credential.expires]);
 }
 
 function encodeCodexCredential(credential: CodexCliCredential): string {
-  return encodeOAuthIdentity(credential);
-}
-
-function encodeGeminiCredential(credential: GeminiCliCredential): string {
-  // Delegate to the shared OAuth-identity encoder. The Gemini CLI reader
-  // lifts the Google-account identity (sub, email) off the openid id_token
-  // onto the credential, so the encoder fingerprints the user through stable,
-  // non-secret identity fields — matching the Claude/Codex OAuth contract.
-  // When the id_token is absent (older logins, scope omitted), the encoder
-  // falls back to a provider-keyed constant, the same identity-less behavior
-  // the Claude CLI OAuth branch tolerates.
-  return encodeOAuthIdentity(credential);
+  return JSON.stringify([
+    credential.type,
+    credential.provider,
+    credential.access,
+    credential.refresh,
+    credential.expires,
+    credential.accountId ?? null,
+  ]);
 }
 
 function encodeAuthProfileCredential(credential: AuthProfileCredential): string {
@@ -105,11 +81,25 @@ function encodeAuthProfileCredential(credential: AuthProfileCredential): string 
         credential.provider,
         credential.token ?? null,
         encodeUnknown(credential.tokenRef),
+        credential.expires ?? null,
         credential.email ?? null,
         credential.displayName ?? null,
       ]);
     case "oauth":
-      return encodeOAuthIdentity(credential);
+      return JSON.stringify([
+        "oauth",
+        credential.provider,
+        credential.access,
+        credential.refresh,
+        credential.expires,
+        credential.clientId ?? null,
+        credential.email ?? null,
+        credential.displayName ?? null,
+        credential.enterpriseUrl ?? null,
+        credential.projectId ?? null,
+        credential.accountId ?? null,
+        credential.managedBy ?? null,
+      ]);
   }
   throw new Error("Unsupported auth profile credential type");
 }
@@ -129,12 +119,6 @@ function getLocalCliCredentialFingerprint(provider: string): string | undefined 
       });
       return credential ? hashCliAuthEpochPart(encodeCodexCredential(credential)) : undefined;
     }
-    case "google-gemini-cli": {
-      const credential = cliAuthEpochDeps.readGeminiCliCredentialsCached({
-        ttlMs: 5000,
-      });
-      return credential ? hashCliAuthEpochPart(encodeGeminiCredential(credential)) : undefined;
-    }
     default:
       return undefined;
   }
@@ -153,17 +137,14 @@ function getAuthProfileCredential(
 export async function resolveCliAuthEpoch(params: {
   provider: string;
   authProfileId?: string;
-  skipLocalCredential?: boolean;
 }): Promise<string | undefined> {
   const provider = params.provider.trim();
   const authProfileId = normalizeOptionalString(params.authProfileId);
   const parts: string[] = [];
 
-  if (params.skipLocalCredential !== true) {
-    const localFingerprint = getLocalCliCredentialFingerprint(provider);
-    if (localFingerprint) {
-      parts.push(`local:${provider}:${localFingerprint}`);
-    }
+  const localFingerprint = getLocalCliCredentialFingerprint(provider);
+  if (localFingerprint) {
+    parts.push(`local:${provider}:${localFingerprint}`);
   }
 
   if (authProfileId) {

@@ -134,21 +134,18 @@ For the generic Docker flow, see [Docker](/install/docker).
 
     ```bash
     OPENCLAW_IMAGE=openclaw:latest
-    OPENCLAW_GATEWAY_TOKEN=
+    OPENCLAW_GATEWAY_TOKEN=change-me-now
     OPENCLAW_GATEWAY_BIND=lan
     OPENCLAW_GATEWAY_PORT=18789
 
     OPENCLAW_CONFIG_DIR=/root/.openclaw
     OPENCLAW_WORKSPACE_DIR=/root/.openclaw/workspace
 
-    GOG_KEYRING_PASSWORD=
+    GOG_KEYRING_PASSWORD=change-me-now
     XDG_CONFIG_HOME=/home/node/.openclaw
     ```
 
-    Leave `OPENCLAW_GATEWAY_TOKEN` blank unless you explicitly want to
-    manage it through `.env`; OpenClaw writes a random gateway token to
-    config on first start. Generate a keyring password and paste it into
-    `GOG_KEYRING_PASSWORD`:
+    Generate strong secrets:
 
     ```bash
     openssl rand -hex 32
@@ -253,19 +250,10 @@ For teams preferring infrastructure-as-code workflows, a community-maintained Te
 
 This approach complements the Docker setup above with reproducible deployments, version-controlled infrastructure, and automated disaster recovery.
 
-<Note>
-Community-maintained. For issues or contributions, see the repository links above.
-</Note>
+> **Note:** Community-maintained. For issues or contributions, see the repository links above.
 
 ## Next steps
 
 - Set up messaging channels: [Channels](/channels)
 - Configure the Gateway: [Gateway configuration](/gateway/configuration)
 - Keep OpenClaw up to date: [Updating](/install/updating)
-
-## Related
-
-- [Install overview](/install)
-- [Fly.io](/install/fly)
-- [Docker](/install/docker)
-- [VPS hosting](/vps)

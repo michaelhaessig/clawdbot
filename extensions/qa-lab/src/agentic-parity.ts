@@ -37,11 +37,6 @@ export const QA_AGENTIC_PARITY_SCENARIOS = [
     countsTowardValidToolCallRate: true,
   },
   {
-    id: "subagent-stale-child-links",
-    title: "Subagent stale child links",
-    countsTowardValidToolCallRate: false,
-  },
-  {
     id: "memory-recall",
     title: "Memory recall after context switch",
     countsTowardValidToolCallRate: false,

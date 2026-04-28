@@ -1,10 +1,9 @@
-import { Type, type TSchema } from "typebox";
+import { Type, type TSchema } from "@sinclair/typebox";
 import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   channelSupportsMessageCapability,
   channelSupportsMessageCapabilityForChannel,
   type ChannelMessageActionDiscoveryInput,
-  listCrossChannelSchemaSupportedMessageActions,
   resolveChannelMessageToolSchemaProperties,
 } from "../../channels/plugins/message-action-discovery.js";
 import { CHANNEL_MESSAGE_ACTION_NAMES } from "../../channels/plugins/message-action-names.js";
@@ -13,7 +12,7 @@ import type { ChannelMessageActionName } from "../../channels/plugins/types.publ
 import { resolveCommandSecretRefsViaGateway } from "../../cli/command-secret-gateway.js";
 import { getScopedChannelsCommandSecretTargets } from "../../cli/command-secret-targets.js";
 import { resolveMessageSecretScope } from "../../cli/message-secret-scope.js";
-import { getRuntimeConfig } from "../../config/config.js";
+import { loadConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../../gateway/protocol/client-info.js";
 import { getToolResult, runMessageAction } from "../../infra/outbound/message-action-runner.js";
@@ -48,46 +47,43 @@ function actionNeedsExplicitTarget(action: ChannelMessageActionName): boolean {
 function buildRoutingSchema() {
   return {
     channel: Type.Optional(Type.String()),
-    target: Type.Optional(channelTargetSchema()),
+    target: Type.Optional(channelTargetSchema({ description: "Target channel/user id or name." })),
     targets: Type.Optional(channelTargetsSchema()),
     accountId: Type.Optional(Type.String()),
     dryRun: Type.Optional(Type.Boolean()),
   };
 }
 
-const presentationOptionSchema = Type.Object({
+const interactiveOptionSchema = Type.Object({
   label: Type.String(),
   value: Type.String(),
 });
 
-const presentationButtonSchema = Type.Object({
+const interactiveButtonSchema = Type.Object({
   label: Type.String(),
-  value: Type.Optional(Type.String()),
-  url: Type.Optional(Type.String()),
+  value: Type.String(),
   style: Type.Optional(stringEnum(["primary", "secondary", "success", "danger"])),
 });
 
-const presentationBlockSchema = Type.Object({
-  type: stringEnum(["text", "context", "divider", "buttons", "select"]),
+const interactiveBlockSchema = Type.Object({
+  type: stringEnum(["text", "buttons", "select"]),
   text: Type.Optional(Type.String()),
-  buttons: Type.Optional(Type.Array(presentationButtonSchema)),
+  buttons: Type.Optional(Type.Array(interactiveButtonSchema)),
   placeholder: Type.Optional(Type.String()),
-  options: Type.Optional(Type.Array(presentationOptionSchema)),
+  options: Type.Optional(Type.Array(interactiveOptionSchema)),
 });
 
-const presentationMessageSchema = Type.Object(
+const interactiveMessageSchema = Type.Object(
   {
-    title: Type.Optional(Type.String()),
-    tone: Type.Optional(stringEnum(["info", "success", "warning", "danger", "neutral"])),
-    blocks: Type.Array(presentationBlockSchema),
+    blocks: Type.Array(interactiveBlockSchema),
   },
   {
     description:
-      "Shared presentation payload for rich text, buttons, selects, and context. Core degrades unsupported blocks to text.",
+      "Shared interactive message payload for buttons and selects. Channels render this into their native components when supported.",
   },
 );
 
-function buildSendSchema(options: { includePresentation: boolean; includeDeliveryPin: boolean }) {
+function buildSendSchema(options: { includeInteractive: boolean }) {
   const props: Record<string, TSchema> = {
     message: Type.Optional(Type.String()),
     effectId: Type.Optional(
@@ -134,31 +130,10 @@ function buildSendSchema(options: { includePresentation: boolean; includeDeliver
           "Send image/GIF as document to avoid Telegram compression. Alias for forceDocument (Telegram only).",
       }),
     ),
+    interactive: Type.Optional(interactiveMessageSchema),
   };
-  if (options.includePresentation) {
-    props.presentation = Type.Optional(presentationMessageSchema);
-  }
-  if (options.includeDeliveryPin) {
-    props.delivery = Type.Optional(
-      Type.Object(
-        {
-          pin: Type.Optional(
-            Type.Union([
-              Type.Boolean(),
-              Type.Object({
-                enabled: Type.Boolean(),
-                notify: Type.Optional(Type.Boolean()),
-                required: Type.Optional(Type.Boolean()),
-              }),
-            ]),
-          ),
-        },
-        {
-          description:
-            "Shared delivery preferences. pin requests that the sent message be pinned when the channel supports it.",
-        },
-      ),
-    );
+  if (!options.includeInteractive) {
+    delete props.interactive;
   }
   return props;
 }
@@ -378,8 +353,7 @@ function buildChannelManagementSchema() {
 }
 
 function buildMessageToolSchemaProps(options: {
-  includePresentation: boolean;
-  includeDeliveryPin: boolean;
+  includeInteractive: boolean;
   extraProperties?: Record<string, TSchema>;
 }) {
   return {
@@ -403,8 +377,7 @@ function buildMessageToolSchemaProps(options: {
 function buildMessageToolSchemaFromActions(
   actions: readonly string[],
   options: {
-    includePresentation: boolean;
-    includeDeliveryPin: boolean;
+    includeInteractive: boolean;
     extraProperties?: Record<string, TSchema>;
   },
 ) {
@@ -416,8 +389,7 @@ function buildMessageToolSchemaFromActions(
 }
 
 const MessageToolSchema = buildMessageToolSchemaFromActions(AllMessageActions, {
-  includePresentation: true,
-  includeDeliveryPin: true,
+  includeInteractive: true,
 });
 
 type MessageToolOptions = {
@@ -425,7 +397,7 @@ type MessageToolOptions = {
   agentSessionKey?: string;
   sessionId?: string;
   config?: OpenClawConfig;
-  getRuntimeConfig?: () => OpenClawConfig;
+  loadConfig?: () => OpenClawConfig;
   getScopedChannelsCommandSecretTargets?: typeof getScopedChannelsCommandSecretTargets;
   resolveCommandSecretRefsViaGateway?: typeof resolveCommandSecretRefsViaGateway;
   runMessageAction?: typeof runMessageAction;
@@ -492,7 +464,7 @@ function resolveMessageToolSchemaActions(params: MessageToolDiscoveryParams): st
       if (plugin.id === currentChannel) {
         continue;
       }
-      for (const action of listCrossChannelSchemaSupportedMessageActions(
+      for (const action of listChannelSupportedActions(
         buildMessageActionDiscoveryInput(params, plugin.id),
       )) {
         allActions.add(action);
@@ -522,18 +494,13 @@ function resolveIncludeCapability(
   return channelSupportsMessageCapability(params.cfg, capability);
 }
 
-function resolveIncludePresentation(params: MessageToolDiscoveryParams): boolean {
-  return resolveIncludeCapability(params, "presentation");
-}
-
-function resolveIncludeDeliveryPin(params: MessageToolDiscoveryParams): boolean {
-  return resolveIncludeCapability(params, "delivery-pin");
+function resolveIncludeInteractive(params: MessageToolDiscoveryParams): boolean {
+  return resolveIncludeCapability(params, "interactive");
 }
 
 function buildMessageToolSchema(params: MessageToolDiscoveryParams) {
   const actions = resolveMessageToolSchemaActions(params);
-  const includePresentation = resolveIncludePresentation(params);
-  const includeDeliveryPin = resolveIncludeDeliveryPin(params);
+  const includeInteractive = resolveIncludeInteractive(params);
   const extraProperties = resolveChannelMessageToolSchemaProperties(
     buildMessageActionDiscoveryInput(
       params,
@@ -541,8 +508,7 @@ function buildMessageToolSchema(params: MessageToolDiscoveryParams) {
     ),
   );
   return buildMessageToolSchemaFromActions(actions.length > 0 ? actions : ["send"], {
-    includePresentation,
-    includeDeliveryPin,
+    includeInteractive,
     extraProperties,
   });
 }
@@ -604,7 +570,7 @@ function buildMessageToolDescription(options?: {
         if (plugin.id === currentChannel) {
           continue;
         }
-        const actions = listCrossChannelSchemaSupportedMessageActions(
+        const actions = listChannelSupportedActions(
           buildMessageActionDiscoveryInput(messageToolDiscoveryParams, plugin.id),
         );
         if (actions.length > 0) {
@@ -650,7 +616,7 @@ function appendMessageToolReadHint(
 }
 
 export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
-  const loadConfigForTool = options?.getRuntimeConfig ?? getRuntimeConfig;
+  const loadConfigForTool = options?.loadConfig ?? loadConfig;
   const getScopedSecretTargetsForTool =
     options?.getScopedChannelsCommandSecretTargets ?? getScopedChannelsCommandSecretTargets;
   const resolveSecretRefsForTool =

@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { validateJsonSchemaValue } from "../../../src/plugins/schema-validator.js";
-import { __testing } from "../test-api.js";
-import { createBraveWebSearchProvider } from "./brave-web-search-provider.js";
+import { __testing, createBraveWebSearchProvider } from "./brave-web-search-provider.js";
 
 const braveManifest = JSON.parse(
   fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf-8"),

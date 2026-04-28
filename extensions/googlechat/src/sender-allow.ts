@@ -1,4 +1,6 @@
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+function normalizeLowercaseStringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
 
 function normalizeUserId(raw?: string | null): string {
   const trimmed = typeof raw === "string" ? raw.trim() : "";

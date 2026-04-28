@@ -4,8 +4,10 @@ read_when:
   - You are changing markdown formatting or chunking for outbound channels
   - You are adding a new channel formatter or style mapping
   - You are debugging formatting regressions across channels
-title: "Markdown formatting"
+title: "Markdown Formatting"
 ---
+
+# Markdown formatting
 
 OpenClaw formats outbound Markdown by converting it into a shared intermediate
 representation (IR) before rendering channel-specific output. The IR keeps the
@@ -126,8 +128,3 @@ SPOILER style ranges. Other channels treat them as plain text.
 - Signal style ranges depend on UTF-16 offsets; do not use code point offsets.
 - Preserve trailing newlines for fenced code blocks so closing markers land on
   their own line.
-
-## Related
-
-- [Streaming and chunking](/concepts/streaming)
-- [System prompt](/concepts/system-prompt)

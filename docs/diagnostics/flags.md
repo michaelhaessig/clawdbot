@@ -3,8 +3,10 @@ summary: "Diagnostics flags for targeted debug logs"
 read_when:
   - You need targeted debug logs without raising global logging levels
   - You need to capture subsystem-specific logs for support
-title: "Diagnostics flags"
+title: "Diagnostics Flags"
 ---
+
+# Diagnostics Flags
 
 Diagnostics flags let you enable targeted debug logs without turning on verbose logging everywhere. Flags are opt-in and have no effect unless a subsystem checks them.
 
@@ -87,8 +89,3 @@ For remote gateways, you can also use `openclaw logs --follow` (see [/cli/logs](
 - If `logging.level` is set higher than `warn`, these logs may be suppressed. Default `info` is fine.
 - Flags are safe to leave enabled; they only affect log volume for the specific subsystem.
 - Use [/logging](/logging) to change log destinations, levels, and redaction.
-
-## Related
-
-- [Gateway diagnostics](/gateway/diagnostics)
-- [Gateway troubleshooting](/gateway/troubleshooting)

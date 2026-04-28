@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { Type, type Static } from "@sinclair/typebox";
 
 const FileType = Type.Union([
   Type.Literal("doc"),

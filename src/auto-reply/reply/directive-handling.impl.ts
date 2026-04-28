@@ -8,11 +8,7 @@ import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { applyTraceOverride, applyVerboseOverride } from "../../sessions/level-overrides.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
-import {
-  formatThinkingLevels,
-  isThinkingLevelSupported,
-  resolveSupportedThinkingLevel,
-} from "../thinking.js";
+import { formatThinkingLevels, formatXHighModelHint, supportsXHighThinking } from "../thinking.js";
 import type { ReplyPayload } from "../types.js";
 import { resolveModelSelectionFromDirective } from "./directive-handling.model-selection.js";
 import { maybeHandleModelDirectiveInfo } from "./directive-handling.model.js";
@@ -32,7 +28,6 @@ import {
 } from "./directive-handling.shared.js";
 import type { ElevatedLevel, ReasoningLevel, ThinkLevel } from "./directives.js";
 import { refreshQueuedFollowupSession } from "./queue.js";
-import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 
 export async function handleDirectiveOnly(
   params: HandleDirectiveOnlyParams,
@@ -74,11 +69,7 @@ export async function handleDirectiveOnly(
   const agentDir = resolveAgentDir(params.cfg, activeAgentId);
   const runtimeIsSandboxed = resolveSandboxRuntimeStatus({
     cfg: params.cfg,
-    sessionKey: resolveRuntimePolicySessionKey({
-      cfg: params.cfg,
-      ctx: params.ctx,
-      sessionKey: params.sessionKey,
-    }),
+    sessionKey: params.sessionKey,
   }).sandboxed;
   const shouldHintDirectRuntime = directives.hasElevatedDirective && !runtimeIsSandboxed;
   const allowInternalExecPersistence = canPersistInternalExecDirective({
@@ -295,38 +286,21 @@ export async function handleDirectiveOnly(
 
   if (
     directives.hasThinkDirective &&
-    directives.thinkLevel &&
-    !isThinkingLevelSupported({
-      provider: resolvedProvider,
-      model: resolvedModel,
-      level: directives.thinkLevel,
-    })
+    directives.thinkLevel === "xhigh" &&
+    !supportsXHighThinking(resolvedProvider, resolvedModel)
   ) {
     return {
-      text: `Thinking level "${directives.thinkLevel}" is not supported for ${resolvedProvider}/${resolvedModel}. Use one of: ${formatThinkingLevels(resolvedProvider, resolvedModel)}.`,
+      text: `Thinking level "xhigh" is only supported for ${formatXHighModelHint()}.`,
     };
   }
 
-  const resolvedDirectiveThinkLevel = directives.thinkLevel;
   const nextThinkLevel = directives.hasThinkDirective
-    ? resolvedDirectiveThinkLevel
+    ? directives.thinkLevel
     : ((sessionEntry?.thinkingLevel as ThinkLevel | undefined) ?? currentThinkLevel);
-  const remappedUnsupportedThinkLevel =
+  const shouldDowngradeXHigh =
     !directives.hasThinkDirective &&
-    nextThinkLevel &&
-    !isThinkingLevelSupported({
-      provider: resolvedProvider,
-      model: resolvedModel,
-      level: nextThinkLevel,
-    })
-      ? resolveSupportedThinkingLevel({
-          provider: resolvedProvider,
-          model: resolvedModel,
-          level: nextThinkLevel,
-        })
-      : undefined;
-  const shouldRemapUnsupportedThinkLevel =
-    Boolean(remappedUnsupportedThinkLevel) && remappedUnsupportedThinkLevel !== nextThinkLevel;
+    nextThinkLevel === "xhigh" &&
+    !supportsXHighThinking(resolvedProvider, resolvedModel);
 
   const prevElevatedLevel =
     currentElevatedLevel ??
@@ -352,7 +326,7 @@ export async function handleDirectiveOnly(
     (directives.hasExecDirective && directives.hasExecOptions && allowInternalExecPersistence) ||
     Boolean(modelSelection) ||
     directives.hasQueueDirective ||
-    shouldRemapUnsupportedThinkLevel;
+    shouldDowngradeXHigh;
   const fastModeChanged =
     directives.hasFastDirective &&
     directives.fastMode !== undefined &&
@@ -360,14 +334,14 @@ export async function handleDirectiveOnly(
   let reasoningChanged =
     directives.hasReasoningDirective && directives.reasoningLevel !== undefined;
   if (shouldPersistSessionEntry) {
-    if (directives.hasThinkDirective && directives.thinkLevel && resolvedDirectiveThinkLevel) {
-      sessionEntry.thinkingLevel = resolvedDirectiveThinkLevel;
+    if (directives.hasThinkDirective && directives.thinkLevel) {
+      sessionEntry.thinkingLevel = directives.thinkLevel;
     }
     if (directives.hasFastDirective && directives.fastMode !== undefined) {
       sessionEntry.fastMode = directives.fastMode;
     }
-    if (shouldRemapUnsupportedThinkLevel && remappedUnsupportedThinkLevel) {
-      sessionEntry.thinkingLevel = remappedUnsupportedThinkLevel;
+    if (shouldDowngradeXHigh) {
+      sessionEntry.thinkingLevel = "high";
     }
     if (
       directives.hasVerboseDirective &&
@@ -478,17 +452,11 @@ export async function handleDirectiveOnly(
 
   const parts: string[] = [];
   if (directives.hasThinkDirective && directives.thinkLevel) {
-    const displayedThinkLevel = resolvedDirectiveThinkLevel ?? directives.thinkLevel;
     parts.push(
-      displayedThinkLevel === "off"
+      directives.thinkLevel === "off"
         ? "Thinking disabled."
-        : `Thinking level set to ${displayedThinkLevel}.`,
+        : `Thinking level set to ${directives.thinkLevel}.`,
     );
-    if (directives.thinkLevel === "max" && displayedThinkLevel !== "max") {
-      parts.push(
-        `max not supported for ${resolvedProvider}/${resolvedModel}; using ${displayedThinkLevel}.`,
-      );
-    }
   }
   if (directives.hasFastDirective && directives.fastMode !== undefined) {
     parts.push(
@@ -570,13 +538,9 @@ export async function handleDirectiveOnly(
   if (directives.hasExecDirective && directives.hasExecOptions && !allowInternalExecPersistence) {
     parts.push(formatDirectiveAck(formatInternalExecPersistenceDeniedText()));
   }
-  if (
-    !directives.hasThinkDirective &&
-    shouldRemapUnsupportedThinkLevel &&
-    remappedUnsupportedThinkLevel
-  ) {
+  if (shouldDowngradeXHigh) {
     parts.push(
-      `Thinking level set to ${remappedUnsupportedThinkLevel} (${nextThinkLevel} not supported for ${resolvedProvider}/${resolvedModel}).`,
+      `Thinking level set to high (xhigh not supported for ${resolvedProvider}/${resolvedModel}).`,
     );
   }
   if (modelSelection) {

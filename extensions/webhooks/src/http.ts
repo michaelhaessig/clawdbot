@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
+import { safeEqualSecret } from "openclaw/plugin-sdk/browser-security-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { z } from "zod";
 import type { PluginRuntime } from "../api.js";
@@ -667,6 +667,7 @@ export function createTaskFlowWebhookRequestHandler(params: {
   targetsByPath: Map<string, TaskFlowWebhookTarget[]>;
   inFlightLimiter?: WebhookInFlightLimiter;
 }): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
+  const secretByTarget = new WeakMap<TaskFlowWebhookTarget, Promise<string | undefined>>();
   const rateLimiter = createFixedWindowRateLimiter({
     windowMs: WEBHOOK_RATE_LIMIT_DEFAULTS.windowMs,
     maxRequests: WEBHOOK_RATE_LIMIT_DEFAULTS.maxRequests,
@@ -678,19 +679,19 @@ export function createTaskFlowWebhookRequestHandler(params: {
       maxInFlightPerKey: WEBHOOK_IN_FLIGHT_DEFAULTS.maxInFlightPerKey,
       maxTrackedKeys: WEBHOOK_IN_FLIGHT_DEFAULTS.maxTrackedKeys,
     });
-  const resolveTargetSecret = async (
-    target: TaskFlowWebhookTarget,
-  ): Promise<string | undefined> => {
-    if (typeof target.secretInput === "string") {
-      return target.secretInput;
+  const resolveTargetSecret = (target: TaskFlowWebhookTarget): Promise<string | undefined> => {
+    const cached = secretByTarget.get(target);
+    if (cached) {
+      return cached;
     }
-    const resolved = await resolveConfiguredSecretInputString({
+    const pending = resolveConfiguredSecretInputString({
       config: params.cfg,
       env: process.env,
       value: target.secretInput,
       path: target.secretConfigPath,
-    });
-    return resolved.value;
+    }).then((resolved) => resolved.value);
+    secretByTarget.set(target, pending);
+    return pending;
   };
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
@@ -723,7 +724,9 @@ export function createTaskFlowWebhookRequestHandler(params: {
               return false;
             }
             const resolvedSecret = await resolveTargetSecret(candidate);
-            return Boolean(resolvedSecret && timingSafeEquals(resolvedSecret, presentedSecret));
+            return Boolean(
+              resolvedSecret && timingSafeEquals(resolvedSecret, presentedSecret),
+            );
           },
         });
         if (!target) {

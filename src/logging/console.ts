@@ -6,7 +6,7 @@ import { readLoggingConfig, shouldSkipMutatingLoggingConfigRead } from "./config
 import { resolveEnvLogLevelOverride } from "./env-log-level.js";
 import { type LogLevel, normalizeLogLevel } from "./levels.js";
 import { getLogger } from "./logger.js";
-import { redactSensitiveText } from "./redact.js";
+import { resolveNodeRequireFromMeta } from "./node-require.js";
 import { loggingState } from "./state.js";
 import { formatLocalIsoWithOffset, formatTimestamp } from "./timestamps.js";
 import type { ConsoleStyle, LoggerSettings } from "./types.js";
@@ -18,8 +18,20 @@ type ConsoleSettings = {
 };
 export type ConsoleLoggerSettings = ConsoleSettings;
 
+const requireConfig = resolveNodeRequireFromMeta(import.meta.url);
 type ConsoleConfigLoader = () => OpenClawConfig["logging"] | undefined;
-const loadConfigFallbackDefault: ConsoleConfigLoader = () => undefined;
+const loadConfigFallbackDefault: ConsoleConfigLoader = () => {
+  try {
+    const loaded = requireConfig?.("../config/config.js") as
+      | {
+          loadConfig?: () => OpenClawConfig;
+        }
+      | undefined;
+    return loaded?.loadConfig?.().logging;
+  } catch {
+    return undefined;
+  }
+};
 let loadConfigFallback: ConsoleConfigLoader = loadConfigFallbackDefault;
 
 export function setConsoleConfigLoaderForTests(loader?: ConsoleConfigLoader): void {
@@ -118,26 +130,12 @@ export function setConsoleTimestampPrefix(enabled: boolean): void {
   loggingState.consoleTimestampPrefix = enabled;
 }
 
-function normalizeConsoleSubsystem(subsystem?: string | null): string | null {
-  if (typeof subsystem !== "string") {
-    return null;
-  }
-  const normalized = subsystem.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-export function shouldLogSubsystemToConsole(subsystem?: string | null): boolean {
+export function shouldLogSubsystemToConsole(subsystem: string): boolean {
   const filter = loggingState.consoleSubsystemFilter;
   if (!filter || filter.length === 0) {
     return true;
   }
-  const normalizedSubsystem = normalizeConsoleSubsystem(subsystem);
-  if (!normalizedSubsystem) {
-    return false;
-  }
-  return filter.some(
-    (prefix) => normalizedSubsystem === prefix || normalizedSubsystem.startsWith(`${prefix}/`),
-  );
+  return filter.some((prefix) => subsystem === prefix || subsystem.startsWith(`${prefix}/`));
 }
 
 const SUPPRESSED_CONSOLE_PREFIXES = [
@@ -263,8 +261,7 @@ export function enableConsoleCapture(): void {
       if (loggingState.forceConsoleToStderr) {
         // In --json mode, all console.* writes are diagnostics and should stay off stdout.
         try {
-          const redacted = redactSensitiveText(formatted);
-          const line = timestamp ? `${timestamp} ${redacted}` : redacted;
+          const line = timestamp ? `${timestamp} ${formatted}` : formatted;
           process.stderr.write(`${line}\n`);
         } catch (err) {
           if (isEpipeError(err)) {
@@ -274,16 +271,19 @@ export function enableConsoleCapture(): void {
         }
       } else {
         try {
-          const redacted = redactSensitiveText(formatted);
           if (!timestamp) {
-            if (args.length === 0) {
-              orig.apply(console, args as []);
-              return;
-            }
-            orig.call(console, redacted);
+            orig.apply(console, args as []);
             return;
           }
-          orig.call(console, redacted ? `${timestamp} ${redacted}` : timestamp);
+          if (args.length === 0) {
+            orig.call(console, timestamp);
+            return;
+          }
+          if (typeof args[0] === "string") {
+            orig.call(console, `${timestamp} ${args[0]}`, ...args.slice(1));
+            return;
+          }
+          orig.call(console, timestamp, ...args);
         } catch (err) {
           if (isEpipeError(err)) {
             return;

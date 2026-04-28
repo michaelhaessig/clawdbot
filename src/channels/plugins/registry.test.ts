@@ -1,18 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import type { PluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { getChannelPlugin, listChannelPlugins } from "./registry.js";
-
-vi.mock("./bundled.js", () => ({
-  getBundledChannelPlugin: (id: string) =>
-    id === "fallback"
-      ? {
-          id: "fallback",
-          meta: { label: "fallback" },
-        }
-      : undefined,
-}));
 
 function withMalformedChannels(registry: PluginRegistry): PluginRegistry {
   const malformed = { ...registry } as PluginRegistry;
@@ -35,7 +25,11 @@ describe("listChannelPlugins", () => {
   it("falls back to bundled channel plugins for direct lookups before registry bootstrap", () => {
     setActivePluginRegistry(createEmptyPluginRegistry());
 
-    expect(getChannelPlugin("fallback")?.meta.label).toBe("fallback");
+    expect(getChannelPlugin("googlechat")?.doctor).toMatchObject({
+      dmAllowFromMode: "nestedOnly",
+      groupAllowFromFallbackToAllowFrom: false,
+      warnOnEmptyGroupSenderAllowlist: false,
+    });
   });
 
   it("rebuilds channel lookups when the active registry object changes without a version bump", () => {

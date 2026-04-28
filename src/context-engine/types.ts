@@ -22,10 +22,6 @@ export type CompactResult = {
     tokensBefore: number;
     tokensAfter?: number;
     details?: unknown;
-    /** Session id after compaction, when the runtime rotated transcripts. */
-    sessionId?: string;
-    /** Session file after compaction, when the runtime rotated transcripts. */
-    sessionFile?: string;
   };
 };
 
@@ -286,11 +282,6 @@ export interface ContextEngine {
   prepareSubagentSpawn?(params: {
     parentSessionKey: string;
     childSessionKey: string;
-    contextMode?: "isolated" | "fork";
-    parentSessionId?: string;
-    parentSessionFile?: string;
-    childSessionId?: string;
-    childSessionFile?: string;
     ttlMs?: number;
   }): Promise<SubagentSpawnPreparation | undefined>;
 

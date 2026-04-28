@@ -29,8 +29,6 @@ export type MatrixDraftStream = {
   flush: () => Promise<void>;
   /** Flush and mark this block as done. Returns the event ID if a message was sent. */
   stop: () => Promise<string | undefined>;
-  /** Cancel pending draft updates without creating a new preview event. */
-  discardPending: () => Promise<void>;
   /** Clear the MSC4357 live marker in place when the draft is kept as final text. */
   finalizeLive: () => Promise<boolean>;
   /** Reset state for the next text block (after tool calls). */
@@ -182,12 +180,6 @@ export function createMatrixDraftStream(params: {
     return currentEventId;
   };
 
-  const discardPending = async (): Promise<void> => {
-    stopped = true;
-    loop.stop();
-    await loop.waitForInFlight();
-  };
-
   const reset = (): void => {
     // Clear reply context unless preserveReplyId is set (replyToMode "all"),
     // in which case subsequent blocks should keep replying to the original.
@@ -211,7 +203,6 @@ export function createMatrixDraftStream(params: {
     },
     flush: loop.flush,
     stop,
-    discardPending,
     finalizeLive,
     reset,
     eventId: () => currentEventId,

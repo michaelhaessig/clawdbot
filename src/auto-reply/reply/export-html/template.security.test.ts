@@ -3,6 +3,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parseHTML } from "linkedom";
 
 type SessionEntry = {
   id: string;
@@ -27,63 +28,13 @@ type SessionData = {
   tools: unknown[];
 };
 
-type ParsedHtml = {
-  document: Document;
-  window: {
-    HTMLElement?: unknown;
-  };
-};
-
-type LinkedomModule = {
-  parseHTML(html: string): ParsedHtml;
-};
-
-const LINKEDOM_MODULE = "linkedom";
-
 const exportHtmlDir = path.dirname(fileURLToPath(import.meta.url));
 const templateHtml = fs.readFileSync(path.join(exportHtmlDir, "template.html"), "utf8");
 const templateJs = fs.readFileSync(path.join(exportHtmlDir, "template.js"), "utf8");
 const markedJs = fs.readFileSync(path.join(exportHtmlDir, "vendor", "marked.min.js"), "utf8");
 const highlightJs = fs.readFileSync(path.join(exportHtmlDir, "vendor", "highlight.min.js"), "utf8");
 
-let parseHtmlPromise: Promise<LinkedomModule["parseHTML"]> | null = null;
-
-async function loadParseHTML(): Promise<LinkedomModule["parseHTML"]> {
-  parseHtmlPromise ??= (import(LINKEDOM_MODULE) as Promise<LinkedomModule>).then(
-    ({ parseHTML }) => parseHTML,
-  );
-  return parseHtmlPromise;
-}
-
-function installScrollIntoViewStub(document: Document) {
-  const patchElement = <T extends Element | null>(element: T): T => {
-    if (element && !("scrollIntoView" in element)) {
-      Object.defineProperty(element, "scrollIntoView", {
-        configurable: true,
-        value: () => {},
-      });
-    }
-    return element;
-  };
-
-  for (const element of document.querySelectorAll("*")) {
-    patchElement(element);
-  }
-
-  const getElementById = document.getElementById.bind(document);
-  document.getElementById = ((id: string) =>
-    patchElement(getElementById(id))) as typeof document.getElementById;
-
-  const querySelector = document.querySelector.bind(document);
-  document.querySelector = ((selectors: string) =>
-    patchElement(querySelector(selectors))) as typeof document.querySelector;
-
-  const createElement = document.createElement.bind(document);
-  document.createElement = ((tagName: string, options?: ElementCreationOptions) =>
-    patchElement(createElement(tagName, options))) as typeof document.createElement;
-}
-
-async function renderTemplate(sessionData: SessionData) {
+function renderTemplate(sessionData: SessionData) {
   const html = templateHtml
     .replace("{{CSS}}", "")
     .replace("{{SESSION_DATA}}", Buffer.from(JSON.stringify(sessionData), "utf8").toString("base64"))
@@ -91,10 +42,9 @@ async function renderTemplate(sessionData: SessionData) {
     .replace("{{HIGHLIGHT_JS}}", "")
     .replace("{{JS}}", "");
 
-  const parseHTML = await loadParseHTML();
   const { document, window } = parseHTML(html);
-  if (window.HTMLElement) {
-    installScrollIntoViewStub(document);
+  if (window.HTMLElement?.prototype) {
+    window.HTMLElement.prototype.scrollIntoView = () => {};
   }
 
   const immediateTimeout = (fn: (...args: unknown[]) => void) => {
@@ -130,7 +80,7 @@ function now() {
 }
 
 describe("export html security hardening", () => {
-  it("escapes raw HTML from markdown blocks", async () => {
+  it("escapes raw HTML from markdown blocks", () => {
     const attack = "<img src=x onerror=alert(1)>";
     const session: SessionData = {
       header: { id: "session-1", timestamp: now() },
@@ -164,14 +114,14 @@ describe("export html security hardening", () => {
       tools: [],
     };
 
-    const { document } = await renderTemplate(session);
+    const { document } = renderTemplate(session);
     const messages = document.getElementById("messages");
     expect(messages).toBeTruthy();
     expect(messages?.querySelector("img[onerror]")).toBeNull();
     expect(messages?.innerHTML).toContain("&lt;img src=x onerror=alert(1)&gt;");
   });
 
-  it("escapes tree and header metadata fields", async () => {
+  it("escapes tree and header metadata fields", () => {
     const attack = "<img src=x onerror=alert(9)>";
     const baseEntries: SessionEntry[] = [
       {
@@ -231,7 +181,7 @@ describe("export html security hardening", () => {
       tools: [],
     };
 
-    const { document } = await renderTemplate(headerSession);
+    const { document } = renderTemplate(headerSession);
     const tree = document.getElementById("tree-container");
     const header = document.getElementById("header-container");
     expect(tree).toBeTruthy();
@@ -248,7 +198,7 @@ describe("export html security hardening", () => {
       systemPrompt: "",
       tools: [],
     };
-    const modelLeaf = (await renderTemplate(modelLeafSession)).document;
+    const modelLeaf = renderTemplate(modelLeafSession).document;
     expect(modelLeaf.getElementById("tree-container")?.querySelector("img[onerror]")).toBeNull();
     expect(modelLeaf.getElementById("tree-container")?.innerHTML).toContain(
       "&lt;img src=x onerror=alert(9)&gt;",
@@ -261,14 +211,14 @@ describe("export html security hardening", () => {
       systemPrompt: "",
       tools: [],
     };
-    const thinkingLeaf = (await renderTemplate(thinkingLeafSession)).document;
+    const thinkingLeaf = renderTemplate(thinkingLeafSession).document;
     expect(thinkingLeaf.getElementById("tree-container")?.querySelector("img[onerror]")).toBeNull();
     expect(thinkingLeaf.getElementById("tree-container")?.innerHTML).toContain(
       "&lt;img src=x onerror=alert(9)&gt;",
     );
   });
 
-  it("sanitizes image MIME types used in data URLs", async () => {
+  it("sanitizes image MIME types used in data URLs", () => {
     const session: SessionData = {
       header: { id: "session-3", timestamp: now() },
       entries: [
@@ -294,14 +244,14 @@ describe("export html security hardening", () => {
       tools: [],
     };
 
-    const { document } = await renderTemplate(session);
+    const { document } = renderTemplate(session);
     const img = document.querySelector("#messages .message-image");
     expect(img).toBeTruthy();
     expect(img?.getAttribute("onerror")).toBeNull();
     expect(img?.getAttribute("src")).toBe("data:application/octet-stream;base64,AAAA");
   });
 
-  it("flattens remote markdown images but keeps data-image markdown", async () => {
+  it("flattens remote markdown images but keeps data-image markdown", () => {
     const dataImage = "data:image/png;base64,AAAA";
     const session: SessionData = {
       header: { id: "session-4", timestamp: now() },
@@ -327,7 +277,7 @@ describe("export html security hardening", () => {
       tools: [],
     };
 
-    const { document } = await renderTemplate(session);
+    const { document } = renderTemplate(session);
     const messages = document.getElementById("messages");
     expect(messages).toBeTruthy();
     expect(messages?.querySelector('img[src^="https://"]')).toBeNull();
@@ -335,7 +285,7 @@ describe("export html security hardening", () => {
     expect(messages?.querySelector(`img[src="${dataImage}"]`)).toBeTruthy();
   });
 
-  it("escapes markdown data-image attributes", async () => {
+  it("escapes markdown data-image attributes", () => {
     const dataImage = "data:image/png;base64,AAAA";
     const session: SessionData = {
       header: { id: "session-5", timestamp: now() },
@@ -361,7 +311,7 @@ describe("export html security hardening", () => {
       tools: [],
     };
 
-    const { document } = await renderTemplate(session);
+    const { document } = renderTemplate(session);
     const img = document.querySelector("#messages img");
     expect(img).toBeTruthy();
     expect(img?.getAttribute("onerror")).toBeNull();

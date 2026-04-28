@@ -79,17 +79,17 @@ describe("statusSummaryRuntime.resolveSessionModelRef", () => {
         {
           agents: {
             defaults: {
-              model: { primary: "openai/gpt-5.5" },
+              model: { primary: "openai/gpt-5.4" },
             },
           },
         } as never,
         {
-          model: "gpt-5.5",
+          model: "gpt-5.4",
         },
       ),
     ).toEqual({
       provider: "openai",
-      model: "gpt-5.5",
+      model: "gpt-5.4",
     });
   });
 

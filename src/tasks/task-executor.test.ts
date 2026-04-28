@@ -4,11 +4,6 @@ import { resetHeartbeatWakeStateForTests } from "../infra/heartbeat-wake.js";
 import { resetSystemEventsForTest } from "../infra/system-events.js";
 import { withStateDirEnv } from "../test-helpers/state-dir-env.js";
 import {
-  getDetachedTaskLifecycleRuntime,
-  resetDetachedTaskLifecycleRuntimeForTests,
-  setDetachedTaskLifecycleRuntime,
-} from "./detached-task-runtime.js";
-import {
   cancelFlowById,
   cancelFlowByIdForOwner,
   cancelDetachedTaskRunById,
@@ -62,13 +57,8 @@ vi.mock("../agents/subagent-control.js", () => ({
   killSubagentRunAdmin: (params: unknown) => hoisted.killSubagentRunAdminMock(params),
 }));
 
-vi.mock("../utils/message-channel.js", () => ({
-  isDeliverableMessageChannel: (channel: string) => channel === "notifychat",
-}));
-
 async function withTaskExecutorStateDir(run: (stateDir: string) => Promise<void>): Promise<void> {
   await withStateDirEnv("openclaw-task-executor-", async ({ stateDir }) => {
-    resetDetachedTaskLifecycleRuntimeForTests();
     resetSystemEventsForTest();
     resetHeartbeatWakeStateForTests();
     resetAgentEventsForTest();
@@ -98,56 +88,6 @@ async function withTaskExecutorStateDir(run: (stateDir: string) => Promise<void>
       resetTaskRegistryForTests({ persist: false });
       resetTaskFlowRegistryForTests({ persist: false });
     }
-  });
-}
-
-function createRunningAcpChildTaskRun(
-  overrides: Partial<Parameters<typeof createRunningTaskRun>[0]> = {},
-) {
-  return createRunningTaskRun({
-    runtime: "acp",
-    ownerKey: "agent:main:main",
-    scopeKind: "session",
-    childSessionKey: "agent:codex:acp:child",
-    runId: "run-acp-child",
-    task: "Inspect a PR",
-    startedAt: 10,
-    deliveryStatus: "pending",
-    ...overrides,
-  });
-}
-
-function spyOnRuntimeCancel() {
-  const defaultRuntime = getDetachedTaskLifecycleRuntime();
-  const cancelDetachedTaskRunByIdSpy = vi.fn(
-    (...args: Parameters<typeof defaultRuntime.cancelDetachedTaskRunById>) =>
-      defaultRuntime.cancelDetachedTaskRunById(...args),
-  );
-
-  setDetachedTaskLifecycleRuntime({
-    ...defaultRuntime,
-    cancelDetachedTaskRunById: cancelDetachedTaskRunByIdSpy,
-  });
-
-  return cancelDetachedTaskRunByIdSpy;
-}
-
-function expectCancelledAcpChildTask(
-  child: ReturnType<typeof createRunningTaskRun>,
-  cancelled: unknown,
-) {
-  expect(cancelled).toMatchObject({
-    found: true,
-    cancelled: true,
-  });
-  expect(getTaskById(child.taskId)).toMatchObject({
-    taskId: child.taskId,
-    status: "cancelled",
-  });
-  expect(hoisted.cancelSessionMock).toHaveBeenCalledWith({
-    cfg: {} as never,
-    sessionKey: "agent:codex:acp:child",
-    reason: "task-cancel",
   });
 }
 
@@ -340,8 +280,8 @@ describe("task-executor", () => {
         ownerKey: "agent:main:main",
         scopeKind: "session",
         requesterOrigin: {
-          channel: "notifychat",
-          to: "notifychat:123",
+          channel: "telegram",
+          to: "telegram:123",
         },
         childSessionKey: "agent:codex:acp:child",
         runId: "run-executor-blocked",
@@ -416,8 +356,8 @@ describe("task-executor", () => {
         controllerId: "tests/managed-flow",
         goal: "Inspect PR batch",
         requesterOrigin: {
-          channel: "notifychat",
-          to: "notifychat:123",
+          channel: "telegram",
+          to: "telegram:123",
         },
       });
       const child = createRunningTaskRun({
@@ -459,8 +399,8 @@ describe("task-executor", () => {
         controllerId: "tests/managed-flow",
         goal: "Inspect PR batch",
         requesterOrigin: {
-          channel: "notifychat",
-          to: "notifychat:123",
+          channel: "telegram",
+          to: "telegram:123",
         },
       });
 
@@ -641,8 +581,15 @@ describe("task-executor", () => {
     await withTaskExecutorStateDir(async () => {
       hoisted.cancelSessionMock.mockResolvedValue(undefined);
 
-      const child = createRunningAcpChildTaskRun({
+      const child = createRunningTaskRun({
+        runtime: "acp",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        childSessionKey: "agent:codex:acp:child",
         runId: "run-linear-cancel",
+        task: "Inspect a PR",
+        startedAt: 10,
+        deliveryStatus: "pending",
       });
 
       const cancelled = await cancelDetachedTaskRunById({
@@ -650,106 +597,19 @@ describe("task-executor", () => {
         taskId: child.taskId,
       });
 
-      expectCancelledAcpChildTask(child, cancelled);
-    });
-  });
-
-  it("dispatches detached task cancellation through the registered runtime", async () => {
-    await withTaskExecutorStateDir(async () => {
-      hoisted.cancelSessionMock.mockResolvedValue(undefined);
-
-      const child = createRunningAcpChildTaskRun({
-        runId: "run-external-cancel",
-      });
-
-      const cancelDetachedTaskRunByIdSpy = spyOnRuntimeCancel();
-
-      const cancelled = await cancelDetachedTaskRunById({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
-
-      expect(cancelDetachedTaskRunByIdSpy).toHaveBeenCalledWith({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
       expect(cancelled).toMatchObject({
         found: true,
         cancelled: true,
       });
-    });
-  });
-
-  it("falls back to the legacy canceller when the registered runtime declines task ownership", async () => {
-    await withTaskExecutorStateDir(async () => {
-      hoisted.cancelSessionMock.mockResolvedValue(undefined);
-
-      const child = createRunningAcpChildTaskRun({
-        runId: "run-runtime-decline-cancel",
-      });
-
-      const cancelDetachedTaskRunByIdSpy = vi.fn(async () => ({
-        found: false,
-        cancelled: false,
-        reason: "not owned by runtime",
-      }));
-
-      setDetachedTaskLifecycleRuntime({
-        ...getDetachedTaskLifecycleRuntime(),
-        cancelDetachedTaskRunById: cancelDetachedTaskRunByIdSpy,
-      });
-
-      const cancelled = await cancelDetachedTaskRunById({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
-
-      expect(cancelDetachedTaskRunByIdSpy).toHaveBeenCalledWith({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
-      expectCancelledAcpChildTask(child, cancelled);
-    });
-  });
-
-  it("does not fall back when the registered runtime claims task ownership", async () => {
-    await withTaskExecutorStateDir(async () => {
-      hoisted.cancelSessionMock.mockResolvedValue(undefined);
-
-      const child = createRunningAcpChildTaskRun({
-        runId: "run-runtime-owned-cancel",
-      });
-
-      const cancelDetachedTaskRunByIdSpy = vi.fn(async () => ({
-        found: true,
-        cancelled: false,
-        reason: "runtime refused cancel",
-      }));
-
-      setDetachedTaskLifecycleRuntime({
-        ...getDetachedTaskLifecycleRuntime(),
-        cancelDetachedTaskRunById: cancelDetachedTaskRunByIdSpy,
-      });
-
-      const cancelled = await cancelDetachedTaskRunById({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
-
-      expect(cancelled).toMatchObject({
-        found: true,
-        cancelled: false,
-        reason: "runtime refused cancel",
-      });
-      expect(cancelDetachedTaskRunByIdSpy).toHaveBeenCalledWith({
-        cfg: {} as never,
-        taskId: child.taskId,
-      });
       expect(getTaskById(child.taskId)).toMatchObject({
         taskId: child.taskId,
-        status: "running",
+        status: "cancelled",
       });
-      expect(hoisted.cancelSessionMock).not.toHaveBeenCalled();
+      expect(hoisted.cancelSessionMock).toHaveBeenCalledWith({
+        cfg: {} as never,
+        sessionKey: "agent:codex:acp:child",
+        reason: "task-cancel",
+      });
     });
   });
 
@@ -787,54 +647,6 @@ describe("task-executor", () => {
       expect(hoisted.killSubagentRunAdminMock).toHaveBeenCalledWith({
         cfg: {} as never,
         sessionKey: "agent:codex:subagent:child",
-      });
-    });
-  });
-
-  it("routes TaskFlow cancellation through the registered detached runtime", async () => {
-    await withTaskExecutorStateDir(async () => {
-      hoisted.cancelSessionMock.mockResolvedValue(undefined);
-
-      const flow = createManagedTaskFlow({
-        ownerKey: "agent:main:main",
-        controllerId: "tests/cancel-flow",
-        goal: "Cancel linked tasks",
-      });
-      const child = runTaskInFlow({
-        flowId: flow.flowId,
-        runtime: "acp",
-        childSessionKey: "agent:codex:acp:child",
-        runId: "run-flow-cancel-via-runtime",
-        task: "Cancel flow child",
-        status: "running",
-        startedAt: 10,
-      });
-      if (!child.created) {
-        throw new Error("expected child task creation to succeed");
-      }
-      const childTask = child.task;
-      if (!childTask) {
-        throw new Error("expected child task payload");
-      }
-
-      const cancelDetachedTaskRunByIdSpy = spyOnRuntimeCancel();
-
-      const cancelled = await cancelFlowById({
-        cfg: {} as never,
-        flowId: flow.flowId,
-      });
-
-      expect(cancelDetachedTaskRunByIdSpy).toHaveBeenCalledWith({
-        cfg: {} as never,
-        taskId: childTask.taskId,
-      });
-      expect(cancelled).toMatchObject({
-        found: true,
-        cancelled: true,
-        flow: {
-          flowId: flow.flowId,
-          status: "cancelled",
-        },
       });
     });
   });

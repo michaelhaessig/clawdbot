@@ -5,18 +5,9 @@ const mocks = vi.hoisted(() => ({
   resolveOutboundChannelPlugin: vi.fn(),
 }));
 
-const deliverableChannelIds = vi.hoisted(() => ["alpha", "beta", "gamma", "delta", "muted"]);
-
 vi.mock("../../channels/plugins/index.js", () => ({
   getLoadedChannelPlugin: vi.fn(),
   listChannelPlugins: mocks.listChannelPlugins,
-}));
-
-vi.mock("../../utils/message-channel.js", () => ({
-  listDeliverableMessageChannels: () => deliverableChannelIds,
-  isDeliverableMessageChannel: (value: string) => deliverableChannelIds.includes(value),
-  normalizeMessageChannel: (value?: string | null) =>
-    typeof value === "string" ? value.trim().toLowerCase() : undefined,
 }));
 
 vi.mock("./channel-resolution.js", () => ({
@@ -79,37 +70,37 @@ describe("listConfiguredMessageChannels", () => {
 
   it.each([
     {
-      plugins: [makePlugin({ id: "not-a-channel" }), makePlugin({ id: "alpha", accountIds: [] })],
+      plugins: [makePlugin({ id: "not-a-channel" }), makePlugin({ id: "slack", accountIds: [] })],
       expected: [],
       expectedErrors: 0,
     },
     {
       plugins: [
         makePlugin({
-          id: "beta",
+          id: "discord",
           resolveAccount: () => ({ enabled: true }),
         }),
       ],
-      expected: ["beta"],
+      expected: ["discord"],
       expectedErrors: 0,
     },
     {
       plugins: [
         makePlugin({
-          id: "gamma",
+          id: "telegram",
           accountIds: ["disabled", "enabled"],
           resolveAccount: (accountId) =>
             accountId === "disabled" ? { enabled: false } : { enabled: true },
           isConfigured: (account) => (account as { enabled?: boolean }).enabled === true,
         }),
       ],
-      expected: ["gamma"],
+      expected: ["telegram"],
       expectedErrors: 0,
     },
     {
       plugins: [
         makePlugin({
-          id: "muted",
+          id: "signal",
           resolveAccount: () => ({ token: "x" }),
           isEnabled: () => false,
           isConfigured: () => true,
@@ -121,7 +112,7 @@ describe("listConfiguredMessageChannels", () => {
     {
       plugins: [
         makePlugin({
-          id: "beta",
+          id: "discord",
           resolveAccount: () => {
             throw new Error("boom");
           },
@@ -145,9 +136,9 @@ describe("resolveMessageChannelSelection", () => {
 
   it.each([
     {
-      params: { cfg: {} as never, channel: "alpha" },
+      params: { cfg: {} as never, channel: "telegram" },
       expected: {
-        channel: "alpha",
+        channel: "telegram",
         configured: [],
         source: "explicit",
       },
@@ -155,12 +146,12 @@ describe("resolveMessageChannelSelection", () => {
     {
       setup: () => {
         const isConfigured = vi.fn(async () => true);
-        mocks.listChannelPlugins.mockReturnValue([makePlugin({ id: "beta", isConfigured })]);
+        mocks.listChannelPlugins.mockReturnValue([makePlugin({ id: "slack", isConfigured })]);
         return { isConfigured };
       },
-      params: { cfg: {} as never, channel: "beta" },
+      params: { cfg: {} as never, channel: "slack" },
       expected: {
-        channel: "beta",
+        channel: "slack",
         configured: [],
         source: "explicit",
       },
@@ -169,17 +160,17 @@ describe("resolveMessageChannelSelection", () => {
       },
     },
     {
-      params: { cfg: {} as never, channel: "channel:C123", fallbackChannel: "beta" },
+      params: { cfg: {} as never, channel: "channel:C123", fallbackChannel: "slack" },
       expected: {
-        channel: "beta",
+        channel: "slack",
         configured: [],
         source: "tool-context-fallback",
       },
     },
     {
-      params: { cfg: {} as never, fallbackChannel: "gamma" },
+      params: { cfg: {} as never, fallbackChannel: "signal" },
       expected: {
-        channel: "gamma",
+        channel: "signal",
         configured: [],
         source: "tool-context-fallback",
       },
@@ -187,25 +178,25 @@ describe("resolveMessageChannelSelection", () => {
     {
       setup: () => {
         mocks.listChannelPlugins.mockReturnValue([
-          makePlugin({ id: "delta", isConfigured: async () => true }),
+          makePlugin({ id: "discord", isConfigured: async () => true }),
         ]);
       },
       params: { cfg: {} as never },
       expected: {
-        channel: "delta",
-        configured: ["delta"],
+        channel: "discord",
+        configured: ["discord"],
         source: "single-configured",
       },
     },
     {
       setup: () => {
         mocks.resolveOutboundChannelPlugin.mockImplementation(({ channel }: { channel: string }) =>
-          channel === "beta" ? { id: "beta" } : undefined,
+          channel === "slack" ? { id: "slack" } : undefined,
         );
       },
-      params: { cfg: {} as never, channel: "alpha", fallbackChannel: "beta" },
+      params: { cfg: {} as never, channel: "discord", fallbackChannel: "slack" },
       expected: {
-        channel: "beta",
+        channel: "slack",
         configured: [],
         source: "tool-context-fallback",
       },
@@ -225,8 +216,8 @@ describe("resolveMessageChannelSelection", () => {
       setup: () => {
         mocks.resolveOutboundChannelPlugin.mockReturnValue(undefined);
       },
-      params: { cfg: {} as never, channel: "alpha" },
-      expectedMessage: "Channel is unavailable: alpha",
+      params: { cfg: {} as never, channel: "discord" },
+      expectedMessage: "Channel is unavailable: discord",
     },
     {
       params: { cfg: {} as never },
@@ -235,12 +226,13 @@ describe("resolveMessageChannelSelection", () => {
     {
       setup: () => {
         mocks.listChannelPlugins.mockReturnValue([
-          makePlugin({ id: "beta", isConfigured: async () => true }),
-          makePlugin({ id: "gamma", isConfigured: async () => true }),
+          makePlugin({ id: "discord", isConfigured: async () => true }),
+          makePlugin({ id: "telegram", isConfigured: async () => true }),
         ]);
       },
       params: { cfg: {} as never },
-      expectedMessage: "Channel is required when multiple channels are configured: beta, gamma",
+      expectedMessage:
+        "Channel is required when multiple channels are configured: discord, telegram",
     },
   ])("rejects invalid channel selection for %j", async ({ setup, params, expectedMessage }) => {
     setup?.();

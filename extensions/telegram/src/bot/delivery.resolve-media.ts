@@ -151,9 +151,6 @@ function resolveRequiredTelegramTransport(transport?: TelegramTransport): Telegr
   return {
     fetch: resolvedFetch,
     sourceFetch: resolvedFetch,
-    // Caller-owned transport constructed from the globalThis fetch — it owns
-    // no dispatcher lifecycle of its own, so close() is a no-op.
-    close: async () => {},
   };
 }
 

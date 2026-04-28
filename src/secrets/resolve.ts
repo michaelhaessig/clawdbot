@@ -286,7 +286,6 @@ async function readFileProviderPayload(params: {
     const secureFilePath = await assertSecurePath({
       targetPath: filePath,
       label: `secrets.providers.${params.providerName}.path`,
-      allowInsecurePath: params.providerConfig.allowInsecurePath,
     });
     const timeoutMs = normalizePositiveInt(
       params.providerConfig.timeoutMs,
@@ -310,7 +309,7 @@ async function readFileProviderPayload(params: {
       if (payload.byteLength > maxBytes) {
         throw new Error(`File provider "${params.providerName}" exceeded maxBytes (${maxBytes}).`);
       }
-      const text = payload.toString("utf8").replace(/^\uFEFF/, "");
+      const text = payload.toString("utf8");
       if (params.providerConfig.mode === "singleValue") {
         return text.replace(/\r?\n$/, "");
       }

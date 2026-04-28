@@ -1,3 +1,4 @@
+import { getChannelPlugin } from "../../channels/plugins/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import {
   DEFAULT_CHANNEL_CONNECT_GRACE_MS,
@@ -34,7 +35,6 @@ function shouldIgnoreReadinessFailure(
 export function createReadinessChecker(deps: {
   channelManager: ChannelManager;
   startedAt: number;
-  getStartupPending?: () => boolean;
   cacheTtlMs?: number;
 }): ReadinessChecker {
   const { channelManager, startedAt } = deps;
@@ -45,9 +45,6 @@ export function createReadinessChecker(deps: {
   return (): ReadinessResult => {
     const now = Date.now();
     const uptimeMs = now - startedAt;
-    if (deps.getStartupPending?.()) {
-      return { ready: false, failing: ["startup-sidecars"], uptimeMs };
-    }
     if (cachedState && now - cachedAt < cacheTtlMs) {
       return { ...cachedState, uptimeMs };
     }
@@ -68,6 +65,7 @@ export function createReadinessChecker(deps: {
           staleEventThresholdMs: DEFAULT_CHANNEL_STALE_EVENT_THRESHOLD_MS,
           channelConnectGraceMs: DEFAULT_CHANNEL_CONNECT_GRACE_MS,
           channelId,
+          skipStaleSocketCheck: getChannelPlugin(channelId)?.status?.skipStaleSocketHealthCheck,
         };
         const health = evaluateChannelHealth(accountSnapshot, policy);
         if (!health.healthy && !shouldIgnoreReadinessFailure(accountSnapshot, health)) {

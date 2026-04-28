@@ -12,11 +12,8 @@ const resolveDefaultAgentIdMock = vi.fn<
 
 let resolvePluginRuntimeLoadContext: typeof import("./load-context.js").resolvePluginRuntimeLoadContext;
 let buildPluginRuntimeLoadOptions: typeof import("./load-context.js").buildPluginRuntimeLoadOptions;
-let clearRuntimeConfigSnapshot: typeof import("../../config/runtime-snapshot.js").clearRuntimeConfigSnapshot;
-let setRuntimeConfigSnapshot: typeof import("../../config/runtime-snapshot.js").setRuntimeConfigSnapshot;
 
 vi.mock("../../config/config.js", () => ({
-  getRuntimeConfig: loadConfigMock,
   loadConfig: loadConfigMock,
 }));
 
@@ -32,8 +29,6 @@ vi.mock("../../agents/agent-scope.js", () => ({
 describe("resolvePluginRuntimeLoadContext", () => {
   beforeEach(async () => {
     vi.resetModules();
-    ({ clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } =
-      await import("../../config/runtime-snapshot.js"));
     ({ resolvePluginRuntimeLoadContext, buildPluginRuntimeLoadOptions } =
       await import("./load-context.js"));
     loadConfigMock.mockReset();
@@ -47,7 +42,6 @@ describe("resolvePluginRuntimeLoadContext", () => {
       changes: [],
       autoEnabledReasons: {},
     }));
-    clearRuntimeConfigSnapshot();
   });
 
   it("builds the runtime plugin load context from the auto-enabled config", () => {
@@ -92,27 +86,6 @@ describe("resolvePluginRuntimeLoadContext", () => {
     });
     expect(resolveDefaultAgentIdMock).toHaveBeenCalledWith(resolvedConfig);
     expect(resolveAgentWorkspaceDirMock).toHaveBeenCalledWith(resolvedConfig, "default");
-  });
-
-  it("uses the source runtime snapshot for plugin activation source config", () => {
-    const runtimeConfig = { plugins: {} };
-    const sourceConfig = {
-      plugins: {
-        allow: ["trusted-plugin"],
-      },
-    };
-
-    setRuntimeConfigSnapshot(runtimeConfig, sourceConfig);
-    loadConfigMock.mockReturnValue(runtimeConfig);
-
-    const context = resolvePluginRuntimeLoadContext();
-
-    expect(context.rawConfig).toBe(runtimeConfig);
-    expect(context.activationSourceConfig).toBe(sourceConfig);
-    expect(applyPluginAutoEnableMock).toHaveBeenCalledWith({
-      config: runtimeConfig,
-      env: process.env,
-    });
   });
 
   it("builds plugin load options from the shared runtime context", () => {

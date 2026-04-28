@@ -5,7 +5,6 @@ import { serializeGatewayDiscoveryBeacon } from "./discovery.js";
 import {
   isProbeReachable,
   isScopeLimitedProbeFailure,
-  summarizeGatewayProbeCapability,
   renderProbeSummaryLine,
   renderTargetHeader,
 } from "./helpers.js";
@@ -79,7 +78,7 @@ export function buildGatewayStatusWarnings(params: {
     warnings.push({
       code: "probe_scope_limited",
       message:
-        "Read-probe diagnostics are limited by gateway scopes (missing operator.read). Connection succeeded, but read-only status calls are incomplete. Hint: pair device identity or use credentials with operator.read.",
+        "Probe diagnostics are limited by gateway scopes (missing operator.read). Connection succeeded, but status details may be incomplete. Hint: pair device identity or use credentials with operator.read.",
       targetIds: [result.target.id],
     });
   }
@@ -99,11 +98,9 @@ export function writeGatewayStatusJson(params: {
 }) {
   const reachable = params.probed.filter((entry) => isProbeReachable(entry.probe));
   const degraded = params.probed.some((entry) => isScopeLimitedProbeFailure(entry.probe));
-  const capability = summarizeGatewayProbeCapability(reachable.map((entry) => entry.probe));
   writeRuntimeJson(params.runtime, {
     ok: reachable.length > 0,
     degraded,
-    capability,
     ts: Date.now(),
     durationMs: Date.now() - params.startedAt,
     timeoutMs: params.overallTimeoutMs,
@@ -129,7 +126,6 @@ export function writeGatewayStatusJson(params: {
         error: entry.probe.error,
         close: entry.probe.close,
       },
-      auth: entry.probe.auth,
       self: entry.self,
       config: entry.configSummary,
       health: entry.probe.health,
@@ -153,15 +149,11 @@ export function writeGatewayStatusText(params: {
 }) {
   const reachable = params.probed.filter((entry) => isProbeReachable(entry.probe));
   const ok = reachable.length > 0;
-  const capability = summarizeGatewayProbeCapability(reachable.map((entry) => entry.probe));
   params.runtime.log(colorize(params.rich, theme.heading, "Gateway Status"));
   params.runtime.log(
     ok
       ? `${colorize(params.rich, theme.success, "Reachable")}: yes`
       : `${colorize(params.rich, theme.error, "Reachable")}: no`,
-  );
-  params.runtime.log(
-    `${colorize(params.rich, theme.info, "Capability")}: ${capability.replaceAll("_", "-")}`,
   );
   params.runtime.log(
     colorize(params.rich, theme.muted, `Probe budget: ${params.overallTimeoutMs}ms`),

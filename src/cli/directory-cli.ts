@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { getChannelPlugin } from "../channels/plugins/index.js";
 import { resolveInstallableChannelPlugin } from "../commands/channel-setup/channel-plugin-resolution.js";
-import { getRuntimeConfig, readConfigFileSnapshot, replaceConfigFile } from "../config/config.js";
+import { loadConfig, readConfigFileSnapshot, replaceConfigFile } from "../config/config.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { danger } from "../globals.js";
 import { resolveMessageChannelSelection } from "../infra/outbound/channel-selection.js";
@@ -15,7 +15,6 @@ import { formatDocsLink } from "../terminal/links.js";
 import { getTerminalTableWidth, renderTable } from "../terminal/table.js";
 import { theme } from "../terminal/theme.js";
 import { formatHelpExamples } from "./help-format.js";
-import { commitConfigWithPendingPluginInstalls } from "./plugins-install-record-commit.js";
 
 function parseLimit(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -105,7 +104,7 @@ export function registerDirectoryCli(program: Command) {
   const resolve = async (opts: { channel?: string; account?: string }) => {
     const sourceSnapshotPromise = readConfigFileSnapshot().catch(() => null);
     const autoEnabled = applyPluginAutoEnable({
-      config: getRuntimeConfig(),
+      config: loadConfig(),
       env: process.env,
     });
     let cfg = autoEnabled.config;
@@ -121,11 +120,10 @@ export function registerDirectoryCli(program: Command) {
       : null;
     if (resolvedExplicit?.configChanged) {
       cfg = resolvedExplicit.cfg;
-      const committed = await commitConfigWithPendingPluginInstalls({
+      await replaceConfigFile({
         nextConfig: cfg,
         baseHash: (await sourceSnapshotPromise)?.hash,
       });
-      cfg = committed.config;
     } else if (autoEnabled.changes.length > 0) {
       await replaceConfigFile({
         nextConfig: cfg,

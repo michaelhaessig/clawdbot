@@ -93,7 +93,5 @@ export function buildMistralModelDefinition(): ModelDefinitionConfig {
 }
 
 export function buildMistralCatalogModels(): ModelDefinitionConfig[] {
-  return MISTRAL_MODEL_CATALOG.map((model) =>
-    Object.assign({}, model, { input: [...model.input] }),
-  );
+  return MISTRAL_MODEL_CATALOG.map((model) => ({ ...model, input: [...model.input] }));
 }

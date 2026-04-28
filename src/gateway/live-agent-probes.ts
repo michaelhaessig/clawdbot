@@ -5,6 +5,8 @@ import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 const execFileAsync = promisify(execFile);
 
+export type LiveAgentFamily = "claude" | "codex" | "gemini";
+
 export type CronListCliResult = {
   jobs?: Array<{
     id?: string;
@@ -26,24 +28,28 @@ export type LiveCronProbeSpec = {
   argsJson: string;
 };
 
-export function isClaudeLikeLiveAgent(raw: string): boolean {
+export function normalizeLiveAgentFamily(raw: string): LiveAgentFamily {
   const normalized = normalizeOptionalLowercaseString(raw);
-  return normalized === "claude" || normalized === "claude-cli";
+  if (normalized === "claude" || normalized === "claude-cli") {
+    return "claude";
+  }
+  if (normalized === "codex" || normalized === "codex-cli") {
+    return "codex";
+  }
+  if (normalized === "gemini" || normalized === "google-gemini-cli") {
+    return "gemini";
+  }
+  throw new Error(`unsupported live agent family: ${raw}`);
 }
 
 export function assertLiveImageProbeReply(text: string): void {
   const normalized = normalizeOptionalLowercaseString(text);
-  if (normalized !== "cat" && !/(^|[^a-z])cat[.!?`'")\]]*$/.test(normalized ?? "")) {
+  if (normalized !== "cat") {
     throw new Error(`image probe expected 'cat', got: ${normalized}`);
   }
 }
 
-export function createLiveCronProbeSpec(
-  params: {
-    agentId?: string;
-    sessionKey?: string;
-  } = {},
-): LiveCronProbeSpec {
+export function createLiveCronProbeSpec(): LiveCronProbeSpec {
   const nonce = randomBytes(3).toString("hex").toUpperCase();
   const normalizedNonce = normalizeOptionalLowercaseString(nonce) ?? "";
   const name = `live-mcp-${normalizedNonce}`;
@@ -55,9 +61,7 @@ export function createLiveCronProbeSpec(
       name,
       schedule: { kind: "at", at },
       payload: { kind: "agentTurn", message },
-      sessionTarget: params.sessionKey ? `session:${params.sessionKey}` : "current",
-      ...(params.agentId ? { agentId: params.agentId } : {}),
-      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+      sessionTarget: "current",
       enabled: true,
     },
   });
@@ -70,39 +74,26 @@ export function buildLiveCronProbeMessage(params: {
   attempt: number;
   exactReply: string;
 }): string {
-  const claudeLike = isClaudeLikeLiveAgent(params.agent);
+  const family = normalizeLiveAgentFamily(params.agent);
   if (params.attempt === 0) {
     return (
-      "Use the OpenClaw MCP tool `openclaw-tools/cron` (server `openclaw-tools`, tool `cron`). " +
-      "If the harness shows Claude-style MCP names, use `mcp__openclaw-tools__cron` or `mcp__openclaw_tools__cron`. " +
+      "Use the OpenClaw MCP tool named cron. " +
       `Call it with JSON arguments ${params.argsJson}. ` +
-      "Preserve the JSON exactly, including job.sessionTarget and job.sessionKey; do not omit, rename, or flatten those fields. " +
       "Do the actual tool call; I will verify externally with the OpenClaw cron CLI. " +
       `After the cron job is created, reply exactly: ${params.exactReply}`
     );
   }
-  if (claudeLike) {
+  if (family === "claude") {
     return (
-      "Retry the OpenClaw MCP tool `openclaw-tools/cron` now. " +
-      "If the harness shows Claude-style MCP names, use `mcp__openclaw-tools__cron` or `mcp__openclaw_tools__cron`. " +
+      "Return only a tool call for the OpenClaw MCP tool `cron`. " +
       `Use these exact JSON arguments: ${params.argsJson}. ` +
-      "Preserve job.sessionTarget and job.sessionKey exactly as provided. " +
-      `If the cron job is created, reply exactly: ${params.exactReply}. ` +
-      "If the tool call is cancelled, the job is not created, or you cannot confirm creation, " +
-      "reply briefly saying that and ask me to retry. No markdown. " +
-      "I will verify externally with the OpenClaw cron CLI."
+      "No prose. I will verify externally with the OpenClaw cron CLI."
     );
   }
   return (
-    "Your previous OpenClaw cron MCP tool call was cancelled before the job was created. " +
-    "Retry the OpenClaw MCP tool `openclaw-tools/cron` now. " +
-    "If the harness shows Claude-style MCP names, use `mcp__openclaw-tools__cron` or `mcp__openclaw_tools__cron`. " +
+    "Use the OpenClaw MCP tool named cron. " +
     `Use these exact JSON arguments: ${params.argsJson}. ` +
-    "Preserve job.sessionTarget and job.sessionKey exactly as provided. " +
-    `If the cron job is created, reply exactly: ${params.exactReply}. ` +
-    "If the tool call is cancelled, the job is not created, or you cannot confirm creation, " +
-    "reply briefly saying that and ask me to retry. No markdown. " +
-    "I will verify externally with the OpenClaw cron CLI."
+    "No prose before the tool call. I will verify externally with the OpenClaw cron CLI."
   );
 }
 

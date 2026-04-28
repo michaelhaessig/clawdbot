@@ -207,16 +207,12 @@ async function mapWithConcurrency<T, U>(
 }
 
 function extractTranscript(result: QaSuiteResult) {
-  let longestDetail: string | undefined;
-  for (const scenario of result.scenarios) {
-    for (const step of scenario.steps) {
-      const detail = step.details;
-      if (detail && (!longestDetail || detail.length > longestDetail.length)) {
-        longestDetail = detail;
-      }
-    }
-  }
-  return longestDetail ?? result.report;
+  const details = result.scenarios.flatMap((scenario) =>
+    scenario.steps
+      .map((step) => step.details)
+      .filter((detail): detail is string => Boolean(detail)),
+  );
+  return details.toSorted((left, right) => right.length - left.length)[0] ?? result.report;
 }
 
 function collectTranscriptStats(transcript: string) {
@@ -655,10 +651,10 @@ export async function runQaCharacterEval(params: QaCharacterEvalParams) {
           timeoutMs: judgeTimeoutMs,
         });
         rankings = parseJudgeReply(rawReply, new Set(judgePrompt.labelToModel.keys())).map(
-          (ranking) =>
-            Object.assign({}, ranking, {
-              model: judgePrompt.labelToModel.get(ranking.model) ?? ranking.model,
-            }),
+          (ranking) => ({
+            ...ranking,
+            model: judgePrompt.labelToModel.get(ranking.model) ?? ranking.model,
+          }),
         );
       } catch (error) {
         judgeError = formatErrorMessage(error);

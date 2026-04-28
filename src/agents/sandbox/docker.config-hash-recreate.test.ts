@@ -157,29 +157,6 @@ function createSandboxConfig(
   };
 }
 
-async function ensureSandboxCreateCallForTest(params: {
-  cfg: SandboxConfig;
-  workspaceDir?: string;
-  sessionKey?: string;
-}): Promise<SpawnCall> {
-  const workspaceDir = params.workspaceDir ?? "/tmp/workspace";
-  await ensureSandboxContainer({
-    sessionKey: params.sessionKey ?? "agent:main:session-1",
-    workspaceDir,
-    agentWorkspaceDir: workspaceDir,
-    cfg: params.cfg,
-  });
-
-  const createCall = spawnState.calls.find(
-    (call) => call.command === "docker" && call.args[0] === "create",
-  );
-  expect(createCall).toBeDefined();
-  if (!createCall) {
-    throw new Error("expected docker create call");
-  }
-  return createCall;
-}
-
 describe("ensureSandboxContainer config-hash recreation", () => {
   beforeEach(async () => {
     spawnState.calls.length = 0;
@@ -282,10 +259,20 @@ describe("ensureSandboxContainer config-hash recreation", () => {
       ],
     });
 
-    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
-    expect(createCall.args).toContain(`openclaw.configHash=${expectedHash}`);
+    await ensureSandboxContainer({
+      sessionKey: "agent:main:session-1",
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      cfg,
+    });
 
-    const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+    const createCall = spawnState.calls.find(
+      (call) => call.command === "docker" && call.args[0] === "create",
+    );
+    expect(createCall).toBeDefined();
+    expect(createCall?.args).toContain(`openclaw.configHash=${expectedHash}`);
+
+    const bindArgs = collectDockerFlagValues(createCall?.args ?? [], "-v");
     const workspaceMountIdx = bindArgs.indexOf("/tmp/workspace:/workspace:z");
     const customMountIdx = bindArgs.indexOf("/tmp/workspace-shared/USER.md:/workspace/USER.md:ro");
     expect(workspaceMountIdx).toBeGreaterThanOrEqual(0);
@@ -307,9 +294,19 @@ describe("ensureSandboxContainer config-hash recreation", () => {
       registryMocks.readRegistry.mockResolvedValue({ entries: [] });
       registryMocks.updateRegistry.mockResolvedValue(undefined);
 
-      const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+      await ensureSandboxContainer({
+        sessionKey: "agent:main:session-1",
+        workspaceDir,
+        agentWorkspaceDir: workspaceDir,
+        cfg,
+      });
 
-      const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+      const createCall = spawnState.calls.find(
+        (call) => call.command === "docker" && call.args[0] === "create",
+      );
+      expect(createCall).toBeDefined();
+
+      const bindArgs = collectDockerFlagValues(createCall?.args ?? [], "-v");
       expect(bindArgs).toContain(expectedMainMount);
     },
   );
@@ -322,8 +319,18 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     spawnState.labelHash = "";
     registryMocks.readRegistry.mockResolvedValue({ entries: [] });
 
-    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
-    expect(createCall.args).toContain(
+    await ensureSandboxContainer({
+      sessionKey: "agent:main:session-1",
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      cfg,
+    });
+
+    const createCall = spawnState.calls.find(
+      (call) => call.command === "docker" && call.args[0] === "create",
+    );
+    expect(createCall).toBeDefined();
+    expect(createCall?.args).toContain(
       `openclaw.mountFormatVersion=${SANDBOX_MOUNT_FORMAT_VERSION}`,
     );
   });

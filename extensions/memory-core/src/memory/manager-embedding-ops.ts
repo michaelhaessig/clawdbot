@@ -4,7 +4,6 @@ import {
   enforceEmbeddingMaxInputTokens,
   hasNonTextEmbeddingParts,
   type EmbeddingInput,
-  type MemoryEmbeddingProviderRuntime,
 } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import { type SessionFileEntry } from "openclaw/plugin-sdk/memory-core-host-engine-qmd";
@@ -54,47 +53,6 @@ const EMBEDDING_BATCH_TIMEOUT_REMOTE_MS = 2 * 60_000;
 const EMBEDDING_BATCH_TIMEOUT_LOCAL_MS = 10 * 60_000;
 
 const log = createSubsystemLogger("memory");
-
-export function resolveEmbeddingTimeoutMs(params: {
-  kind: "query" | "batch";
-  providerId?: string;
-  providerRuntime?: Pick<
-    MemoryEmbeddingProviderRuntime,
-    "inlineQueryTimeoutMs" | "inlineBatchTimeoutMs"
-  >;
-  configuredBatchTimeoutSeconds?: number;
-}): number {
-  if (params.kind === "query") {
-    const runtimeTimeoutMs = params.providerRuntime?.inlineQueryTimeoutMs;
-    if (typeof runtimeTimeoutMs === "number" && runtimeTimeoutMs > 0) {
-      return runtimeTimeoutMs;
-    }
-    return params.providerId === "local"
-      ? EMBEDDING_QUERY_TIMEOUT_LOCAL_MS
-      : EMBEDDING_QUERY_TIMEOUT_REMOTE_MS;
-  }
-
-  const configuredTimeoutSeconds = params.configuredBatchTimeoutSeconds;
-  if (typeof configuredTimeoutSeconds === "number" && configuredTimeoutSeconds > 0) {
-    return configuredTimeoutSeconds * 1000;
-  }
-  const runtimeTimeoutMs = params.providerRuntime?.inlineBatchTimeoutMs;
-  if (typeof runtimeTimeoutMs === "number" && runtimeTimeoutMs > 0) {
-    return runtimeTimeoutMs;
-  }
-  return params.providerId === "local"
-    ? EMBEDDING_BATCH_TIMEOUT_LOCAL_MS
-    : EMBEDDING_BATCH_TIMEOUT_REMOTE_MS;
-}
-
-export function resolveMemoryIndexConcurrency(params: {
-  batch: { enabled: boolean; concurrency: number };
-  configuredConcurrency?: number;
-}): number {
-  return params.configuredConcurrency != null || params.batch.enabled
-    ? params.batch.concurrency
-    : EMBEDDING_INDEX_CONCURRENCY;
-}
 
 export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
   protected abstract batchFailureCount: number;
@@ -347,12 +305,11 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
   }
 
   private resolveEmbeddingTimeout(kind: "query" | "batch"): number {
-    return resolveEmbeddingTimeoutMs({
-      kind,
-      providerId: this.provider?.id,
-      providerRuntime: this.providerRuntime,
-      configuredBatchTimeoutSeconds: this.settings.sync.embeddingBatchTimeoutSeconds,
-    });
+    const isLocal = this.provider?.id === "local";
+    if (kind === "query") {
+      return isLocal ? EMBEDDING_QUERY_TIMEOUT_LOCAL_MS : EMBEDDING_QUERY_TIMEOUT_REMOTE_MS;
+    }
+    return isLocal ? EMBEDDING_BATCH_TIMEOUT_LOCAL_MS : EMBEDDING_BATCH_TIMEOUT_REMOTE_MS;
   }
 
   protected async embedQueryWithTimeout(text: string): Promise<number[]> {
@@ -507,10 +464,7 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
   }
 
   protected getIndexConcurrency(): number {
-    return resolveMemoryIndexConcurrency({
-      batch: this.batch,
-      configuredConcurrency: this.settings.remote?.batch?.concurrency,
-    });
+    return this.batch.enabled ? this.batch.concurrency : EMBEDDING_INDEX_CONCURRENCY;
   }
 
   private clearIndexedFileData(pathname: string, source: MemorySource): void {

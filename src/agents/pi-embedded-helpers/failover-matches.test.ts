@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   isAuthErrorMessage,
   isBillingErrorMessage,
-  isOverloadedErrorMessage,
   isRateLimitErrorMessage,
 } from "./failover-matches.js";
 
@@ -67,12 +66,6 @@ describe("Z.ai vendor error codes (#48988)", () => {
   describe("existing patterns are unaffected", () => {
     it("rate limit still classified correctly", () => {
       expect(isRateLimitErrorMessage("rate limit exceeded")).toBe(true);
-    });
-
-    it("OpenAI model-capacity text is classified as overloaded", () => {
-      expect(
-        isOverloadedErrorMessage("Selected model is at capacity. Please try a different model."),
-      ).toBe(true);
     });
 
     it("billing still classified correctly", () => {

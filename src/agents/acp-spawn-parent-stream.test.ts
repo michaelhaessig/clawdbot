@@ -78,7 +78,7 @@ describe("startAcpSpawnParentStreamRelay", () => {
 
   it("relays assistant progress and completion to the parent session", () => {
     const deliveryContext = {
-      channel: "forum",
+      channel: "telegram",
       to: "-1001234567890",
       accountId: "default",
       threadId: 1122,

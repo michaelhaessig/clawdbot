@@ -1,125 +1,6 @@
 // Manual facade. Keep loader boundary explicit.
-import type {
-  ModelDefinitionConfig,
-  ModelProviderConfig,
-  OpenClawConfig,
-} from "../config/types.js";
-import {
-  createLazyFacadeValue as createLazyFacadeRuntimeValue,
-  loadBundledPluginPublicSurfaceModuleSync,
-} from "./facade-runtime.js";
-
-type LmstudioReasoningCapabilityWire = {
-  allowed_options?: unknown;
-  default?: unknown;
-};
-
-export type LmstudioModelWire = {
-  type?: "llm" | "embedding";
-  key?: string;
-  display_name?: string;
-  max_context_length?: number;
-  format?: "gguf" | "mlx" | null;
-  capabilities?: {
-    vision?: boolean;
-    trained_for_tool_use?: boolean;
-    reasoning?: LmstudioReasoningCapabilityWire;
-  };
-  loaded_instances?: Array<{
-    id?: string;
-    config?: {
-      context_length?: number;
-    } | null;
-  } | null>;
-};
-
-export type LmstudioModelBase = {
-  id: string;
-  displayName: string;
-  format: "gguf" | "mlx" | null;
-  vision: boolean;
-  trainedForToolUse: boolean;
-  loaded: boolean;
-  reasoning: boolean;
-  input: Array<"text" | "image">;
-  cost: ModelDefinitionConfig["cost"];
-  contextWindow: number;
-  contextTokens: number;
-  maxTokens: number;
-};
-
-export type FetchLmstudioModelsResult = {
-  reachable: boolean;
-  status?: number;
-  models: LmstudioModelWire[];
-  error?: unknown;
-};
-
-type FacadeModule = {
-  LMSTUDIO_DEFAULT_BASE_URL: string;
-  LMSTUDIO_DEFAULT_INFERENCE_BASE_URL: string;
-  LMSTUDIO_DEFAULT_EMBEDDING_MODEL: string;
-  LMSTUDIO_PROVIDER_LABEL: string;
-  LMSTUDIO_DEFAULT_API_KEY_ENV_VAR: string;
-  LMSTUDIO_LOCAL_API_KEY_PLACEHOLDER: string;
-  LMSTUDIO_MODEL_PLACEHOLDER: string;
-  LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH: number;
-  LMSTUDIO_DEFAULT_MODEL_ID: string;
-  LMSTUDIO_PROVIDER_ID: string;
-  resolveLmstudioReasoningCapability: (entry: Pick<LmstudioModelWire, "capabilities">) => boolean;
-  resolveLoadedContextWindow: (entry: Pick<LmstudioModelWire, "loaded_instances">) => number | null;
-  resolveLmstudioServerBase: (configuredBaseUrl?: string) => string;
-  resolveLmstudioInferenceBase: (configuredBaseUrl?: string) => string;
-  normalizeLmstudioProviderConfig: (provider: ModelProviderConfig) => ModelProviderConfig;
-  fetchLmstudioModels: (params?: {
-    baseUrl?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-    ssrfPolicy?: unknown;
-    timeoutMs?: number;
-    fetchImpl?: typeof fetch;
-  }) => Promise<FetchLmstudioModelsResult>;
-  mapLmstudioWireEntry: (entry: LmstudioModelWire) => LmstudioModelBase | null;
-  discoverLmstudioModels: (params?: {
-    config?: OpenClawConfig;
-    baseUrl?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-  }) => Promise<ModelDefinitionConfig[]>;
-  ensureLmstudioModelLoaded: (params: Record<string, unknown>) => Promise<unknown>;
-  buildLmstudioAuthHeaders: (params: {
-    apiKey?: string;
-    json?: boolean;
-    headers?: Record<string, string>;
-  }) => Record<string, string> | undefined;
-  resolveLmstudioConfiguredApiKey: (params: {
-    config?: OpenClawConfig;
-    env?: NodeJS.ProcessEnv;
-    path?: string;
-  }) => Promise<string | undefined>;
-  resolveLmstudioProviderHeaders: (params: {
-    config?: OpenClawConfig;
-    env?: NodeJS.ProcessEnv;
-    headers?: unknown;
-    path?: string;
-  }) => Promise<Record<string, string> | undefined>;
-  resolveLmstudioRequestContext: (params: {
-    config?: OpenClawConfig;
-    env?: NodeJS.ProcessEnv;
-    headers?: unknown;
-    providerHeaders?: unknown;
-    path?: string;
-  }) => Promise<{
-    apiKey?: string;
-    headers?: Record<string, string>;
-  }>;
-  resolveLmstudioRuntimeApiKey: (params: {
-    config?: OpenClawConfig;
-    agentDir?: string;
-    env?: NodeJS.ProcessEnv;
-    headers?: unknown;
-  }) => Promise<string | undefined>;
-};
+type FacadeModule = typeof import("@openclaw/lmstudio/runtime-api.js");
+import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-runtime.js";
 
 function loadFacadeModule(): FacadeModule {
   return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({
@@ -127,6 +8,9 @@ function loadFacadeModule(): FacadeModule {
     artifactBasename: "runtime-api.js",
   });
 }
+
+export type LmstudioModelWire = Parameters<FacadeModule["mapLmstudioWireEntry"]>[0];
+export type LmstudioModelBase = Exclude<ReturnType<FacadeModule["mapLmstudioWireEntry"]>, null>;
 
 // Keep defaults inline so importing the runtime facade stays cold until a helper
 // is actually used. These values are part of the public LM Studio contract.
@@ -148,30 +32,38 @@ export const LMSTUDIO_DEFAULT_MODEL_ID: FacadeModule["LMSTUDIO_DEFAULT_MODEL_ID"
 export const LMSTUDIO_PROVIDER_ID: FacadeModule["LMSTUDIO_PROVIDER_ID"] = "lmstudio";
 
 export const resolveLmstudioReasoningCapability: FacadeModule["resolveLmstudioReasoningCapability"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioReasoningCapability");
+  createLazyFacadeValue("resolveLmstudioReasoningCapability");
 export const resolveLoadedContextWindow: FacadeModule["resolveLoadedContextWindow"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLoadedContextWindow");
+  createLazyFacadeValue("resolveLoadedContextWindow");
 export const resolveLmstudioServerBase: FacadeModule["resolveLmstudioServerBase"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioServerBase");
+  createLazyFacadeValue("resolveLmstudioServerBase");
 export const resolveLmstudioInferenceBase: FacadeModule["resolveLmstudioInferenceBase"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioInferenceBase");
+  createLazyFacadeValue("resolveLmstudioInferenceBase");
 export const normalizeLmstudioProviderConfig: FacadeModule["normalizeLmstudioProviderConfig"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "normalizeLmstudioProviderConfig");
+  createLazyFacadeValue("normalizeLmstudioProviderConfig");
 export const fetchLmstudioModels: FacadeModule["fetchLmstudioModels"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "fetchLmstudioModels");
+  createLazyFacadeValue("fetchLmstudioModels");
 export const mapLmstudioWireEntry: FacadeModule["mapLmstudioWireEntry"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "mapLmstudioWireEntry");
+  createLazyFacadeValue("mapLmstudioWireEntry");
 export const discoverLmstudioModels: FacadeModule["discoverLmstudioModels"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "discoverLmstudioModels");
+  createLazyFacadeValue("discoverLmstudioModels");
 export const ensureLmstudioModelLoaded: FacadeModule["ensureLmstudioModelLoaded"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "ensureLmstudioModelLoaded");
+  createLazyFacadeValue("ensureLmstudioModelLoaded");
 export const buildLmstudioAuthHeaders: FacadeModule["buildLmstudioAuthHeaders"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "buildLmstudioAuthHeaders");
+  createLazyFacadeValue("buildLmstudioAuthHeaders");
 export const resolveLmstudioConfiguredApiKey: FacadeModule["resolveLmstudioConfiguredApiKey"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioConfiguredApiKey");
+  createLazyFacadeValue("resolveLmstudioConfiguredApiKey");
 export const resolveLmstudioProviderHeaders: FacadeModule["resolveLmstudioProviderHeaders"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioProviderHeaders");
-export const resolveLmstudioRequestContext: FacadeModule["resolveLmstudioRequestContext"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioRequestContext");
+  createLazyFacadeValue("resolveLmstudioProviderHeaders");
 export const resolveLmstudioRuntimeApiKey: FacadeModule["resolveLmstudioRuntimeApiKey"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveLmstudioRuntimeApiKey");
+  createLazyFacadeValue("resolveLmstudioRuntimeApiKey");
+
+function createLazyFacadeValue<K extends keyof FacadeModule>(key: K): FacadeModule[K] {
+  return ((...args: unknown[]) => {
+    const value = loadFacadeModule()[key];
+    if (typeof value !== "function") {
+      return value;
+    }
+    return (value as (...innerArgs: unknown[]) => unknown)(...args);
+  }) as FacadeModule[K];
+}

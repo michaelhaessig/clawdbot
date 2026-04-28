@@ -18,7 +18,6 @@ let loadGatewayRuntimeConfigSchema: typeof import("./runtime-schema.js").loadGat
 
 vi.mock("./config.js", () => {
   return {
-    getRuntimeConfig: () => mockLoadConfig(),
     loadConfig: () => mockLoadConfig(),
     readConfigFileSnapshot: () => mockReadConfigFileSnapshot(),
   };
@@ -26,11 +25,6 @@ vi.mock("./config.js", () => {
 
 vi.mock("../plugins/manifest-registry.js", () => ({
   loadPluginManifestRegistry: (...args: unknown[]) => mockLoadPluginManifestRegistry(...args),
-}));
-
-vi.mock("../plugins/plugin-registry.js", () => ({
-  loadPluginManifestRegistryForPluginRegistry: (...args: unknown[]) =>
-    mockLoadPluginManifestRegistry(...args),
 }));
 
 function makeSnapshot(params: { valid: boolean; config?: OpenClawConfig }): ConfigFileSnapshot {

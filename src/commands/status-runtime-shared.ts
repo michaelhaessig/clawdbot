@@ -1,4 +1,3 @@
-import { resolveReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import type { HealthSummary } from "./health.js";
@@ -28,20 +27,12 @@ export async function resolveStatusSecurityAudit(params: {
   sourceConfig: OpenClawConfig;
 }) {
   const { runSecurityAudit } = await loadSecurityAuditModule();
-  const readOnlyPlugins = resolveReadOnlyChannelPluginsForConfig(params.config, {
-    activationSourceConfig: params.sourceConfig,
-    includeSetupRuntimeFallback: false,
-  });
   return await runSecurityAudit({
     config: params.config,
     sourceConfig: params.sourceConfig,
     deep: false,
     includeFilesystem: true,
     includeChannelSecurity: true,
-    loadPluginSecurityCollectors: false,
-    ...(readOnlyPlugins.missingConfiguredChannelIds.length === 0
-      ? { plugins: readOnlyPlugins.plugins }
-      : {}),
   });
 }
 

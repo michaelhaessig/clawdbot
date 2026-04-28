@@ -1,16 +1,8 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installDebugProxyTestResetHooks } from "../test-support/debug-proxy-env-test-helpers.js";
-
-vi.mock("node-edge-tts", () => ({
-  EdgeTTS: class {
-    async ttsPromise(): Promise<void> {}
-  },
-}));
-
 import {
   buildMicrosoftSpeechProvider,
   isCjkDominant,
@@ -21,7 +13,28 @@ import * as ttsModule from "./tts.js";
 const TEST_CFG = {} as OpenClawConfig;
 
 describe("listMicrosoftVoices", () => {
-  const proxyReset = installDebugProxyTestResetHooks();
+  const originalFetch = globalThis.fetch;
+  const proxyEnvKeys = [
+    "OPENCLAW_DEBUG_PROXY_ENABLED",
+    "OPENCLAW_DEBUG_PROXY_DB_PATH",
+    "OPENCLAW_DEBUG_PROXY_BLOB_DIR",
+    "OPENCLAW_DEBUG_PROXY_SESSION_ID",
+  ] as const;
+  let priorProxyEnv: Partial<Record<(typeof proxyEnvKeys)[number], string | undefined>> = {};
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+    for (const key of proxyEnvKeys) {
+      const value = priorProxyEnv[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    priorProxyEnv = {};
+  });
 
   it("maps Microsoft voice metadata into speech voice options", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
@@ -69,7 +82,9 @@ describe("listMicrosoftVoices", () => {
 
   it("records voice discovery exchanges in debug proxy capture mode", async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "microsoft-voices-capture-"));
-    proxyReset.captureProxyEnv();
+    priorProxyEnv = Object.fromEntries(
+      proxyEnvKeys.map((key) => [key, process.env[key]]),
+    ) as typeof priorProxyEnv;
     process.env.OPENCLAW_DEBUG_PROXY_ENABLED = "1";
     process.env.OPENCLAW_DEBUG_PROXY_DB_PATH = path.join(tempDir, "capture.sqlite");
     process.env.OPENCLAW_DEBUG_PROXY_BLOB_DIR = path.join(tempDir, "blobs");
@@ -112,7 +127,9 @@ describe("listMicrosoftVoices", () => {
 
   it("does not double-capture voice discovery when the global fetch patch is installed", async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "microsoft-voices-global-"));
-    proxyReset.captureProxyEnv();
+    priorProxyEnv = Object.fromEntries(
+      proxyEnvKeys.map((key) => [key, process.env[key]]),
+    ) as typeof priorProxyEnv;
     process.env.OPENCLAW_DEBUG_PROXY_ENABLED = "1";
     process.env.OPENCLAW_DEBUG_PROXY_DB_PATH = path.join(tempDir, "capture.sqlite");
     process.env.OPENCLAW_DEBUG_PROXY_BLOB_DIR = path.join(tempDir, "blobs");
@@ -151,7 +168,7 @@ describe("listMicrosoftVoices", () => {
       const kinds = events.map((event) => String(event.kind)).toSorted();
       expect(kinds).toEqual(["request", "response"]);
     } finally {
-      globalThis.fetch = proxyReset.originalFetch;
+      globalThis.fetch = originalFetch;
       finalizeDebugProxyCapture();
     }
   });

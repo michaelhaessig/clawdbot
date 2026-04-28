@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const mocks = vi.hoisted(() => ({
   resolveSessionAgentId: vi.fn(() => "agent-from-key"),
   deliveryContextFromSession: vi.fn(() => ({
-    channel: "mobilechat",
+    channel: "whatsapp",
     to: "+15550001",
     accountId: "acct-1",
     threadId: "thread-1",
@@ -101,7 +101,7 @@ describe("deliverSessionMaintenanceWarning", () => {
 
     expect(mocks.deliverOutboundPayloads).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: "mobilechat",
+        channel: "whatsapp",
         to: "+15550001",
         session: { key: "agent:main:main", agentId: "agent-from-key" },
       }),

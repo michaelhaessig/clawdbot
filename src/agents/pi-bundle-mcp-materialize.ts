@@ -3,15 +3,14 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
-import { setPluginToolMeta } from "../plugins/tools.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   buildSafeToolName,
   normalizeReservedToolNames,
   TOOL_NAME_SEPARATOR,
 } from "./pi-bundle-mcp-names.js";
+import { createSessionMcpRuntime } from "./pi-bundle-mcp-runtime.js";
 import type { BundleMcpToolRuntime, SessionMcpRuntime } from "./pi-bundle-mcp-types.js";
-import type { AnyAgentTool } from "./tools/common.js";
 
 function toAgentToolResult(params: {
   serverName: string;
@@ -66,16 +65,8 @@ export async function materializeBundleMcpToolsForRun(params: {
   reservedToolNames?: Iterable<string>;
   disposeRuntime?: () => Promise<void>;
 }): Promise<BundleMcpToolRuntime> {
-  let disposed = false;
-  const releaseLease = params.runtime.acquireLease?.();
   params.runtime.markUsed();
-  let catalog;
-  try {
-    catalog = await params.runtime.getCatalog();
-  } catch (error) {
-    releaseLease?.();
-    throw error;
-  }
+  const catalog = await params.runtime.getCatalog();
   const reservedNames = normalizeReservedToolNames(params.reservedToolNames);
   const tools: BundleMcpToolRuntime["tools"] = [];
   const sortedCatalogTools = [...catalog.tools].toSorted((a, b) => {
@@ -106,13 +97,12 @@ export async function materializeBundleMcpToolsForRun(params: {
       );
     }
     reservedNames.add(normalizeLowercaseStringOrEmpty(safeToolName));
-    const agentTool: AnyAgentTool = {
+    tools.push({
       name: safeToolName,
       label: tool.title ?? tool.toolName,
       description: tool.description || tool.fallbackDescription,
       parameters: tool.inputSchema,
       execute: async (_toolCallId: string, input: unknown) => {
-        params.runtime.markUsed();
         const result = await params.runtime.callTool(tool.serverName, tool.toolName, input);
         return toAgentToolResult({
           serverName: tool.serverName,
@@ -120,12 +110,7 @@ export async function materializeBundleMcpToolsForRun(params: {
           result,
         });
       },
-    };
-    setPluginToolMeta(agentTool, {
-      pluginId: "bundle-mcp",
-      optional: false,
     });
-    tools.push(agentTool);
   }
 
   // Sort tools deterministically by name so the tools block in API requests is stable across
@@ -136,11 +121,6 @@ export async function materializeBundleMcpToolsForRun(params: {
   return {
     tools,
     dispose: async () => {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-      releaseLease?.();
       await params.disposeRuntime?.();
     },
   };
@@ -150,15 +130,8 @@ export async function createBundleMcpToolRuntime(params: {
   workspaceDir: string;
   cfg?: OpenClawConfig;
   reservedToolNames?: Iterable<string>;
-  createRuntime?: (params: {
-    sessionId: string;
-    workspaceDir: string;
-    cfg?: OpenClawConfig;
-  }) => SessionMcpRuntime;
 }): Promise<BundleMcpToolRuntime> {
-  const createRuntime =
-    params.createRuntime ?? (await import("./pi-bundle-mcp-runtime.js")).createSessionMcpRuntime;
-  const runtime = createRuntime({
+  const runtime = createSessionMcpRuntime({
     sessionId: `bundle-mcp:${crypto.randomUUID()}`,
     workspaceDir: params.workspaceDir,
     cfg: params.cfg,

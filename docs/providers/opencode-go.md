@@ -6,6 +6,8 @@ read_when:
 title: "OpenCode Go"
 ---
 
+# OpenCode Go
+
 OpenCode Go is the Go catalog within [OpenCode](/providers/opencode).
 It uses the same `OPENCODE_API_KEY` as the Zen catalog, but keeps the runtime
 provider id `opencode-go` so upstream per-model routing stays correct.
@@ -16,28 +18,13 @@ provider id `opencode-go` so upstream per-model routing stays correct.
 | Auth             | `OPENCODE_API_KEY`              |
 | Parent setup     | [OpenCode](/providers/opencode) |
 
-## Built-in catalog
+## Supported models
 
-OpenClaw sources most Go catalog rows from the bundled pi model registry and
-supplements current upstream rows while the registry catches up. Run
-`openclaw models list --provider opencode-go` for the current model list.
-
-The provider includes:
-
-| Model ref                       | Name                  |
-| ------------------------------- | --------------------- |
-| `opencode-go/glm-5`             | GLM-5                 |
-| `opencode-go/glm-5.1`           | GLM-5.1               |
-| `opencode-go/kimi-k2.5`         | Kimi K2.5             |
-| `opencode-go/kimi-k2.6`         | Kimi K2.6 (3x limits) |
-| `opencode-go/deepseek-v4-pro`   | DeepSeek V4 Pro       |
-| `opencode-go/deepseek-v4-flash` | DeepSeek V4 Flash     |
-| `opencode-go/mimo-v2-omni`      | MiMo V2 Omni          |
-| `opencode-go/mimo-v2-pro`       | MiMo V2 Pro           |
-| `opencode-go/minimax-m2.5`      | MiniMax M2.5          |
-| `opencode-go/minimax-m2.7`      | MiniMax M2.7          |
-| `opencode-go/qwen3.5-plus`      | Qwen3.5 Plus          |
-| `opencode-go/qwen3.6-plus`      | Qwen3.6 Plus          |
+| Model ref                  | Name         |
+| -------------------------- | ------------ |
+| `opencode-go/kimi-k2.5`    | Kimi K2.5    |
+| `opencode-go/glm-5`        | GLM 5        |
+| `opencode-go/minimax-m2.5` | MiniMax M2.5 |
 
 ## Getting started
 
@@ -51,7 +38,7 @@ The provider includes:
       </Step>
       <Step title="Set a Go model as default">
         ```bash
-        openclaw config set agents.defaults.model.primary "opencode-go/kimi-k2.6"
+        openclaw config set agents.defaults.model.primary "opencode-go/kimi-k2.5"
         ```
       </Step>
       <Step title="Verify models are available">
@@ -83,11 +70,11 @@ The provider includes:
 ```json5
 {
   env: { OPENCODE_API_KEY: "YOUR_API_KEY_HERE" }, // pragma: allowlist secret
-  agents: { defaults: { model: { primary: "opencode-go/kimi-k2.6" } } },
+  agents: { defaults: { model: { primary: "opencode-go/kimi-k2.5" } } },
 }
 ```
 
-## Advanced configuration
+## Advanced notes
 
 <AccordionGroup>
   <Accordion title="Routing behavior">

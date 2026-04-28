@@ -4,8 +4,10 @@ read_when:
   - You want to enable or configure code_execution
   - You want remote analysis without local shell access
   - You want to combine x_search or web_search with remote Python analysis
-title: "Code execution"
+title: "Code Execution"
 ---
+
+# Code Execution
 
 `code_execution` runs sandboxed remote Python analysis on xAI's Responses API.
 This is different from local [`exec`](/tools/exec):
@@ -55,7 +57,7 @@ Example:
 }
 ```
 
-## How to use it
+## How To Use It
 
 Ask naturally and make the analysis intent explicit:
 
@@ -81,10 +83,8 @@ the full analysis request and any inline data in one prompt.
 - Do not assume access to local files or your workspace.
 - For fresh X data, use [`x_search`](/tools/web#x_search) first.
 
-## Related
+## See Also
 
-- [Exec tool](/tools/exec)
-- [Exec approvals](/tools/exec-approvals)
-- [apply_patch tool](/tools/apply-patch)
 - [Web tools](/tools/web)
+- [Exec](/tools/exec)
 - [xAI](/providers/xai)

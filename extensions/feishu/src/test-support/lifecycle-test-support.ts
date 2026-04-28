@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { expect, vi, type Mock } from "vitest";
 import { createPluginRuntimeMock } from "../../../../test/helpers/plugins/plugin-runtime-mock.js";
 import type { ClawdbotConfig, PluginRuntime, RuntimeEnv } from "../../runtime-api.js";
-import { createFeishuMessageReceiveHandler } from "../monitor.message-handler.js";
 import { setFeishuRuntime } from "../runtime.js";
 import type { ResolvedFeishuAccount } from "../types.js";
 
@@ -106,44 +105,45 @@ export function installFeishuLifecycleRuntime(params: {
   upsertPairingRequest?: PluginRuntime["channel"]["pairing"]["upsertPairingRequest"];
   buildPairingReply?: PluginRuntime["channel"]["pairing"]["buildPairingReply"];
   detectMime?: PluginRuntime["media"]["detectMime"];
-}): PluginRuntime {
-  const runtime = createPluginRuntimeMock({
-    channel: {
-      debounce: createImmediateInboundDebounce(),
-      text: {
-        hasControlCommand: params.hasControlCommand ?? vi.fn(() => false),
+}) {
+  setFeishuRuntime(
+    createPluginRuntimeMock({
+      channel: {
+        debounce: createImmediateInboundDebounce(),
+        text: {
+          hasControlCommand: params.hasControlCommand ?? vi.fn(() => false),
+        },
+        routing: {
+          resolveAgentRoute: params.resolveAgentRoute,
+        },
+        reply: {
+          resolveEnvelopeFormatOptions: vi.fn(() => ({})),
+          formatAgentEnvelope: vi.fn((value: { body: string }) => value.body),
+          finalizeInboundContext: params.finalizeInboundContext,
+          dispatchReplyFromConfig: params.dispatchReplyFromConfig,
+          withReplyDispatcher: params.withReplyDispatcher,
+        },
+        commands: {
+          shouldComputeCommandAuthorized:
+            params.shouldComputeCommandAuthorized ?? vi.fn(() => false),
+          resolveCommandAuthorizedFromAuthorizers:
+            params.resolveCommandAuthorizedFromAuthorizers ?? vi.fn(() => false),
+        },
+        session: {
+          readSessionUpdatedAt: vi.fn(),
+          resolveStorePath: params.resolveStorePath,
+        },
+        pairing: {
+          readAllowFromStore: params.readAllowFromStore ?? vi.fn().mockResolvedValue([]),
+          upsertPairingRequest: params.upsertPairingRequest ?? vi.fn(),
+          buildPairingReply: params.buildPairingReply ?? vi.fn(),
+        },
       },
-      routing: {
-        resolveAgentRoute: params.resolveAgentRoute,
+      media: {
+        detectMime: params.detectMime ?? vi.fn(async () => "text/plain"),
       },
-      reply: {
-        resolveEnvelopeFormatOptions: vi.fn(() => ({})),
-        formatAgentEnvelope: vi.fn((value: { body: string }) => value.body),
-        finalizeInboundContext: params.finalizeInboundContext,
-        dispatchReplyFromConfig: params.dispatchReplyFromConfig,
-        withReplyDispatcher: params.withReplyDispatcher,
-      },
-      commands: {
-        shouldComputeCommandAuthorized: params.shouldComputeCommandAuthorized ?? vi.fn(() => false),
-        resolveCommandAuthorizedFromAuthorizers:
-          params.resolveCommandAuthorizedFromAuthorizers ?? vi.fn(() => false),
-      },
-      session: {
-        readSessionUpdatedAt: vi.fn(),
-        resolveStorePath: params.resolveStorePath,
-      },
-      pairing: {
-        readAllowFromStore: params.readAllowFromStore ?? vi.fn().mockResolvedValue([]),
-        upsertPairingRequest: params.upsertPairingRequest ?? vi.fn(),
-        buildPairingReply: params.buildPairingReply ?? vi.fn(),
-      },
-    },
-    media: {
-      detectMime: params.detectMime ?? vi.fn(async () => "text/plain"),
-    },
-  }) as unknown as PluginRuntime;
-  setFeishuRuntime(runtime);
-  return runtime;
+    }) as unknown as PluginRuntime,
+  );
 }
 
 export function installFeishuLifecycleReplyRuntime(params: {
@@ -152,8 +152,8 @@ export function installFeishuLifecycleReplyRuntime(params: {
   dispatchReplyFromConfigMock: unknown;
   withReplyDispatcherMock: unknown;
   storePath: string;
-}): PluginRuntime {
-  return installFeishuLifecycleRuntime({
+}) {
+  installFeishuLifecycleRuntime({
     resolveAgentRoute:
       params.resolveAgentRouteMock as PluginRuntime["channel"]["routing"]["resolveAgentRoute"],
     finalizeInboundContext:
@@ -298,29 +298,18 @@ export function createFeishuTextMessageEvent(params: {
   };
 }
 
-async function expectFeishuLifecycleEventually(
-  assertion: () => void | Promise<void>,
-  timeoutMs: number,
-) {
-  try {
-    await assertion();
-  } catch {
-    await vi.waitFor(assertion, { timeout: timeoutMs });
-  }
-}
-
 export async function replayFeishuLifecycleEvent(params: {
   handler: (data: unknown) => Promise<void>;
   event: unknown;
   waitForFirst: () => void | Promise<void>;
   waitForSecond?: () => void | Promise<void>;
-  waitTimeoutMs?: number;
 }) {
-  const waitTimeoutMs = params.waitTimeoutMs ?? FEISHU_LIFECYCLE_WAIT_TIMEOUT_MS;
   await params.handler(params.event);
-  await expectFeishuLifecycleEventually(params.waitForFirst, waitTimeoutMs);
+  await vi.waitFor(params.waitForFirst, { timeout: FEISHU_LIFECYCLE_WAIT_TIMEOUT_MS });
   await params.handler(params.event);
-  await expectFeishuLifecycleEventually(params.waitForSecond ?? params.waitForFirst, waitTimeoutMs);
+  await vi.waitFor(params.waitForSecond ?? params.waitForFirst, {
+    timeout: FEISHU_LIFECYCLE_WAIT_TIMEOUT_MS,
+  });
 }
 
 export async function runFeishuLifecycleSequence(
@@ -329,10 +318,9 @@ export async function runFeishuLifecycleSequence(
 ) {
   for (const [index, deliver] of deliveries.entries()) {
     await deliver();
-    await expectFeishuLifecycleEventually(
-      waits[index] ?? waits.at(-1) ?? (() => {}),
-      FEISHU_LIFECYCLE_WAIT_TIMEOUT_MS,
-    );
+    await vi.waitFor(waits[index] ?? waits.at(-1) ?? (() => {}), {
+      timeout: FEISHU_LIFECYCLE_WAIT_TIMEOUT_MS,
+    });
   }
 }
 
@@ -363,14 +351,21 @@ export async function expectFeishuReplyPipelineDedupedAcrossReplay(params: {
   await replayFeishuLifecycleEvent({
     handler: params.handler,
     event: params.event,
-    waitTimeoutMs,
-    waitForFirst: () => {
-      expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
-    },
-    waitForSecond: () => {
-      expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
-      expect(params.createFeishuReplyDispatcherMock).toHaveBeenCalledTimes(1);
-    },
+    waitForFirst: () =>
+      vi.waitFor(
+        () => {
+          expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+        },
+        waitTimeoutMs == null ? undefined : { timeout: waitTimeoutMs },
+      ),
+    waitForSecond: () =>
+      vi.waitFor(
+        () => {
+          expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+          expect(params.createFeishuReplyDispatcherMock).toHaveBeenCalledTimes(1);
+        },
+        waitTimeoutMs == null ? undefined : { timeout: waitTimeoutMs },
+      ),
   });
 }
 
@@ -385,15 +380,22 @@ export async function expectFeishuReplyPipelineDedupedAfterPostSendFailure(param
   await replayFeishuLifecycleEvent({
     handler: params.handler,
     event: params.event,
-    waitTimeoutMs,
-    waitForFirst: () => {
-      expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
-      expect(params.runtimeErrorMock).toHaveBeenCalledTimes(1);
-    },
-    waitForSecond: () => {
-      expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
-      expect(params.runtimeErrorMock).toHaveBeenCalledTimes(1);
-    },
+    waitForFirst: () =>
+      vi.waitFor(
+        () => {
+          expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+          expect(params.runtimeErrorMock).toHaveBeenCalledTimes(1);
+        },
+        waitTimeoutMs == null ? undefined : { timeout: waitTimeoutMs },
+      ),
+    waitForSecond: () =>
+      vi.waitFor(
+        () => {
+          expect(params.dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+          expect(params.runtimeErrorMock).toHaveBeenCalledTimes(1);
+        },
+        waitTimeoutMs == null ? undefined : { timeout: waitTimeoutMs },
+      ),
   });
 }
 
@@ -411,38 +413,13 @@ async function loadMonitorSingleAccount() {
   return module.monitorSingleAccount;
 }
 
-export async function setupFeishuMessageReceiveLifecycleHandler(params: {
-  runtime: RuntimeEnv;
-  core: PluginRuntime;
-  cfg: ClawdbotConfig;
-  accountId: string;
-  fireAndForget?: boolean;
-  handleMessage: Parameters<typeof createFeishuMessageReceiveHandler>[0]["handleMessage"];
-  resolveDebounceText: Parameters<
-    typeof createFeishuMessageReceiveHandler
-  >[0]["resolveDebounceText"];
-}): Promise<(data: unknown) => Promise<void>> {
-  return createFeishuMessageReceiveHandler({
-    cfg: params.cfg,
-    core: params.core,
-    accountId: params.accountId,
-    runtime: params.runtime,
-    chatHistories: new Map(),
-    fireAndForget: params.fireAndForget,
-    handleMessage: params.handleMessage,
-    resolveDebounceText: params.resolveDebounceText,
-    hasProcessedMessage: vi.fn(async () => false),
-    recordProcessedMessage: vi.fn(async () => true),
-  });
-}
-
-export async function setupFeishuLifecycleHandler(params: {
+export async function setupFeishuLifecycleHandler<T extends RuntimeEnv>(params: {
   createEventDispatcherMock: {
     mockReturnValue: (value: unknown) => unknown;
     mockReturnValueOnce: (value: unknown) => unknown;
   };
   onRegister: (registered: Record<string, (data: unknown) => Promise<void>>) => void;
-  runtime: RuntimeEnv;
+  runtime: T;
   cfg: ClawdbotConfig;
   account: ResolvedFeishuAccount;
   handlerKey: string;
@@ -464,7 +441,6 @@ export async function setupFeishuLifecycleHandler(params: {
     account: params.account,
     runtime: params.runtime,
     botOpenIdSource: FEISHU_PREFETCHED_BOT_OPEN_ID_SOURCE,
-    fireAndForget: false,
   });
 
   const handlers: Record<string, (data: unknown) => Promise<void>> = {};

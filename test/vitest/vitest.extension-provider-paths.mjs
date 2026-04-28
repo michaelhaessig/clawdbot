@@ -14,7 +14,6 @@ export const providerExtensionIds = [
   "groq",
   "huggingface",
   "kimi-coding",
-  "lmstudio",
   "microsoft",
   "microsoft-foundry",
   "minimax",
@@ -23,6 +22,7 @@ export const providerExtensionIds = [
   "moonshot",
   "nvidia",
   "ollama",
+  "openai",
   "openrouter",
   "qianfan",
   "stepfun",
@@ -33,17 +33,8 @@ export const providerExtensionIds = [
   "zai",
 ];
 
-export const providerOpenAiExtensionIds = ["openai"];
-
 export const providerExtensionTestRoots = providerExtensionIds.map((id) => bundledPluginRoot(id));
-export const providerOpenAiExtensionTestRoots = providerOpenAiExtensionIds.map((id) =>
-  bundledPluginRoot(id),
-);
 
 export function isProviderExtensionRoot(root) {
   return providerExtensionTestRoots.includes(root);
-}
-
-export function isProviderOpenAiExtensionRoot(root) {
-  return providerOpenAiExtensionTestRoots.includes(root);
 }

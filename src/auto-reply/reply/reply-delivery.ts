@@ -2,7 +2,7 @@ import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-pay
 import { logVerbose } from "../../globals.js";
 import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
-import type { BlockReplyContext, ReplyPayload, ReplyThreadingPolicy } from "../types.js";
+import type { BlockReplyContext, ReplyPayload } from "../types.js";
 import type { BlockReplyPipeline } from "./block-reply-pipeline.js";
 import { createBlockReplyContentKey } from "./block-reply-pipeline.js";
 import { parseReplyDirectives } from "./reply-directives.js";
@@ -17,7 +17,6 @@ export function normalizeReplyPayloadDirectives(params: {
   silentToken?: string;
   trimLeadingWhitespace?: boolean;
   parseMode?: ReplyDirectiveParseMode;
-  extractMarkdownImages?: boolean;
 }): { payload: ReplyPayload; isSilent: boolean } {
   const parseMode = params.parseMode ?? "always";
   const silentToken = params.silentToken ?? SILENT_REPLY_TOKEN;
@@ -27,15 +26,13 @@ export function normalizeReplyPayloadDirectives(params: {
     parseMode === "always" ||
     (parseMode === "auto" &&
       (sourceText.includes("[[") ||
-        /media:/i.test(sourceText) ||
-        (params.extractMarkdownImages === true && /!\[[^\]]*]\(/.test(sourceText)) ||
+        sourceText.includes("MEDIA:") ||
         sourceText.includes(silentToken)));
 
   const parsed = shouldParse
     ? parseReplyDirectives(sourceText, {
         currentMessageId: params.currentMessageId,
         silentToken,
-        extractMarkdownImages: params.extractMarkdownImages,
       })
     : undefined;
 
@@ -80,7 +77,6 @@ async function sendDirectBlockReply(params: {
 export function createBlockReplyDeliveryHandler(params: {
   onBlockReply: (payload: ReplyPayload, context?: BlockReplyContext) => Promise<void> | void;
   currentMessageId?: string;
-  replyThreading?: ReplyThreadingPolicy;
   normalizeStreamingText: (payload: ReplyPayload) => { text?: string; skip: boolean };
   applyReplyToMode: (payload: ReplyPayload) => ReplyPayload;
   normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
@@ -95,13 +91,6 @@ export function createBlockReplyDeliveryHandler(params: {
       return;
     }
 
-    const implicitCurrentMessageAllowed =
-      payload.replyToCurrent === true
-        ? true
-        : payload.replyToCurrent === false
-          ? false
-          : params.replyThreading?.implicitCurrentMessage !== "deny";
-
     const taggedPayload = applyReplyTagsToPayload(
       {
         ...payload,
@@ -109,7 +98,7 @@ export function createBlockReplyDeliveryHandler(params: {
         mediaUrl: payload.mediaUrl ?? payload.mediaUrls?.[0],
         replyToId:
           payload.replyToId ??
-          (implicitCurrentMessageAllowed ? params.currentMessageId : undefined),
+          (payload.replyToCurrent === false ? undefined : params.currentMessageId),
       },
       params.currentMessageId,
     );
@@ -162,14 +151,15 @@ export function createBlockReplyDeliveryHandler(params: {
         trackingPayload: blockPayload,
         payload: blockPayload,
       });
-    } else if (blockHasMedia && !blockPayload.text) {
-      // Media-only block replies (for example orphaned tool attachments) are not reconstructible
-      // from the assistant's final text, so they still need a direct fallback when streaming is off.
+    } else if (blockHasMedia) {
+      // When block streaming is disabled, text-only block replies are accumulated into the
+      // final response. Media cannot be reconstructed later, so send it immediately and let
+      // the assistant's final text arrive through the normal final-reply path.
       await sendDirectBlockReply({
         onBlockReply: params.onBlockReply,
         directlySentBlockKeys: params.directlySentBlockKeys,
         trackingPayload: blockPayload,
-        payload: blockPayload,
+        payload: { ...blockPayload, text: undefined },
       });
     }
     // When streaming is disabled entirely, text-only blocks are accumulated in final text.

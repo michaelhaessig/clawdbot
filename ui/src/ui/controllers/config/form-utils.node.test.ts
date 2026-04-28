@@ -1,4 +1,3 @@
-// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { JsonSchema } from "../../views/config-form.shared.ts";
 import { coerceFormValues } from "./form-coerce.ts";
@@ -140,7 +139,7 @@ describe("prototype pollution prevention", () => {
     const obj: Record<string, unknown> = {};
     setPathValue(obj, ["__proto__", "polluted"], true);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    expect(Object.getPrototypeOf(obj)).toBe(Object.prototype);
+    expect(obj.__proto__).toBe(Object.prototype);
   });
 
   it("setPathValue rejects constructor in path", () => {

@@ -1,5 +1,4 @@
 import { createDraftStreamLoop } from "openclaw/plugin-sdk/channel-lifecycle";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { deleteSlackMessage, editSlackMessage } from "./actions.js";
 import { SLACK_TEXT_LIMIT } from "./limits.js";
@@ -11,8 +10,6 @@ export type SlackDraftStream = {
   update: (text: string) => void;
   flush: () => Promise<void>;
   clear: () => Promise<void>;
-  discardPending: () => Promise<void>;
-  seal: () => Promise<void>;
   stop: () => void;
   forceNewMessage: () => void;
   messageId: () => string | undefined;
@@ -21,7 +18,6 @@ export type SlackDraftStream = {
 
 export function createSlackDraftStream(params: {
   target: string;
-  cfg: OpenClawConfig;
   token: string;
   accountId?: string;
   maxChars?: number;
@@ -65,14 +61,12 @@ export function createSlackDraftStream(params: {
     try {
       if (streamChannelId && streamMessageId) {
         await edit(streamChannelId, streamMessageId, trimmed, {
-          cfg: params.cfg,
           token: params.token,
           accountId: params.accountId,
         });
         return;
       }
       const sent = await send(params.target, trimmed, {
-        cfg: params.cfg,
         token: params.token,
         accountId: params.accountId,
         threadTs: params.resolveThreadTs?.(),
@@ -101,13 +95,9 @@ export function createSlackDraftStream(params: {
     loop.stop();
   };
 
-  const discardPending = async () => {
+  const clear = async () => {
     stop();
     await loop.waitForInFlight();
-  };
-
-  const clear = async () => {
-    await discardPending();
     const channelId = streamChannelId;
     const messageId = streamMessageId;
     streamChannelId = undefined;
@@ -139,8 +129,6 @@ export function createSlackDraftStream(params: {
     update: loop.update,
     flush: loop.flush,
     clear,
-    discardPending,
-    seal: discardPending,
     stop,
     forceNewMessage,
     messageId: () => streamMessageId,

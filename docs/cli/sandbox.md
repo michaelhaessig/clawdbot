@@ -1,9 +1,11 @@
 ---
-summary: "Manage sandbox runtimes and inspect effective sandbox policy"
 title: Sandbox CLI
+summary: "Manage sandbox runtimes and inspect effective sandbox policy"
 read_when: "You are managing sandbox runtimes or debugging sandbox/tool-policy behavior."
 status: active
 ---
+
+# Sandbox CLI
 
 Manage sandbox runtimes for isolated agent execution.
 
@@ -75,11 +77,9 @@ openclaw sandbox recreate --all --force        # Skip confirmation
 - `--browser`: Only recreate browser containers
 - `--force`: Skip confirmation prompt
 
-<Note>
-Runtimes are automatically recreated when the agent is next used.
-</Note>
+**Important:** Runtimes are automatically recreated when the agent is next used.
 
-## Use cases
+## Use Cases
 
 ### After updating a Docker image
 
@@ -150,19 +150,18 @@ openclaw sandbox recreate --agent family
 openclaw sandbox recreate --agent alfred
 ```
 
-## Why this is needed
+## Why is this needed?
 
-When you update sandbox configuration:
+**Problem:** When you update sandbox configuration:
 
-- Existing runtimes continue running with old settings.
-- Runtimes are only pruned after 24h of inactivity.
-- Regularly-used agents keep old runtimes alive indefinitely.
+- Existing runtimes continue running with old settings
+- Runtimes are only pruned after 24h of inactivity
+- Regularly-used agents keep old runtimes alive indefinitely
 
-Use `openclaw sandbox recreate` to force removal of old runtimes. They are recreated automatically with current settings when next needed.
+**Solution:** Use `openclaw sandbox recreate` to force removal of old runtimes. They'll be recreated automatically with current settings when next needed.
 
-<Tip>
-Prefer `openclaw sandbox recreate` over manual backend-specific cleanup. It uses the Gateway's runtime registry and avoids mismatches when scope or session keys change.
-</Tip>
+Tip: prefer `openclaw sandbox recreate` over manual backend-specific cleanup.
+It uses the Gateway’s runtime registry and avoids mismatches when scope/session keys change.
 
 ## Configuration
 
@@ -191,9 +190,8 @@ Sandbox settings live in `~/.openclaw/openclaw.json` under `agents.defaults.sand
 }
 ```
 
-## Related
+## See Also
 
-- [CLI reference](/cli)
-- [Sandboxing](/gateway/sandboxing)
-- [Agent workspace](/concepts/agent-workspace)
-- [Doctor](/gateway/doctor): checks sandbox setup.
+- [Sandbox Documentation](/gateway/sandboxing)
+- [Agent Configuration](/concepts/agent-workspace)
+- [Doctor Command](/gateway/doctor) - Check sandbox setup

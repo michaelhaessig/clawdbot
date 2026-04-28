@@ -1,6 +1,5 @@
 import type { ResolvedBrowserProfile } from "./config.js";
 import { getBrowserProfileCapabilities } from "./profile-capabilities.js";
-import { getPwAiModule } from "./pw-ai-module.js";
 
 export function resolveIdleProfileStopOutcome(profile: ResolvedBrowserProfile): {
   stopped: boolean;
@@ -21,8 +20,8 @@ export function resolveIdleProfileStopOutcome(profile: ResolvedBrowserProfile): 
 
 export async function closePlaywrightBrowserConnectionForProfile(cdpUrl?: string): Promise<void> {
   try {
-    const mod = await getPwAiModule({ mode: "soft" });
-    await mod?.closePlaywrightBrowserConnection(cdpUrl ? { cdpUrl } : undefined);
+    const mod = await import("./pw-ai.js");
+    await mod.closePlaywrightBrowserConnection(cdpUrl ? { cdpUrl } : undefined);
   } catch {
     // ignore
   }

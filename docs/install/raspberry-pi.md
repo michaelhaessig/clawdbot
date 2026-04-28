@@ -7,6 +7,8 @@ read_when:
 title: "Raspberry Pi"
 ---
 
+# Raspberry Pi
+
 Run a persistent, always-on OpenClaw Gateway on a Raspberry Pi. Since the Pi is just the gateway (models run in the cloud via API), even a modest Pi handles the workload well.
 
 ## Prerequisites
@@ -155,9 +157,3 @@ sudo systemctl disable bluetooth
 - [Channels](/channels) -- connect Telegram, WhatsApp, Discord, and more
 - [Gateway configuration](/gateway/configuration) -- all config options
 - [Updating](/install/updating) -- keep OpenClaw up to date
-
-## Related
-
-- [Install overview](/install)
-- [Linux server](/vps)
-- [Platforms](/platforms)

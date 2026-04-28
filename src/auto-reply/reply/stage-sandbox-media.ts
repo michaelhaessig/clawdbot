@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertSandboxPath } from "../../agents/sandbox-paths.js";
 import { ensureSandboxWorkspaceForSession } from "../../agents/sandbox.js";
-import { slugifySessionKey } from "../../agents/sandbox/shared.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { copyFileWithinRoot, SafeOpenError } from "../../infra/fs-safe.js";
@@ -41,7 +40,7 @@ export async function stageSandboxMedia(params: {
 
   // For remote attachments without sandbox, use ~/.openclaw/media (not agent workspace for privacy)
   const remoteMediaCacheDir = ctx.MediaRemoteHost
-    ? path.join(CONFIG_DIR, "media", "remote-cache", slugifySessionKey(sessionKey))
+    ? path.join(CONFIG_DIR, "media", "remote-cache", sessionKey)
     : null;
   const effectiveWorkspaceDir = sandbox?.workspaceDir ?? remoteMediaCacheDir;
   if (!effectiveWorkspaceDir) {
@@ -49,9 +48,7 @@ export async function stageSandboxMedia(params: {
   }
 
   await fs.mkdir(effectiveWorkspaceDir, { recursive: true });
-  const remoteAttachmentRoots = ctx.MediaRemoteHost
-    ? (resolveChannelRemoteInboundAttachmentRoots({ cfg, ctx }) ?? [])
-    : [];
+  const remoteAttachmentRoots = resolveChannelRemoteInboundAttachmentRoots({ cfg, ctx }) ?? [];
 
   const usedNames = new Set<string>();
   const staged = new Map<string, string>(); // absolute source -> relative sandbox path

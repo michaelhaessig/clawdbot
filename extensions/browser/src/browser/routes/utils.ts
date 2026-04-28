@@ -1,13 +1,7 @@
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import { parseBooleanValue } from "../../utils/boolean.js";
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
-import type { BrowserRequest, BrowserResponse, BrowserRouteHandler } from "./types.js";
-
-function normalizeOptionalString(value: string): string | undefined {
-  return value.trim() || undefined;
-}
-
-export function asyncBrowserRoute(handler: BrowserRouteHandler): BrowserRouteHandler {
-  return (req, res) => handler(req, res);
-}
+import type { BrowserRequest, BrowserResponse } from "./types.js";
 
 /**
  * Extract profile name from query string or body and get profile context.
@@ -63,20 +57,10 @@ export function toNumber(value: unknown) {
 }
 
 export function toBoolean(value: unknown) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value !== "string" && typeof value !== "number") {
-    return undefined;
-  }
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0" || normalized === "no") {
-    return false;
-  }
-  return undefined;
+  return parseBooleanValue(value, {
+    truthy: ["true", "1", "yes"],
+    falsy: ["false", "0", "no"],
+  });
 }
 
 export function toStringArray(value: unknown): string[] | undefined {

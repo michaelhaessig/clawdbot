@@ -1,6 +1,5 @@
 import type { Command } from "commander";
 import { resolveCliArgvInvocation } from "../argv-invocation.js";
-import { resolveCliCommandPathPolicy } from "../command-path-policy.js";
 import {
   shouldEagerRegisterSubcommands,
   shouldRegisterPrimarySubcommandOnly,
@@ -31,17 +30,12 @@ async function registerSubCliWithPluginCommands(
   registerSubCli: () => Promise<void>,
   pluginCliPosition: "before" | "after",
 ) {
-  const invocation = resolveCliArgvInvocation(process.argv);
-  const shouldRegisterPluginCommands =
-    !invocation.hasHelpOrVersion &&
-    (invocation.commandPath.length <= 1 ||
-      resolveCliCommandPathPolicy(invocation.commandPath).loadPlugins !== "never");
   const { registerPluginCliCommandsFromValidatedConfig } = await import("../../plugins/cli.js");
-  if (pluginCliPosition === "before" && shouldRegisterPluginCommands) {
+  if (pluginCliPosition === "before") {
     await registerPluginCliCommandsFromValidatedConfig(program);
   }
   await registerSubCli();
-  if (pluginCliPosition === "after" && shouldRegisterPluginCommands) {
+  if (pluginCliPosition === "after") {
     await registerPluginCliCommandsFromValidatedConfig(program);
   }
 }
@@ -117,7 +111,7 @@ const entrySpecs: readonly CommandGroupDescriptorSpec<SubCliRegistrar>[] = [
       exportName: "registerSandboxCli",
     },
     {
-      commandNames: ["tui", "terminal", "chat"],
+      commandNames: ["tui"],
       loadModule: () => import("../tui-cli.js"),
       exportName: "registerTuiCli",
     },

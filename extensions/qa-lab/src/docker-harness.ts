@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -353,6 +352,7 @@ export async function buildQaDockerHarnessImage(
   const runCommand =
     deps?.runCommand ??
     (async (command: string, args: string[], cwd: string) => {
+      const { execFile } = await import("node:child_process");
       return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
         execFile(command, args, { cwd }, (error, stdout, stderr) => {
           if (error) {

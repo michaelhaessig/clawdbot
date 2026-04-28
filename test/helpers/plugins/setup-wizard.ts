@@ -151,7 +151,9 @@ export function createSetupWizardAdapter(params: SetupWizardAdapterParams) {
   return buildChannelSetupWizardAdapterFromSetupWizard(params);
 }
 
-export function createPluginSetupWizardAdapter(plugin: SetupWizardTestPlugin) {
+export function createPluginSetupWizardAdapter<TPlugin extends SetupWizardTestPlugin>(
+  plugin: TPlugin,
+) {
   const wizard = requireDeclarativeSetupWizard(plugin);
   return createSetupWizardAdapter({
     plugin: plugin as unknown as SetupWizardPlugin,
@@ -159,11 +161,15 @@ export function createPluginSetupWizardAdapter(plugin: SetupWizardTestPlugin) {
   });
 }
 
-export function createPluginSetupWizardConfigure(plugin: SetupWizardTestPlugin) {
+export function createPluginSetupWizardConfigure<TPlugin extends SetupWizardTestPlugin>(
+  plugin: TPlugin,
+) {
   return createPluginSetupWizardAdapter(plugin).configure;
 }
 
-export function createPluginSetupWizardStatus(plugin: SetupWizardTestPlugin) {
+export function createPluginSetupWizardStatus<TPlugin extends SetupWizardTestPlugin>(
+  plugin: TPlugin,
+) {
   return createPluginSetupWizardAdapter(plugin).getStatus;
 }
 

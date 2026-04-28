@@ -17,16 +17,14 @@ export function createUiVitestConfig(
   env?: Record<string, string | undefined>,
   options?: { includePatterns?: string[]; name?: string },
 ) {
-  const includePatterns = options?.includePatterns ?? ["ui/src/**/*.test.ts"];
-  const exclude = options?.includePatterns ? [] : unitUiIncludePatterns;
-  return createScopedVitestConfig(includePatterns, {
+  return createScopedVitestConfig(options?.includePatterns ?? ["ui/src/ui/**/*.test.ts"], {
     deps: jsdomOptimizedDeps,
+    dir: "ui/src/ui",
     environment: "jsdom",
     env,
-    exclude,
     excludeUnitFastTests: false,
     includeOpenClawRuntimeSetup: false,
-    isolate: false,
+    isolate: true,
     name: options?.name ?? "ui",
     setupFiles: ["ui/src/test-helpers/lit-warnings.setup.ts"],
   });

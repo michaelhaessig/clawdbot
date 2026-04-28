@@ -1,5 +1,4 @@
 import {
-  createLazyFacadeValue as createLazyFacadeRuntimeValue,
   createLazyFacadeObjectValue,
   loadActivatedBundledPluginPublicSurfaceModuleSync,
 } from "./facade-runtime.js";
@@ -13,12 +12,6 @@ import type {
   TtsSynthesisResult,
   TtsTelephonyResult,
 } from "./tts-runtime.types.js";
-export {
-  TtsAutoSchema,
-  TtsConfigSchema,
-  TtsModeSchema,
-  TtsProviderSchema,
-} from "../config/zod-schema.core.js";
 
 // Manual facade. Keep loader boundary explicit and avoid typing this public SDK
 // seam through the bundled speech-core runtime surface.
@@ -35,93 +28,50 @@ export const _test: FacadeModule["_test"] = createLazyFacadeObjectValue(
   () => loadFacadeModule()._test,
 );
 export const buildTtsSystemPromptHint: FacadeModule["buildTtsSystemPromptHint"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "buildTtsSystemPromptHint");
-export const getLastTtsAttempt: FacadeModule["getLastTtsAttempt"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "getLastTtsAttempt",
-);
+  createLazyFacadeValue("buildTtsSystemPromptHint");
+export const getLastTtsAttempt: FacadeModule["getLastTtsAttempt"] =
+  createLazyFacadeValue("getLastTtsAttempt");
 export const getResolvedSpeechProviderConfig: FacadeModule["getResolvedSpeechProviderConfig"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "getResolvedSpeechProviderConfig");
-export const getTtsMaxLength: FacadeModule["getTtsMaxLength"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "getTtsMaxLength",
-);
-export const getTtsPersona: FacadeModule["getTtsPersona"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "getTtsPersona",
-);
-export const getTtsProvider: FacadeModule["getTtsProvider"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "getTtsProvider",
-);
+  createLazyFacadeValue("getResolvedSpeechProviderConfig");
+export const getTtsMaxLength: FacadeModule["getTtsMaxLength"] =
+  createLazyFacadeValue("getTtsMaxLength");
+export const getTtsProvider: FacadeModule["getTtsProvider"] =
+  createLazyFacadeValue("getTtsProvider");
 export const isSummarizationEnabled: FacadeModule["isSummarizationEnabled"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "isSummarizationEnabled");
-export const isTtsEnabled: FacadeModule["isTtsEnabled"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "isTtsEnabled",
-);
+  createLazyFacadeValue("isSummarizationEnabled");
+export const isTtsEnabled: FacadeModule["isTtsEnabled"] = createLazyFacadeValue("isTtsEnabled");
 export const isTtsProviderConfigured: FacadeModule["isTtsProviderConfigured"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "isTtsProviderConfigured");
-export const listSpeechVoices: FacadeModule["listSpeechVoices"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "listSpeechVoices",
-);
-export const listTtsPersonas: FacadeModule["listTtsPersonas"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "listTtsPersonas",
-);
+  createLazyFacadeValue("isTtsProviderConfigured");
+export const listSpeechVoices: FacadeModule["listSpeechVoices"] =
+  createLazyFacadeValue("listSpeechVoices");
 export const maybeApplyTtsToPayload: FacadeModule["maybeApplyTtsToPayload"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "maybeApplyTtsToPayload");
+  createLazyFacadeValue("maybeApplyTtsToPayload");
 export const resolveExplicitTtsOverrides: FacadeModule["resolveExplicitTtsOverrides"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveExplicitTtsOverrides");
-export const resolveTtsAutoMode: FacadeModule["resolveTtsAutoMode"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "resolveTtsAutoMode",
-);
-export const resolveTtsConfig: FacadeModule["resolveTtsConfig"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "resolveTtsConfig",
-);
+  createLazyFacadeValue("resolveExplicitTtsOverrides");
+export const resolveTtsAutoMode: FacadeModule["resolveTtsAutoMode"] =
+  createLazyFacadeValue("resolveTtsAutoMode");
+export const resolveTtsConfig: FacadeModule["resolveTtsConfig"] =
+  createLazyFacadeValue("resolveTtsConfig");
 export const resolveTtsPrefsPath: FacadeModule["resolveTtsPrefsPath"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveTtsPrefsPath");
+  createLazyFacadeValue("resolveTtsPrefsPath");
 export const resolveTtsProviderOrder: FacadeModule["resolveTtsProviderOrder"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "resolveTtsProviderOrder");
-export const setLastTtsAttempt: FacadeModule["setLastTtsAttempt"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setLastTtsAttempt",
-);
+  createLazyFacadeValue("resolveTtsProviderOrder");
+export const setLastTtsAttempt: FacadeModule["setLastTtsAttempt"] =
+  createLazyFacadeValue("setLastTtsAttempt");
 export const setSummarizationEnabled: FacadeModule["setSummarizationEnabled"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "setSummarizationEnabled");
-export const setTtsAutoMode: FacadeModule["setTtsAutoMode"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setTtsAutoMode",
-);
-export const setTtsEnabled: FacadeModule["setTtsEnabled"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setTtsEnabled",
-);
-export const setTtsMaxLength: FacadeModule["setTtsMaxLength"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setTtsMaxLength",
-);
-export const setTtsPersona: FacadeModule["setTtsPersona"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setTtsPersona",
-);
-export const setTtsProvider: FacadeModule["setTtsProvider"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "setTtsProvider",
-);
-export const synthesizeSpeech: FacadeModule["synthesizeSpeech"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "synthesizeSpeech",
-);
-export const textToSpeech: FacadeModule["textToSpeech"] = createLazyFacadeRuntimeValue(
-  loadFacadeModule,
-  "textToSpeech",
-);
+  createLazyFacadeValue("setSummarizationEnabled");
+export const setTtsAutoMode: FacadeModule["setTtsAutoMode"] =
+  createLazyFacadeValue("setTtsAutoMode");
+export const setTtsEnabled: FacadeModule["setTtsEnabled"] = createLazyFacadeValue("setTtsEnabled");
+export const setTtsMaxLength: FacadeModule["setTtsMaxLength"] =
+  createLazyFacadeValue("setTtsMaxLength");
+export const setTtsProvider: FacadeModule["setTtsProvider"] =
+  createLazyFacadeValue("setTtsProvider");
+export const synthesizeSpeech: FacadeModule["synthesizeSpeech"] =
+  createLazyFacadeValue("synthesizeSpeech");
+export const textToSpeech: FacadeModule["textToSpeech"] = createLazyFacadeValue("textToSpeech");
 export const textToSpeechTelephony: FacadeModule["textToSpeechTelephony"] =
-  createLazyFacadeRuntimeValue(loadFacadeModule, "textToSpeechTelephony");
+  createLazyFacadeValue("textToSpeechTelephony");
 
 export type {
   ResolvedTtsConfig,
@@ -132,3 +82,13 @@ export type {
   TtsSynthesisResult,
   TtsTelephonyResult,
 } from "./tts-runtime.types.js";
+
+function createLazyFacadeValue<K extends keyof FacadeModule>(key: K): FacadeModule[K] {
+  return ((...args: unknown[]) => {
+    const value = loadFacadeModule()[key];
+    if (typeof value !== "function") {
+      return value;
+    }
+    return (value as (...innerArgs: unknown[]) => unknown)(...args);
+  }) as FacadeModule[K];
+}

@@ -157,7 +157,6 @@ describe("media store", () => {
   async function expectSavedBufferCase(params: {
     buffer: Buffer;
     contentType?: string;
-    originalFilename?: string;
     expectedContentType: string;
     expectedExtension: string;
     assertSaved?: (
@@ -166,13 +165,7 @@ describe("media store", () => {
     ) => Promise<void> | void;
   }) {
     await withTempStore(async (store) => {
-      const saved = await store.saveMediaBuffer(
-        params.buffer,
-        params.contentType,
-        "inbound",
-        5 * 1024 * 1024,
-        params.originalFilename,
-      );
+      const saved = await store.saveMediaBuffer(params.buffer, params.contentType);
       expect(saved.contentType).toBe(params.expectedContentType);
       expect(saved.path.endsWith(params.expectedExtension)).toBe(true);
       await params.assertSaved?.(saved, params.buffer);
@@ -378,14 +371,6 @@ describe("media store", () => {
       expectedContentType: "image/jpeg",
       expectedExtension: ".jpg",
     },
-    {
-      name: "preserves original extension for generic file buffers",
-      buffer: Buffer.from("custom binary"),
-      contentType: "application/octet-stream",
-      originalFilename: "report.custom",
-      expectedContentType: "application/octet-stream",
-      expectedExtension: ".custom",
-    },
   ] as const)("$name", async (testCase) => {
     const buffer =
       "bufferFactory" in testCase && testCase.bufferFactory
@@ -394,16 +379,8 @@ describe("media store", () => {
     await expectSavedBufferCase({
       buffer,
       contentType: testCase.contentType,
-      ...("originalFilename" in testCase ? { originalFilename: testCase.originalFilename } : {}),
       expectedContentType: testCase.expectedContentType,
       expectedExtension: testCase.expectedExtension,
-      ...("originalFilename" in testCase
-        ? {
-            assertSaved: async (saved: Awaited<ReturnType<typeof store.saveMediaBuffer>>) => {
-              expect(path.basename(saved.path)).toMatch(/^report---.+\.custom$/);
-            },
-          }
-        : {}),
       ...("assertSaved" in testCase ? { assertSaved: testCase.assertSaved } : {}),
     });
   });

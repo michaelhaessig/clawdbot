@@ -38,8 +38,7 @@ const clientConstructorState = vi.hoisted(() => ({
 const jwtState = vi.hoisted(() => ({
   verifyBehavior: "success" as "success" | "throw",
   decodedHeader: { kid: "key-1" } as { kid?: string } | null,
-  decodedPayload: { iss: "https://api.botframework.com" } as { iss?: string } | string | null,
-  verifyResult: { sub: "ok" } as unknown,
+  decodedPayload: { iss: "https://api.botframework.com" } as { iss?: string } | null,
   verifyCalls: [] as Array<{ token: string; options: unknown }>,
 }));
 
@@ -55,7 +54,7 @@ const jwtMockImpl = {
     if (jwtState.verifyBehavior === "throw") {
       throw new Error("invalid signature");
     }
-    return jwtState.verifyResult;
+    return { sub: "ok" };
   },
 };
 
@@ -111,7 +110,6 @@ afterEach(() => {
   jwtState.verifyBehavior = "success";
   jwtState.decodedHeader = { kid: "key-1" };
   jwtState.decodedPayload = { iss: "https://api.botframework.com" };
-  jwtState.verifyResult = { sub: "ok" };
   vi.restoreAllMocks();
 });
 
@@ -272,46 +270,12 @@ describe("createBotFrameworkJwtValidator", () => {
   it("accepts tokens with aud: https://api.botframework.com (#58249)", async () => {
     // This is the critical fix: the old JwtValidator rejected this audience.
     jwtState.decodedPayload = { iss: "https://api.botframework.com" };
-    jwtState.verifyResult = {
-      aud: ["https://api.botframework.com"],
-      appid: creds.appId,
-    };
 
     const validator = await createBotFrameworkJwtValidator(creds);
     await expect(validator.validate("Bearer botfw-token")).resolves.toBe(true);
 
     const opts = jwtState.verifyCalls[0]?.options as Record<string, unknown>;
     expect((opts.audience as string[]).includes("https://api.botframework.com")).toBe(true);
-  });
-
-  it("accepts global audience tokens when azp matches the configured app id", async () => {
-    jwtState.decodedPayload = { iss: "https://api.botframework.com" };
-    jwtState.verifyResult = {
-      aud: ["https://api.botframework.com"],
-      azp: "APP-ID",
-    };
-
-    const validator = await createBotFrameworkJwtValidator(creds);
-    await expect(validator.validate("Bearer botfw-token-azp")).resolves.toBe(true);
-  });
-
-  it("rejects global audience tokens when app binding does not match the configured app id", async () => {
-    jwtState.decodedPayload = { iss: "https://api.botframework.com" };
-    jwtState.verifyResult = {
-      aud: ["https://api.botframework.com"],
-      azp: "other-app-id",
-    };
-
-    const validator = await createBotFrameworkJwtValidator(creds);
-    await expect(validator.validate("Bearer botfw-token-wrong-app")).resolves.toBe(false);
-  });
-
-  it("rejects non-object verified payloads", async () => {
-    jwtState.decodedPayload = { iss: "https://api.botframework.com" };
-    jwtState.verifyResult = "verified-string-payload";
-
-    const validator = await createBotFrameworkJwtValidator(creds);
-    await expect(validator.validate("Bearer botfw-token-string")).resolves.toBe(false);
   });
 
   it("validates a token with Entra issuer", async () => {

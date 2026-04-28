@@ -3,7 +3,7 @@ summary: "CLI reference for `openclaw backup` (create local backup archives)"
 read_when:
   - You want a first-class backup archive for local OpenClaw state
   - You want to preview which paths would be included before reset or uninstall
-title: "Backup"
+title: "backup"
 ---
 
 # `openclaw backup`
@@ -82,7 +82,3 @@ Practical limits come from the local machine and destination filesystem:
 Large workspaces are usually the main driver of archive size. If you want a smaller or faster backup, use `--no-include-workspace`.
 
 For the smallest archive, use `--only-config`.
-
-## Related
-
-- [CLI reference](/cli)

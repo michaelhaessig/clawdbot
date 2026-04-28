@@ -4,7 +4,7 @@ import {
   resolveAgentModelPrimaryValue,
 } from "../../config/model-input.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { providerSupportsNativePdfDocument } from "../../media-understanding/defaults.js";
+import { bundledProviderSupportsNativePdfDocument } from "../../media-understanding/bundled-defaults.js";
 import { extractAssistantText } from "../pi-embedded-utils.js";
 
 export type PdfModelConfig = { primary?: string; fallbacks?: string[] };
@@ -38,7 +38,7 @@ export function resolvePdfInputs(record: Record<string, unknown>): string[] {
  * Check whether a provider supports native PDF document input.
  */
 export function providerSupportsNativePdf(provider: string): boolean {
-  return providerSupportsNativePdfDocument({ providerId: provider });
+  return bundledProviderSupportsNativePdfDocument(provider);
 }
 
 /**

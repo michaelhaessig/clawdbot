@@ -1,23 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { asConfig, setupSecretsRuntimeSnapshotTestHooks } from "./runtime.test-support.ts";
 
-const manifestMocks = vi.hoisted(() => ({
-  loadPluginManifestRegistryForInstalledIndex: vi.fn(),
-  loadPluginRegistrySnapshot: vi.fn(() => ({ plugins: [] })),
-}));
+const loadPluginManifestRegistry = vi.hoisted(() => vi.fn());
 
 vi.mock("./runtime-manifest.runtime.js", () => ({
-  loadPluginManifestRegistryForInstalledIndex:
-    manifestMocks.loadPluginManifestRegistryForInstalledIndex,
-  loadPluginRegistrySnapshot: manifestMocks.loadPluginRegistrySnapshot,
+  loadPluginManifestRegistry,
 }));
 
 const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
 
 describe("prepareSecretsRuntimeSnapshot loadable plugin origins", () => {
   afterEach(() => {
-    manifestMocks.loadPluginManifestRegistryForInstalledIndex.mockReset();
-    manifestMocks.loadPluginRegistrySnapshot.mockReset();
+    loadPluginManifestRegistry.mockReset();
   });
 
   it("skips manifest registry loading when plugin entries are absent", async () => {
@@ -36,7 +30,6 @@ describe("prepareSecretsRuntimeSnapshot loadable plugin origins", () => {
       includeAuthStoreRefs: false,
     });
 
-    expect(manifestMocks.loadPluginManifestRegistryForInstalledIndex).not.toHaveBeenCalled();
-    expect(manifestMocks.loadPluginRegistrySnapshot).not.toHaveBeenCalled();
+    expect(loadPluginManifestRegistry).not.toHaveBeenCalled();
   });
 });

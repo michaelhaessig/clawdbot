@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { consumeRootOptionToken, FLAG_TERMINATOR } from "../infra/cli-root-options.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { resolveCliArgvInvocation } from "./argv-invocation.js";
-import { scanCliRootOptions } from "./root-option-scan.js";
+import { forwardConsumedCliRootOption } from "./root-option-forward.js";
 import { takeCliRootOptionValue } from "./root-option-value.js";
 
 type CliContainerParseResult =
@@ -27,26 +27,47 @@ type ContainerRuntimeExec = {
 };
 
 export function parseCliContainerArgs(argv: string[]): CliContainerParseResult {
-  let container: string | null = null;
-
-  const scanned = scanCliRootOptions(argv, ({ arg, args, index }) => {
-    if (arg === "--container" || arg.startsWith("--container=")) {
-      const next = args[index + 1];
-      const { value, consumedNext } = takeCliRootOptionValue(arg, next);
-      if (!value) {
-        return { kind: "error", error: "--container requires a value" };
-      }
-      container = value;
-      return { kind: "handled", consumedNext };
-    }
-    return { kind: "pass" };
-  });
-
-  if (!scanned.ok) {
-    return scanned;
+  if (argv.length < 2) {
+    return { ok: true, container: null, argv };
   }
 
-  return { ok: true, container, argv: scanned.argv };
+  const out: string[] = argv.slice(0, 2);
+  let container: string | null = null;
+
+  const args = argv.slice(2);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === undefined) {
+      continue;
+    }
+    if (arg === FLAG_TERMINATOR) {
+      out.push(arg, ...args.slice(i + 1));
+      break;
+    }
+
+    if (arg === "--container" || arg.startsWith("--container=")) {
+      const next = args[i + 1];
+      const { value, consumedNext } = takeCliRootOptionValue(arg, next);
+      if (consumedNext) {
+        i += 1;
+      }
+      if (!value) {
+        return { ok: false, error: "--container requires a value" };
+      }
+      container = value;
+      continue;
+    }
+
+    const consumedRootOption = forwardConsumedCliRootOption(args, i, out);
+    if (consumedRootOption > 0) {
+      i += consumedRootOption - 1;
+      continue;
+    }
+
+    out.push(arg);
+  }
+
+  return { ok: true, container, argv: out };
 }
 
 export function resolveCliContainerTarget(

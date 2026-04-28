@@ -76,7 +76,6 @@ export async function resolveDeliveryTarget(
     accountId?: string;
     sessionKey?: string;
   },
-  options?: { dryRun?: boolean },
 ): Promise<DeliveryTargetResolution> {
   const requestedChannel = typeof jobPayload.channel === "string" ? jobPayload.channel : "last";
   const explicitTo = typeof jobPayload.to === "string" ? jobPayload.to : undefined;
@@ -234,16 +233,6 @@ export async function resolveDeliveryTarget(
       threadId,
       mode,
       error: docked.error,
-    };
-  }
-  if (options?.dryRun) {
-    return {
-      ok: true,
-      channel,
-      to: docked.to,
-      accountId,
-      threadId,
-      mode,
     };
   }
   const idLikeTarget = await maybeResolveIdLikeTarget({

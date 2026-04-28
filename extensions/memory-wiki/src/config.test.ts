@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import AjvPkg from "ajv";
 import { describe, expect, it } from "vitest";
-import type { JsonSchemaObject } from "../../../src/shared/json-schema.types.js";
 import {
   DEFAULT_WIKI_RENDER_MODE,
   DEFAULT_WIKI_SEARCH_BACKEND,
@@ -14,7 +13,7 @@ import {
 function compileManifestConfigSchema() {
   const manifest = JSON.parse(
     fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
-  ) as { configSchema: JsonSchemaObject };
+  ) as { configSchema: Record<string, unknown> };
   const Ajv = AjvPkg as unknown as new (opts?: object) => import("ajv").default;
   const ajv = new Ajv({ allErrors: true, strict: false, useDefaults: true });
   return ajv.compile(manifest.configSchema);

@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { QaProviderMode } from "./model-selection.js";
 import { extractQaFailureReplyText } from "./reply-failure.js";
 import type {
@@ -69,7 +69,6 @@ export type QaTransportCommonCapabilities = {
   waitForReady: (params: {
     gateway: QaTransportGatewayClient;
     timeoutMs?: number;
-    pollIntervalMs?: number;
   }) => Promise<void>;
   waitForCondition: <T>(
     check: () => T | Promise<T | null | undefined> | null | undefined,
@@ -152,11 +151,7 @@ export type QaTransportAdapter = {
   state: QaTransportState;
   capabilities: QaTransportCommonCapabilities;
   createGatewayConfig: (params: { baseUrl: string }) => QaTransportGatewayConfig;
-  waitReady: (params: {
-    gateway: QaTransportGatewayClient;
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-  }) => Promise<void>;
+  waitReady: (params: { gateway: QaTransportGatewayClient; timeoutMs?: number }) => Promise<void>;
   buildAgentDelivery: (params: { target: string }) => {
     channel: string;
     replyChannel: string;
@@ -213,7 +208,6 @@ export abstract class QaStateBackedTransportAdapter implements QaTransportAdapte
   abstract waitReady: (params: {
     gateway: QaTransportGatewayClient;
     timeoutMs?: number;
-    pollIntervalMs?: number;
   }) => Promise<void>;
   abstract buildAgentDelivery: (params: { target: string }) => {
     channel: string;

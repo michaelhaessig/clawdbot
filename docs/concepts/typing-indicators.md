@@ -2,8 +2,10 @@
 summary: "When OpenClaw shows typing indicators and how to tune them"
 read_when:
   - Changing typing indicator behavior or defaults
-title: "Typing indicators"
+title: "Typing Indicators"
 ---
+
+# Typing indicators
 
 Typing indicators are sent to the chat channel while a run is active. Use
 `agents.defaults.typingMode` to control **when** typing starts and `typingIntervalSeconds`
@@ -16,8 +18,7 @@ When `agents.defaults.typingMode` is **unset**, OpenClaw keeps the legacy behavi
 - **Direct chats**: typing starts immediately once the model loop begins.
 - **Group chats with a mention**: typing starts immediately.
 - **Group chats without a mention**: typing starts only when message text begins streaming.
-- **Heartbeat runs**: typing starts when the heartbeat run begins if the
-  resolved heartbeat target is a typing-capable chat and typing is not disabled.
+- **Heartbeat runs**: typing is disabled.
 
 ## Modes
 
@@ -63,16 +64,6 @@ You can override mode or cadence per session:
   matched case-insensitively).
 - `thinking` only fires if the run streams reasoning (`reasoningLevel: "stream"`).
   If the model doesn’t emit reasoning deltas, typing won’t start.
-- Heartbeat typing is a liveness signal for the resolved delivery target. It
-  starts at heartbeat run start instead of following `message` or `thinking`
-  stream timing. Set `typingMode: "never"` to disable it.
-- Heartbeats do not show typing when `target: "none"`, when the target cannot
-  be resolved, when chat delivery is disabled for the heartbeat, or when the
-  channel does not support typing.
+- Heartbeats never show typing, regardless of mode.
 - `typingIntervalSeconds` controls the **refresh cadence**, not the start time.
   The default is 6 seconds.
-
-## Related
-
-- [Presence](/concepts/presence)
-- [Streaming and chunking](/concepts/streaming)

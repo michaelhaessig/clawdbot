@@ -4,7 +4,7 @@ read_when:
   - You want to switch between stable/beta/dev
   - You want to pin a specific version, tag, or SHA
   - You are tagging or publishing prereleases
-title: "Release channels"
+title: "Release Channels"
 sidebarTitle: "Release Channels"
 ---
 
@@ -46,9 +46,8 @@ install method:
   `OPENCLAW_GIT_DIR`), switches to `main`, rebases on upstream, builds, and
   installs the global CLI from that checkout.
 
-<Tip>
-If you want stable and dev in parallel, keep two clones and point your gateway at the stable one.
-</Tip>
+Tip: if you want stable + dev in parallel, keep two clones and point your
+gateway at the stable one.
 
 ## One-off version or tag targeting
 
@@ -130,8 +129,3 @@ Beta and dev builds may **not** include a macOS app release. That is OK:
 
 - The git tag and npm dist-tag can still be published.
 - Call out "no macOS build for this beta" in release notes or changelog.
-
-## Related
-
-- [Updating](/install/updating)
-- [Installer internals](/install/installer)

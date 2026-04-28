@@ -22,34 +22,6 @@ import { resolveMatrixAccountStorageRoot } from "./storage-paths.js";
 
 const createBackupArchiveMock = vi.hoisted(() => vi.fn());
 
-const MATRIX_CREDENTIALS = {
-  homeserver: "https://matrix.example.org",
-  userId: "@bot:example.org",
-  accessToken: "tok-123",
-} as const;
-
-function makeMatrixMigrationConfig() {
-  return {
-    channels: {
-      matrix: MATRIX_CREDENTIALS,
-    },
-  } as never;
-}
-
-function seedLegacyMatrixCrypto(home: string) {
-  const stateDir = path.join(home, ".openclaw");
-  const { rootDir } = resolveMatrixAccountStorageRoot({
-    stateDir,
-    ...MATRIX_CREDENTIALS,
-  });
-  fs.mkdirSync(path.join(rootDir, "crypto"), { recursive: true });
-  fs.writeFileSync(
-    path.join(rootDir, "crypto", "bot-sdk.json"),
-    JSON.stringify({ deviceId: "DEVICE123" }),
-    "utf8",
-  );
-}
-
 describe("matrix migration snapshots", () => {
   beforeEach(() => {
     createBackupArchiveMock.mockReset();
@@ -124,8 +96,29 @@ describe("matrix migration snapshots", () => {
 
   it("treats legacy Matrix crypto as actionable when the extension inspector is present", async () => {
     await withTempHome(async (home) => {
-      seedLegacyMatrixCrypto(home);
-      const cfg = makeMatrixMigrationConfig();
+      const stateDir = path.join(home, ".openclaw");
+      const { rootDir } = resolveMatrixAccountStorageRoot({
+        stateDir,
+        homeserver: "https://matrix.example.org",
+        userId: "@bot:example.org",
+        accessToken: "tok-123",
+      });
+      fs.mkdirSync(path.join(rootDir, "crypto"), { recursive: true });
+      fs.writeFileSync(
+        path.join(rootDir, "crypto", "bot-sdk.json"),
+        JSON.stringify({ deviceId: "DEVICE123" }),
+        "utf8",
+      );
+
+      const cfg = {
+        channels: {
+          matrix: {
+            homeserver: "https://matrix.example.org",
+            userId: "@bot:example.org",
+            accessToken: "tok-123",
+          },
+        },
+      } as never;
 
       const detection = detectLegacyMatrixCrypto({
         cfg,
@@ -147,8 +140,29 @@ describe("matrix migration snapshots", () => {
     legacyCryptoInspectorAvailability.available = false;
 
     await withTempHome(async (home) => {
-      seedLegacyMatrixCrypto(home);
-      const cfg = makeMatrixMigrationConfig();
+      const stateDir = path.join(home, ".openclaw");
+      const { rootDir } = resolveMatrixAccountStorageRoot({
+        stateDir,
+        homeserver: "https://matrix.example.org",
+        userId: "@bot:example.org",
+        accessToken: "tok-123",
+      });
+      fs.mkdirSync(path.join(rootDir, "crypto"), { recursive: true });
+      fs.writeFileSync(
+        path.join(rootDir, "crypto", "bot-sdk.json"),
+        JSON.stringify({ deviceId: "DEVICE123" }),
+        "utf8",
+      );
+
+      const cfg = {
+        channels: {
+          matrix: {
+            homeserver: "https://matrix.example.org",
+            userId: "@bot:example.org",
+            accessToken: "tok-123",
+          },
+        },
+      } as never;
 
       const detection = detectLegacyMatrixCrypto({
         cfg,

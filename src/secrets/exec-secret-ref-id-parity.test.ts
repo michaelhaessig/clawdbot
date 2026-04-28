@@ -125,9 +125,6 @@ describe("exec SecretRef id parity", () => {
     if (canonicalId.startsWith("tools.web.search.")) {
       return "tools.web.search";
     }
-    if (canonicalId.startsWith("plugins.entries.")) {
-      return "plugins.config";
-    }
     return "unclassified";
   }
 

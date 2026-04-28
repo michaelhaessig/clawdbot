@@ -85,7 +85,7 @@ describe("secrets handlers", () => {
       undefined,
       expect.objectContaining({
         code: "UNAVAILABLE",
-        message: "secrets.reload failed",
+        message: "Error: reload failed",
       }),
     );
   });
@@ -207,7 +207,6 @@ describe("secrets handlers", () => {
       undefined,
       expect.objectContaining({
         code: "UNAVAILABLE",
-        message: "secrets.resolve failed",
       }),
     );
   });

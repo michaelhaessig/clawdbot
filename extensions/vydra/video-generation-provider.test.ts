@@ -1,12 +1,7 @@
+import * as providerAuth from "openclaw/plugin-sdk/provider-auth-runtime";
 import { installPinnedHostnameTestHooks } from "openclaw/plugin-sdk/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectExplicitVideoGenerationCapabilities } from "../../test/helpers/media-generation/provider-capability-assertions.js";
-import {
-  binaryResponse,
-  jsonResponse,
-  stubFetch,
-  stubVydraApiKey,
-} from "./provider-test-helpers.test.js";
 import { buildVydraVideoGenerationProvider } from "./video-generation-provider.js";
 
 describe("vydra video-generation provider", () => {
@@ -22,16 +17,39 @@ describe("vydra video-generation provider", () => {
   });
 
   it("submits veo3 jobs and downloads the completed video", async () => {
-    stubVydraApiKey();
-    const fetchMock = stubFetch(
-      jsonResponse({ jobId: "job-123", status: "processing" }),
-      jsonResponse({
-        jobId: "job-123",
-        status: "completed",
-        videoUrl: "https://cdn.vydra.ai/generated/test.mp4",
-      }),
-      binaryResponse("mp4-data", "video/mp4"),
-    );
+    vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
+      apiKey: "vydra-test-key",
+      source: "env",
+      mode: "api-key",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: "job-123", status: "processing" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jobId: "job-123",
+            status: "completed",
+            videoUrl: "https://cdn.vydra.ai/generated/test.mp4",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(Buffer.from("mp4-data"), {
+          status: 200,
+          headers: { "Content-Type": "video/mp4" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
 
     const provider = buildVydraVideoGenerationProvider();
     const result = await provider.generateVideo({
@@ -63,7 +81,11 @@ describe("vydra video-generation provider", () => {
   });
 
   it("requires a remote image url for kling", async () => {
-    stubVydraApiKey();
+    vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
+      apiKey: "vydra-test-key",
+      source: "env",
+      mode: "api-key",
+    });
     vi.stubGlobal("fetch", vi.fn());
 
     const provider = buildVydraVideoGenerationProvider();
@@ -79,16 +101,39 @@ describe("vydra video-generation provider", () => {
   });
 
   it("submits kling jobs with a remote image url", async () => {
-    stubVydraApiKey();
-    const fetchMock = stubFetch(
-      jsonResponse({ jobId: "job-kling", status: "processing" }),
-      jsonResponse({
-        jobId: "job-kling",
-        status: "completed",
-        videoUrl: "https://cdn.vydra.ai/generated/kling.mp4",
-      }),
-      binaryResponse("mp4-data", "video/mp4"),
-    );
+    vi.spyOn(providerAuth, "resolveApiKeyForProvider").mockResolvedValue({
+      apiKey: "vydra-test-key",
+      source: "env",
+      mode: "api-key",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: "job-kling", status: "processing" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jobId: "job-kling",
+            status: "completed",
+            videoUrl: "https://cdn.vydra.ai/generated/kling.mp4",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(Buffer.from("mp4-data"), {
+          status: 200,
+          headers: { "Content-Type": "video/mp4" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
 
     const provider = buildVydraVideoGenerationProvider();
     const result = await provider.generateVideo({

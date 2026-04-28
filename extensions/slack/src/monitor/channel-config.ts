@@ -4,7 +4,7 @@ import {
   resolveChannelEntryMatchWithFallback,
   type ChannelMatchSource,
 } from "openclaw/plugin-sdk/channel-targets";
-import type { SlackReactionNotificationMode } from "openclaw/plugin-sdk/config-types";
+import type { SlackReactionNotificationMode } from "openclaw/plugin-sdk/config-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import type { SlackMessageEvent } from "../types.js";
 import { allowListMatches, normalizeAllowListLower, normalizeSlackSlug } from "./allow-list.js";
@@ -33,7 +33,7 @@ export type SlackChannelConfigEntries = Record<string, SlackChannelConfigEntry>;
 
 function firstDefined<T>(...values: Array<T | undefined>) {
   for (const value of values) {
-    if (value !== undefined) {
+    if (typeof value !== "undefined") {
       return value;
     }
   }

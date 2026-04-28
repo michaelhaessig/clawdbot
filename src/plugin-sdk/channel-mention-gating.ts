@@ -19,4 +19,3 @@ export {
   // @deprecated Prefer `resolveInboundMentionDecision({ facts, policy })`.
   resolveMentionGatingWithBypass,
 } from "../channels/mention-gating.js";
-export { buildMentionRegexes, normalizeMentionText } from "../auto-reply/reply/mentions.js";

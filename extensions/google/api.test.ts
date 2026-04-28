@@ -1,3 +1,4 @@
+import type { ProviderRequestTransportOverrides } from "openclaw/plugin-sdk/provider-http";
 import { describe, expect, it } from "vitest";
 import {
   isGoogleGenerativeAiApi,
@@ -216,7 +217,7 @@ describe("google generative ai helpers", () => {
     expect(normalized).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
   });
 
-  it("rejects non-Google Gemini base URLs and honors explicit private-network opt-in", () => {
+  it("rejects non-Google Gemini base URLs and ignores smuggled private-network flags", () => {
     expect(() =>
       resolveGoogleGenerativeAiHttpRequestConfig({
         apiKey: "api-key-123",
@@ -240,8 +241,8 @@ describe("google generative ai helpers", () => {
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       capability: "image",
       transport: "http",
-      request: { allowPrivateNetwork: true },
+      request: { allowPrivateNetwork: true } as unknown as ProviderRequestTransportOverrides,
     });
-    expect(config.allowPrivateNetwork).toBe(true);
+    expect(config.allowPrivateNetwork).toBe(false);
   });
 });

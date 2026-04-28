@@ -1,8 +1,7 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveProviderStreamFn } from "../plugins/provider-runtime.js";
 import { createAnthropicMessagesTransportStreamFn } from "./anthropic-transport-stream.js";
+import { createGoogleGenerativeAiTransportStreamFn } from "./google-transport-stream.js";
 import {
   createAzureOpenAIResponsesTransportStreamFn,
   createOpenAICompletionsTransportStreamFn,
@@ -28,55 +27,8 @@ const SIMPLE_TRANSPORT_API_ALIAS: Record<string, Api> = {
   "google-generative-ai": "openclaw-google-generative-ai-transport",
 };
 
-type ProviderTransportStreamContext = {
-  cfg?: OpenClawConfig;
-  agentDir?: string;
-  workspaceDir?: string;
-  env?: NodeJS.ProcessEnv;
-};
-
-function createProviderOwnedGoogleTransportStreamFn(
-  model: Model<Api>,
-  ctx?: ProviderTransportStreamContext,
-): StreamFn | undefined {
-  return (
-    resolveProviderStreamFn({
-      provider: model.provider,
-      config: ctx?.cfg,
-      workspaceDir: ctx?.workspaceDir,
-      env: ctx?.env,
-      context: {
-        config: ctx?.cfg,
-        agentDir: ctx?.agentDir,
-        workspaceDir: ctx?.workspaceDir,
-        provider: model.provider,
-        modelId: model.id,
-        model,
-      },
-    }) ??
-    resolveProviderStreamFn({
-      provider: "google",
-      config: ctx?.cfg,
-      workspaceDir: ctx?.workspaceDir,
-      env: ctx?.env,
-      context: {
-        config: ctx?.cfg,
-        agentDir: ctx?.agentDir,
-        workspaceDir: ctx?.workspaceDir,
-        provider: model.provider,
-        modelId: model.id,
-        model,
-      },
-    }) ??
-    undefined
-  );
-}
-
-function createSupportedTransportStreamFn(
-  model: Model<Api>,
-  ctx?: ProviderTransportStreamContext,
-): StreamFn | undefined {
-  switch (model.api) {
+function createSupportedTransportStreamFn(api: Api): StreamFn | undefined {
+  switch (api) {
     case "openai-responses":
     case "openai-codex-responses":
       return createOpenAIResponsesTransportStreamFn();
@@ -87,7 +39,7 @@ function createSupportedTransportStreamFn(
     case "anthropic-messages":
       return createAnthropicMessagesTransportStreamFn();
     case "google-generative-ai":
-      return createProviderOwnedGoogleTransportStreamFn(model, ctx);
+      return createGoogleGenerativeAiTransportStreamFn();
     default:
       return undefined;
   }
@@ -106,10 +58,7 @@ export function resolveTransportAwareSimpleApi(api: Api): Api | undefined {
   return SIMPLE_TRANSPORT_API_ALIAS[api];
 }
 
-export function createTransportAwareStreamFnForModel(
-  model: Model<Api>,
-  ctx?: ProviderTransportStreamContext,
-): StreamFn | undefined {
+export function createTransportAwareStreamFnForModel(model: Model<Api>): StreamFn | undefined {
   if (!hasTransportOverrides(model)) {
     return undefined;
   }
@@ -118,24 +67,18 @@ export function createTransportAwareStreamFnForModel(
       `Model-provider request.proxy/request.tls is not yet supported for api "${model.api}"`,
     );
   }
-  return createSupportedTransportStreamFn(model, ctx);
+  return createSupportedTransportStreamFn(model.api);
 }
 
-export function createBoundaryAwareStreamFnForModel(
-  model: Model<Api>,
-  ctx?: ProviderTransportStreamContext,
-): StreamFn | undefined {
+export function createBoundaryAwareStreamFnForModel(model: Model<Api>): StreamFn | undefined {
   if (!isTransportAwareApiSupported(model.api)) {
     return undefined;
   }
-  return createSupportedTransportStreamFn(model, ctx);
+  return createSupportedTransportStreamFn(model.api);
 }
 
-export function prepareTransportAwareSimpleModel<TApi extends Api>(
-  model: Model<TApi>,
-  ctx?: ProviderTransportStreamContext,
-): Model<Api> {
-  const streamFn = createTransportAwareStreamFnForModel(model as Model<Api>, ctx);
+export function prepareTransportAwareSimpleModel<TApi extends Api>(model: Model<TApi>): Model<Api> {
+  const streamFn = createTransportAwareStreamFnForModel(model as Model<Api>);
   const alias = resolveTransportAwareSimpleApi(model.api);
   if (!streamFn || !alias) {
     return model;
@@ -146,9 +89,6 @@ export function prepareTransportAwareSimpleModel<TApi extends Api>(
   };
 }
 
-export function buildTransportAwareSimpleStreamFn(
-  model: Model<Api>,
-  ctx?: ProviderTransportStreamContext,
-): StreamFn | undefined {
-  return createTransportAwareStreamFnForModel(model, ctx);
+export function buildTransportAwareSimpleStreamFn(model: Model<Api>): StreamFn | undefined {
+  return createTransportAwareStreamFnForModel(model);
 }

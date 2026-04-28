@@ -1,28 +1,38 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { collectFilesystemFindings } from "./audit.js";
-import { AsyncTempCaseFactory } from "./test-temp-cases.js";
 
 const isWindows = process.platform === "win32";
 
 describe("security audit config symlink findings", () => {
-  const tempCases = new AsyncTempCaseFactory("openclaw-security-audit-config-");
+  let fixtureRoot = "";
+  let caseId = 0;
 
   beforeAll(async () => {
-    await tempCases.setup();
+    fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-security-audit-config-"));
   });
 
   afterAll(async () => {
-    await tempCases.cleanup();
+    if (!fixtureRoot) {
+      return;
+    }
+    await fs.rm(fixtureRoot, { recursive: true, force: true }).catch(() => undefined);
   });
+
+  const makeTmpDir = async (label: string) => {
+    const dir = path.join(fixtureRoot, `case-${caseId++}-${label}`);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
+  };
 
   it("uses symlink target permissions for config checks", async () => {
     if (isWindows) {
       return;
     }
 
-    const tmp = await tempCases.makeTmpDir("config-symlink");
+    const tmp = await makeTmpDir("config-symlink");
     const stateDir = path.join(tmp, "state");
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 

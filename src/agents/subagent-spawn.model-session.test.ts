@@ -1,5 +1,5 @@
 import os from "node:os";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSubagentSpawnTestConfig,
   expectPersistedRuntimeModel,
@@ -16,17 +16,14 @@ let resetSubagentRegistryForTests: typeof import("./subagent-registry.js").reset
 let spawnSubagentDirect: typeof import("./subagent-spawn.js").spawnSubagentDirect;
 
 describe("spawnSubagentDirect runtime model persistence", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     ({ resetSubagentRegistryForTests, spawnSubagentDirect } = await loadSubagentSpawnModuleForTest({
       callGatewayMock,
-      getRuntimeConfig: () => createSubagentSpawnTestConfig(os.tmpdir()),
+      loadConfig: () => createSubagentSpawnTestConfig(os.tmpdir()),
       updateSessionStoreMock,
       pruneLegacyStoreKeysMock,
       workspaceDir: os.tmpdir(),
     }));
-  });
-
-  beforeEach(() => {
     resetSubagentRegistryForTests();
     callGatewayMock.mockReset();
     updateSessionStoreMock.mockReset();
@@ -75,7 +72,7 @@ describe("spawnSubagentDirect runtime model persistence", () => {
       },
       {
         agentSessionKey: "agent:main:main",
-        agentChannel: "guildchat",
+        agentChannel: "discord",
       },
     );
 
@@ -83,17 +80,18 @@ describe("spawnSubagentDirect runtime model persistence", () => {
       status: "accepted",
       modelApplied: true,
     });
-    expect(updateSessionStoreMock).toHaveBeenCalledTimes(3);
+    expect(updateSessionStoreMock).toHaveBeenCalledTimes(1);
     expectPersistedRuntimeModel({
       persistedStore,
       sessionKey: /^agent:main:subagent:/,
       provider: "openai-codex",
       model: "gpt-5.4",
     });
-    expect(pruneLegacyStoreKeysMock).toHaveBeenCalledTimes(3);
-    expect(operations.indexOf("store:update")).toBeGreaterThan(-1);
-    expect(operations.indexOf("gateway:agent")).toBeGreaterThan(
-      operations.lastIndexOf("store:update"),
+    expect(pruneLegacyStoreKeysMock).toHaveBeenCalledTimes(1);
+    expect(operations.indexOf("gateway:sessions.patch")).toBeGreaterThan(-1);
+    expect(operations.indexOf("store:update")).toBeGreaterThan(
+      operations.indexOf("gateway:sessions.patch"),
     );
+    expect(operations.indexOf("gateway:agent")).toBeGreaterThan(operations.indexOf("store:update"));
   });
 });

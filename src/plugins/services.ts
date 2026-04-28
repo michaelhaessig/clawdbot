@@ -1,11 +1,6 @@
 import { STATE_DIR } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import {
-  emitTrustedDiagnosticEvent,
-  onInternalDiagnosticEvent,
-} from "../infra/diagnostic-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import type { PluginServiceRegistration } from "./registry-types.js";
 import type { PluginRegistry } from "./registry.js";
 import type { OpenClawPluginServiceContext, PluginLogger } from "./types.js";
 
@@ -22,27 +17,12 @@ function createPluginLogger(): PluginLogger {
 function createServiceContext(params: {
   config: OpenClawConfig;
   workspaceDir?: string;
-  service?: PluginServiceRegistration;
 }): OpenClawPluginServiceContext {
-  const grantsInternalDiagnostics =
-    params.service?.origin === "bundled" &&
-    params.service.pluginId === params.service.service.id &&
-    (params.service.service.id === "diagnostics-otel" ||
-      params.service.service.id === "diagnostics-prometheus");
-
   return {
     config: params.config,
     workspaceDir: params.workspaceDir,
     stateDir: STATE_DIR,
     logger: createPluginLogger(),
-    ...(grantsInternalDiagnostics
-      ? {
-          internalDiagnostics: {
-            emit: emitTrustedDiagnosticEvent,
-            onEvent: onInternalDiagnosticEvent,
-          },
-        }
-      : {}),
   };
 }
 
@@ -59,13 +39,13 @@ export async function startPluginServices(params: {
     id: string;
     stop?: () => void | Promise<void>;
   }> = [];
+  const serviceContext = createServiceContext({
+    config: params.config,
+    workspaceDir: params.workspaceDir,
+  });
+
   for (const entry of params.registry.services) {
     const service = entry.service;
-    const serviceContext = createServiceContext({
-      config: params.config,
-      workspaceDir: params.workspaceDir,
-      service: entry,
-    });
     try {
       await service.start(serviceContext);
       running.push({

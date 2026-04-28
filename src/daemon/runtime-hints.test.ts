@@ -16,7 +16,6 @@ describe("buildPlatformRuntimeLogHints", () => {
     ).toEqual([
       "Launchd stdout (if installed): /tmp/openclaw-state/logs/gateway.log",
       "Launchd stderr (if installed): /tmp/openclaw-state/logs/gateway.err.log",
-      "Restart attempts: /tmp/openclaw-state/logs/gateway-restart.log",
     ]);
   });
 
@@ -24,29 +23,17 @@ describe("buildPlatformRuntimeLogHints", () => {
     expect(
       buildPlatformRuntimeLogHints({
         platform: "linux",
-        env: {
-          OPENCLAW_STATE_DIR: "/tmp/openclaw-state",
-        },
         systemdServiceName: "openclaw-gateway",
         windowsTaskName: "OpenClaw Gateway",
       }),
-    ).toEqual([
-      "Logs: journalctl --user -u openclaw-gateway.service -n 200 --no-pager",
-      "Restart attempts: /tmp/openclaw-state/logs/gateway-restart.log",
-    ]);
+    ).toEqual(["Logs: journalctl --user -u openclaw-gateway.service -n 200 --no-pager"]);
     expect(
       buildPlatformRuntimeLogHints({
         platform: "win32",
-        env: {
-          OPENCLAW_STATE_DIR: "/tmp/openclaw-state",
-        },
         systemdServiceName: "openclaw-gateway",
         windowsTaskName: "OpenClaw Gateway",
       }),
-    ).toEqual([
-      'Logs: schtasks /Query /TN "OpenClaw Gateway" /V /FO LIST',
-      "Restart attempts: /tmp/openclaw-state/logs/gateway-restart.log",
-    ]);
+    ).toEqual(['Logs: schtasks /Query /TN "OpenClaw Gateway" /V /FO LIST']);
   });
 });
 

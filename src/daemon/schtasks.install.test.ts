@@ -4,7 +4,6 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installScheduledTask, readScheduledTaskCommand } from "./schtasks.js";
-import { auditGatewayServiceConfig, SERVICE_AUDIT_CODES } from "./service-audit.js";
 
 const schtasksCalls: string[][] = [];
 const schtasksResponses: { code: number; stdout: string; stderr: string }[] = [];
@@ -22,14 +21,6 @@ beforeEach(() => {
 });
 
 describe("installScheduledTask", () => {
-  const okSchtasksResponse = { code: 0, stdout: "", stderr: "" };
-  const accessDeniedResponse = { code: 1, stdout: "", stderr: "ERROR: Access is denied." };
-  const missingTaskResponse = {
-    code: 1,
-    stdout: "",
-    stderr: "ERROR: The system cannot find the file specified.",
-  };
-
   async function withUserProfileDir(
     run: (tmpDir: string, env: Record<string, string>) => Promise<void>,
   ) {
@@ -43,24 +34,6 @@ describe("installScheduledTask", () => {
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
-  }
-
-  function installDefaultGatewayTask(env: Record<string, string>) {
-    return installScheduledTask({
-      env,
-      stdout: new PassThrough(),
-      programArguments: ["node", "gateway.js"],
-      environment: {},
-    });
-  }
-
-  function expectInitialTaskQueries(): void {
-    expect(schtasksCalls[0]).toEqual(["/Query"]);
-    expect(schtasksCalls[1]).toEqual(["/Query", "/TN", "OpenClaw Gateway"]);
-  }
-
-  function expectTaskRunCall(index: number): void {
-    expect(schtasksCalls[index]).toEqual(["/Run", "/TN", "OpenClaw Gateway"]);
   }
 
   it("writes quoted set assignments and escapes metacharacters", async () => {
@@ -166,64 +139,95 @@ describe("installScheduledTask", () => {
 
   it("uses /Create when the task does not exist yet", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
-      schtasksResponses.push(okSchtasksResponse, missingTaskResponse);
+      schtasksResponses.push(
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "ERROR: The system cannot find the file specified." },
+      );
 
-      await installDefaultGatewayTask(env);
+      await installScheduledTask({
+        env,
+        stdout: new PassThrough(),
+        programArguments: ["node", "gateway.js"],
+        environment: {},
+      });
 
-      expectInitialTaskQueries();
+      expect(schtasksCalls[0]).toEqual(["/Query"]);
+      expect(schtasksCalls[1]).toEqual(["/Query", "/TN", "OpenClaw Gateway"]);
       expect(schtasksCalls[2]?.[0]).toBe("/Create");
-      expectTaskRunCall(3);
+      expect(schtasksCalls[3]).toEqual(["/Run", "/TN", "OpenClaw Gateway"]);
     });
   });
 
   it("falls back to /Create when /Change fails on an existing task", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
-      schtasksResponses.push(okSchtasksResponse, okSchtasksResponse, accessDeniedResponse);
+      schtasksResponses.push(
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "ERROR: Access is denied." },
+      );
 
-      await installDefaultGatewayTask(env);
+      await installScheduledTask({
+        env,
+        stdout: new PassThrough(),
+        programArguments: ["node", "gateway.js"],
+        environment: {},
+      });
 
-      expectInitialTaskQueries();
+      expect(schtasksCalls[0]).toEqual(["/Query"]);
+      expect(schtasksCalls[1]).toEqual(["/Query", "/TN", "OpenClaw Gateway"]);
       expect(schtasksCalls[2]?.[0]).toBe("/Change");
       expect(schtasksCalls[3]?.[0]).toBe("/Create");
-      expectTaskRunCall(4);
+      expect(schtasksCalls[4]).toEqual(["/Run", "/TN", "OpenClaw Gateway"]);
     });
   });
 
   it("throws when /Run fails after updating an existing task", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
       schtasksResponses.push(
-        okSchtasksResponse,
-        okSchtasksResponse,
-        okSchtasksResponse,
-        accessDeniedResponse,
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "ERROR: Access is denied." },
       );
 
-      await expect(installDefaultGatewayTask(env)).rejects.toThrow(
-        "schtasks run failed: ERROR: Access is denied.",
-      );
+      await expect(
+        installScheduledTask({
+          env,
+          stdout: new PassThrough(),
+          programArguments: ["node", "gateway.js"],
+          environment: {},
+        }),
+      ).rejects.toThrow("schtasks run failed: ERROR: Access is denied.");
 
-      expectInitialTaskQueries();
+      expect(schtasksCalls[0]).toEqual(["/Query"]);
+      expect(schtasksCalls[1]).toEqual(["/Query", "/TN", "OpenClaw Gateway"]);
       expect(schtasksCalls[2]?.[0]).toBe("/Change");
-      expectTaskRunCall(3);
+      expect(schtasksCalls[3]).toEqual(["/Run", "/TN", "OpenClaw Gateway"]);
     });
   });
 
   it("throws when /Run fails after creating a new task", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
       schtasksResponses.push(
-        okSchtasksResponse,
-        missingTaskResponse,
-        okSchtasksResponse,
-        accessDeniedResponse,
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "ERROR: The system cannot find the file specified." },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 1, stdout: "", stderr: "ERROR: Access is denied." },
       );
 
-      await expect(installDefaultGatewayTask(env)).rejects.toThrow(
-        "schtasks run failed: ERROR: Access is denied.",
-      );
+      await expect(
+        installScheduledTask({
+          env,
+          stdout: new PassThrough(),
+          programArguments: ["node", "gateway.js"],
+          environment: {},
+        }),
+      ).rejects.toThrow("schtasks run failed: ERROR: Access is denied.");
 
-      expectInitialTaskQueries();
+      expect(schtasksCalls[0]).toEqual(["/Query"]);
+      expect(schtasksCalls[1]).toEqual(["/Query", "/TN", "OpenClaw Gateway"]);
       expect(schtasksCalls[2]?.[0]).toBe("/Create");
-      expectTaskRunCall(3);
+      expect(schtasksCalls[3]).toEqual(["/Run", "/TN", "OpenClaw Gateway"]);
     });
   });
 
@@ -242,37 +246,6 @@ describe("installScheduledTask", () => {
       const script = await fs.readFile(scriptPath, "utf8");
       expect(script).not.toContain('set "PATH=');
       expect(script).toContain('set "OPENCLAW_GATEWAY_PORT=18789"');
-    });
-  });
-
-  it("exposes Windows task script env values as inline for managed-env drift audit", async () => {
-    await withUserProfileDir(async (_tmpDir, env) => {
-      const { scriptPath } = await installScheduledTask({
-        env,
-        stdout: new PassThrough(),
-        programArguments: ["node", "gateway.js"],
-        environment: {
-          OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "TAVILY_API_KEY",
-          TAVILY_API_KEY: "old-inline-value",
-        },
-      });
-
-      const command = await readScheduledTaskCommand(env);
-      expect(command?.environmentValueSources).toMatchObject({
-        OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "inline",
-        TAVILY_API_KEY: "inline",
-      });
-      expect(command?.sourcePath).toBe(scriptPath);
-
-      const audit = await auditGatewayServiceConfig({
-        env,
-        platform: "win32",
-        command,
-        expectedManagedServiceEnvKeys: ["TAVILY_API_KEY"],
-      });
-      expect(
-        audit.issues.some((issue) => issue.code === SERVICE_AUDIT_CODES.gatewayManagedEnvEmbedded),
-      ).toBe(true);
     });
   });
 });

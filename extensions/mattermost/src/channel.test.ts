@@ -1,3 +1,4 @@
+import { Type } from "@sinclair/typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../runtime-api.js";
 import { createChannelReplyPipeline } from "../runtime-api.js";
@@ -256,7 +257,7 @@ describe("mattermostPlugin", () => {
       expect(actions).toEqual([]);
     });
 
-    it("declares presentation capability for message sends", () => {
+    it("keeps buttons optional in message tool schema", () => {
       const cfg: OpenClawConfig = {
         channels: {
           mattermost: {
@@ -268,8 +269,12 @@ describe("mattermostPlugin", () => {
       };
 
       const discovery = mattermostPlugin.actions?.describeMessageTool?.({ cfg });
-      expect(discovery?.capabilities).toContain("presentation");
-      expect(discovery?.schema).toBeUndefined();
+      const schema = discovery?.schema;
+      if (!schema || Array.isArray(schema)) {
+        throw new Error("expected mattermost message-tool schema");
+      }
+
+      expect(Type.Object(schema.properties).required).toBeUndefined();
     });
 
     it("hides react when actions.reactions is false", () => {

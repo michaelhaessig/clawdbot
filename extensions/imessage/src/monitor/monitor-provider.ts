@@ -6,6 +6,13 @@ import {
 } from "openclaw/plugin-sdk/channel-inbound";
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import { createChannelReplyPipeline } from "openclaw/plugin-sdk/channel-reply-pipeline";
+import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
+import {
+  resolveOpenProviderRuntimeGroupPolicy,
+  resolveDefaultGroupPolicy,
+  warnMissingProviderGroupPolicyFallbackOnce,
+} from "openclaw/plugin-sdk/config-runtime";
+import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/config-runtime";
 import {
   readChannelAllowFromStore,
   upsertChannelPairingRequest,
@@ -22,15 +29,8 @@ import {
 import { resolveTextChunkLimit } from "openclaw/plugin-sdk/reply-runtime";
 import { dispatchInboundMessage } from "openclaw/plugin-sdk/reply-runtime";
 import { createReplyDispatcher } from "openclaw/plugin-sdk/reply-runtime";
-import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { danger, logVerbose, shouldLogVerbose, warn } from "openclaw/plugin-sdk/runtime-env";
-import {
-  resolveOpenProviderRuntimeGroupPolicy,
-  resolveDefaultGroupPolicy,
-  warnMissingProviderGroupPolicyFallbackOnce,
-} from "openclaw/plugin-sdk/runtime-group-policy";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
-import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-runtime";
 import { resolveIMessageAccount } from "../accounts.js";
 import { createIMessageRpcClient, type IMessageRpcClient } from "../client.js";
@@ -116,7 +116,7 @@ async function waitForWatchSubscribeRetryDelay(params: {
 
 export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): Promise<void> {
   const runtime = resolveRuntime(opts);
-  const cfg = opts.config ?? getRuntimeConfig();
+  const cfg = opts.config ?? loadConfig();
   const accountInfo = resolveIMessageAccount({
     cfg,
     accountId: opts.accountId,
@@ -352,7 +352,6 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
         },
         sendPairingReply: async (text) => {
           await sendMessageIMessage(sender, text, {
-            config: cfg,
             client: getActiveClient(),
             maxBytes: mediaMaxBytes,
             accountId: accountInfo.accountId,
@@ -451,7 +450,6 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
           return;
         }
         await deliverReplies({
-          cfg,
           replies: [payload],
           target,
           client: getActiveClient(),

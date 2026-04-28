@@ -1,15 +1,17 @@
 import os from "node:os";
 import path from "node:path";
-import { createPersistentDedupe } from "./dedup-runtime-api.js";
-import {
-  releaseFeishuMessageProcessing,
-  tryBeginFeishuMessageProcessing,
-} from "./processing-claims.js";
+import { createDedupeCache, createPersistentDedupe } from "./dedup-runtime-api.js";
 
 // Persistent TTL: 24 hours — survives restarts & WebSocket reconnects.
 const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
 const MEMORY_MAX_SIZE = 1_000;
 const FILE_MAX_ENTRIES = 10_000;
+const EVENT_DEDUP_TTL_MS = 5 * 60 * 1000;
+const EVENT_MEMORY_MAX_SIZE = 2_000;
+const processingClaims = createDedupeCache({
+  ttlMs: EVENT_DEDUP_TTL_MS,
+  maxSize: EVENT_MEMORY_MAX_SIZE,
+});
 
 function resolveStateDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
   const stateOverride = env.OPENCLAW_STATE_DIR?.trim();
@@ -34,12 +36,35 @@ const persistentDedupe = createPersistentDedupe({
   resolveFilePath: resolveNamespaceFilePath,
 });
 
+function resolveEventDedupeKey(
+  namespace: string,
+  messageId: string | undefined | null,
+): string | null {
+  const trimmed = messageId?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return `${namespace}:${trimmed}`;
+}
+
 function normalizeMessageId(messageId: string | undefined | null): string | null {
   const trimmed = messageId?.trim();
   return trimmed ? trimmed : null;
 }
 
-export { releaseFeishuMessageProcessing, tryBeginFeishuMessageProcessing };
+export function tryBeginFeishuMessageProcessing(
+  messageId: string | undefined | null,
+  namespace = "global",
+): boolean {
+  return !processingClaims.check(resolveEventDedupeKey(namespace, messageId));
+}
+
+export function releaseFeishuMessageProcessing(
+  messageId: string | undefined | null,
+  namespace = "global",
+): void {
+  processingClaims.delete(resolveEventDedupeKey(namespace, messageId));
+}
 
 export async function claimUnprocessedFeishuMessage(params: {
   messageId: string | undefined | null;

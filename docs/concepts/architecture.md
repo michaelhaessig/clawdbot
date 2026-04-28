@@ -2,8 +2,10 @@
 summary: "WebSocket gateway architecture, components, and client flows"
 read_when:
   - Working on gateway protocol, clients, or transports
-title: "Gateway architecture"
+title: "Gateway Architecture"
 ---
+
+# Gateway architecture
 
 ## Overview
 

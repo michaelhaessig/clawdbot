@@ -8,8 +8,8 @@ import {
 } from "@buape/carbon";
 import type { GatewayPlugin } from "@buape/carbon/gateway";
 import { VoicePlugin } from "@buape/carbon/voice";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-name-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/config-runtime";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
@@ -18,10 +18,7 @@ import type { DiscordGuildEntryResolved } from "./allow-list.js";
 import { createDiscordAutoPresenceController } from "./auto-presence.js";
 import type { DiscordDmPolicy } from "./dm-command-auth.js";
 import type { MutableDiscordGateway } from "./gateway-handle.js";
-import {
-  createDiscordGatewayPlugin,
-  waitForDiscordGatewayPluginRegistration,
-} from "./gateway-plugin.js";
+import { createDiscordGatewayPlugin } from "./gateway-plugin.js";
 import { createDiscordGatewaySupervisor } from "./gateway-supervisor.js";
 import {
   DiscordMessageListener,
@@ -110,7 +107,7 @@ export function createDiscordStatusReadyListener(params: {
   })();
 }
 
-export async function createDiscordMonitorClient(params: {
+export function createDiscordMonitorClient(params: {
   accountId: string;
   applicationId: string;
   token: string;
@@ -186,7 +183,6 @@ export async function createDiscordMonitorClient(params: {
     });
   }
   const gateway = client.getPlugin<GatewayPlugin>("gateway") as MutableDiscordGateway | undefined;
-  await waitForDiscordGatewayPluginRegistration(gateway);
   const gatewaySupervisor = params.createGatewaySupervisor({
     gateway,
     isDisallowedIntentsError: params.isDisallowedIntentsError,

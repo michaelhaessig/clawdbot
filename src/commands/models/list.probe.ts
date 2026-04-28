@@ -479,8 +479,6 @@ async function probeTarget(params: {
       reasoningLevel: "off",
       verboseLevel: "off",
       streamParams: { maxTokens },
-      disableTools: true,
-      cleanupBundleMcpOnRunEnd: true,
     });
     return buildResult("ok");
   } catch (err) {

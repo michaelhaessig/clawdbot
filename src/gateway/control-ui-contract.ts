@@ -6,9 +6,6 @@ export type ControlUiBootstrapConfig = {
   basePath: string;
   assistantName: string;
   assistantAvatar: string;
-  assistantAvatarSource?: string | null;
-  assistantAvatarStatus?: "none" | "local" | "remote" | "data" | null;
-  assistantAvatarReason?: string | null;
   assistantAgentId: string;
   serverVersion?: string;
   localMediaPreviewRoots?: string[];

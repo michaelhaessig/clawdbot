@@ -92,13 +92,12 @@ describe("validateBindMounts", () => {
   });
 
   it("allows legitimate project directory mounts", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-safe-"));
     expect(() =>
       validateBindMounts([
-        `${join(projectRoot, "source")}:/source:rw`,
-        `${join(projectRoot, "projects")}:/projects:ro`,
-        `${join(projectRoot, "data")}:/data`,
-        `${join(projectRoot, "config")}:/config:ro`,
+        "/home/user/source:/source:rw",
+        "/home/user/projects:/projects:ro",
+        "/var/data/myapp:/data",
+        "/opt/myapp/config:/config:ro",
       ]),
     ).not.toThrow();
   });
@@ -257,46 +256,42 @@ describe("validateBindMounts", () => {
   });
 
   it("blocks bind sources outside allowed roots when allowlist is configured", () => {
-    const allowedRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-root-"));
-    const externalRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-external-"));
     expect(() =>
-      validateBindMounts([`${externalRoot}:/data:ro`], {
-        allowedSourceRoots: [allowedRoot],
+      validateBindMounts(["/opt/external:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
       }),
     ).toThrow(/outside allowed roots/);
   });
 
   it("allows bind sources in allowed roots when allowlist is configured", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-"));
     expect(() =>
-      validateBindMounts([`${join(projectRoot, "cache")}:/data:ro`], {
-        allowedSourceRoots: [projectRoot],
+      validateBindMounts(["/home/user/project/cache:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
       }),
     ).not.toThrow();
   });
 
   it("allows bind sources outside allowed roots with explicit dangerous override", () => {
-    const allowedRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-allowed-root-"));
-    const externalRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-external-"));
     expect(() =>
-      validateBindMounts([`${externalRoot}:/data:ro`], {
-        allowedSourceRoots: [allowedRoot],
+      validateBindMounts(["/opt/external:/data:ro"], {
+        allowedSourceRoots: ["/home/user/project"],
         allowSourcesOutsideAllowedRoots: true,
       }),
     ).not.toThrow();
   });
 
   it("blocks reserved container target paths by default", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-reserved-default-"));
     expect(() =>
-      validateBindMounts([`${projectRoot}:/workspace:rw`, `${projectRoot}:/agent/cache:rw`]),
+      validateBindMounts([
+        "/home/user/project:/workspace:rw",
+        "/home/user/project:/agent/cache:rw",
+      ]),
     ).toThrow(/reserved container path/);
   });
 
   it("allows reserved container target paths with explicit dangerous override", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-reserved-"));
     expect(() =>
-      validateBindMounts([`${projectRoot}:/workspace:rw`], {
+      validateBindMounts(["/home/user/project:/workspace:rw"], {
         allowReservedContainerTargets: true,
       }),
     ).not.toThrow();
@@ -384,10 +379,9 @@ describe("profile hardening", () => {
 
 describe("validateSandboxSecurity", () => {
   it("passes with safe config", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "openclaw-sbx-safe-config-"));
     expect(() =>
       validateSandboxSecurity({
-        binds: [`${projectRoot}:/src:rw`],
+        binds: ["/home/user/src:/src:rw"],
         network: "none",
         seccompProfile: "/tmp/seccomp.json",
         apparmorProfile: "openclaw-sandbox",

@@ -249,23 +249,13 @@ async function scanTranscriptFile(params: {
       continue;
     }
 
-    if (entry.usage) {
+    if (entry.usage && entry.costTotal === undefined) {
       const cost = resolveModelCostConfig({
         provider: entry.provider,
         model: entry.model,
         config: params.config,
       });
-      if (cost?.tieredPricing && cost.tieredPricing.length > 0) {
-        // When tiered pricing is configured, always recompute to override
-        // the flat-rate cost that the transport layer wrote into the transcript.
-        // Clear costBreakdown so downstream aggregation uses the recomputed total
-        // instead of the stale flat-rate breakdown from the transport layer.
-        entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
-        entry.costBreakdown = undefined;
-      } else if (entry.costTotal === undefined) {
-        // Fill in missing cost estimates.
-        entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
-      }
+      entry.costTotal = estimateUsageCost({ usage: entry.usage, cost });
     }
 
     params.onEntry(entry);
@@ -772,7 +762,7 @@ export async function loadSessionCostSummary(params: {
       if (!stats) {
         return null;
       }
-      return Object.assign({ date }, stats);
+      return { date, ...stats };
     })
     .filter((entry): entry is SessionDailyLatency => Boolean(entry))
     .toSorted((a, b) => a.date.localeCompare(b.date));

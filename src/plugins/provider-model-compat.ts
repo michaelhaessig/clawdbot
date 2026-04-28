@@ -2,7 +2,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import { detectOpenAICompletionsCompat } from "../agents/openai-completions-compat.js";
 import type { ModelCompatConfig } from "../config/types.models.js";
 
-export function extractModelCompat(
+function extractModelCompat(
   modelOrCompat: { compat?: unknown } | ModelCompatConfig | undefined,
 ): ModelCompatConfig | undefined {
   if (!modelOrCompat || typeof modelOrCompat !== "object") {

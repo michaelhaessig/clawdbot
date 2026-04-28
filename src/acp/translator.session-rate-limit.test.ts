@@ -13,10 +13,6 @@ import { createInMemorySessionStore } from "./session.js";
 import { AcpGatewayAgent } from "./translator.js";
 import { createAcpConnection, createAcpGateway } from "./translator.test-helpers.js";
 
-vi.mock("./commands.js", () => ({
-  getAvailableCommands: () => [],
-}));
-
 function createNewSessionRequest(cwd = "/tmp"): NewSessionRequest {
   return {
     cwd,
@@ -130,11 +126,12 @@ describe("acp session creation rate limit", () => {
     const agent = new AcpGatewayAgent(createAcpConnection(), createAcpGateway(), {
       sessionStore,
       sessionCreateRateLimit: {
-        maxRequests: 1,
+        maxRequests: 2,
         windowMs: 60_000,
       },
     });
 
+    await agent.newSession(createNewSessionRequest());
     await agent.newSession(createNewSessionRequest());
     await expect(agent.newSession(createNewSessionRequest())).rejects.toThrow(
       /session creation rate limit exceeded/i,

@@ -137,7 +137,6 @@ describe("lobster plugin tool", () => {
           prompt: "Approve this?",
           items: [{ id: "item-1" }],
           resumeToken: "resume-1",
-          approvalId: "approval-1",
         },
       }),
     };
@@ -169,7 +168,6 @@ describe("lobster plugin tool", () => {
         prompt: "Approve this?",
         items: [{ id: "item-1" }],
         resumeToken: "resume-1",
-        approvalId: "approval-1",
       },
     });
     expect(res.details).toMatchObject({
@@ -216,51 +214,7 @@ describe("lobster plugin tool", () => {
     ).rejects.toThrow(/flowStateJson must be valid JSON/);
   });
 
-  it("can resume managed TaskFlow mode with only approvalId", async () => {
-    const runner = {
-      run: vi.fn().mockResolvedValue({
-        ok: true,
-        status: "ok",
-        output: [],
-        requiresApproval: null,
-      }),
-    };
-    const taskFlow = createFakeTaskFlow();
-    const tool = createLobsterTool(fakeApi(), { runner, taskFlow });
-
-    const res = await tool.execute("call-managed-resume-approval-id", {
-      action: "resume",
-      approvalId: "approval-1",
-      approve: true,
-      flowId: "flow-1",
-      flowExpectedRevision: 1,
-      flowCurrentStep: "resume_lobster",
-    });
-
-    expect(taskFlow.resume).toHaveBeenCalledWith({
-      flowId: "flow-1",
-      expectedRevision: 1,
-      status: "running",
-      currentStep: "resume_lobster",
-    });
-    expect(runner.run).toHaveBeenCalledWith({
-      action: "resume",
-      approvalId: "approval-1",
-      approve: true,
-      cwd: process.cwd(),
-      timeoutMs: 20_000,
-      maxStdoutBytes: 512_000,
-    });
-    expect(res.details).toMatchObject({
-      ok: true,
-      status: "ok",
-      mutation: {
-        applied: true,
-      },
-    });
-  });
-
-  it("rejects managed TaskFlow resume mode without a token or approvalId", async () => {
+  it("rejects managed TaskFlow resume mode without a token", async () => {
     const tool = createLobsterTool(fakeApi(), {
       runner: { run: vi.fn() },
       taskFlow: createFakeTaskFlow(),
@@ -273,7 +227,7 @@ describe("lobster plugin tool", () => {
         flowExpectedRevision: 1,
         approve: true,
       }),
-    ).rejects.toThrow(/token or approvalId required when using managed TaskFlow resume mode/);
+    ).rejects.toThrow(/token required when using managed TaskFlow resume mode/);
   });
 
   it("rejects managed TaskFlow resume mode without approve", async () => {

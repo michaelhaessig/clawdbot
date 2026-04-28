@@ -4,11 +4,6 @@
 id: memory-tools-channel-context
 title: Memory tools in channel context
 surface: memory
-coverage:
-  primary:
-    - memory.tools
-  secondary:
-    - channels.group-messages
 objective: Verify the agent uses memory_search and memory_get in a shared channel when the answer lives only in memory files, not the live transcript.
 successCriteria:
   - Agent uses memory_search before answering.

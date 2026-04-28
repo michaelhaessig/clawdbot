@@ -6,7 +6,7 @@ export default defineBundledChannelEntry({
   description: "Nextcloud Talk channel plugin",
   importMetaUrl: import.meta.url,
   plugin: {
-    specifier: "./channel-plugin-api.js",
+    specifier: "./api.js",
     exportName: "nextcloudTalkPlugin",
   },
   secrets: {

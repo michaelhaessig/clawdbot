@@ -28,7 +28,7 @@ vi.mock("../../config/config.js", async () => {
     await vi.importActual<typeof import("../../config/config.js")>("../../config/config.js");
   return {
     ...actual,
-    getRuntimeConfig: () => loadConfigMock() as never,
+    loadConfig: () => loadConfigMock() as never,
   };
 });
 vi.mock("./sessions-send-tool.a2a.js", () => ({

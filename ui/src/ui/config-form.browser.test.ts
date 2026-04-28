@@ -32,13 +32,12 @@ const rootSchema = {
     },
   },
 };
-const rootAnalysis = analyzeConfigSchema(rootSchema);
 
 describe("config form renderer", () => {
   it("renders inputs and patches values", () => {
     const onPatch = vi.fn();
     const container = document.createElement("div");
-    const analysis = rootAnalysis;
+    const analysis = analyzeConfigSchema(rootSchema);
     render(
       renderConfigForm({
         schema: analysis.schema,
@@ -46,7 +45,7 @@ describe("config form renderer", () => {
           "gateway.auth.token": { label: "Gateway Token", sensitive: true },
         },
         unsupportedPaths: analysis.unsupportedPaths,
-        value: { allowFrom: ["+1"], bind: "auto" },
+        value: {},
         revealSensitive: true,
         onPatch,
       }),
@@ -79,6 +78,22 @@ describe("config form renderer", () => {
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event("change", { bubbles: true }));
     expect(onPatch).toHaveBeenCalledWith(["enabled"], true);
+  });
+
+  it("adds and removes array entries", () => {
+    const onPatch = vi.fn();
+    const container = document.createElement("div");
+    const analysis = analyzeConfigSchema(rootSchema);
+    render(
+      renderConfigForm({
+        schema: analysis.schema,
+        uiHints: {},
+        unsupportedPaths: analysis.unsupportedPaths,
+        value: { allowFrom: ["+1"] },
+        onPatch,
+      }),
+      container,
+    );
 
     const addButton = container.querySelector(".cfg-array__add");
     expect(addButton).not.toBeUndefined();
@@ -89,6 +104,22 @@ describe("config form renderer", () => {
     expect(removeButton).not.toBeUndefined();
     removeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onPatch).toHaveBeenCalledWith(["allowFrom"], []);
+  });
+
+  it("renders union literals as select options", () => {
+    const onPatch = vi.fn();
+    const container = document.createElement("div");
+    const analysis = analyzeConfigSchema(rootSchema);
+    render(
+      renderConfigForm({
+        schema: analysis.schema,
+        uiHints: {},
+        unsupportedPaths: analysis.unsupportedPaths,
+        value: { bind: "auto" },
+        onPatch,
+      }),
+      container,
+    );
 
     const tailnetButton = Array.from(
       container.querySelectorAll<HTMLButtonElement>(".cfg-segmented__btn"),
@@ -172,7 +203,7 @@ describe("config form renderer", () => {
   it("renders tags from uiHints metadata", () => {
     const onPatch = vi.fn();
     const container = document.createElement("div");
-    const analysis = rootAnalysis;
+    const analysis = analyzeConfigSchema(rootSchema);
     render(
       renderConfigForm({
         schema: analysis.schema,
@@ -191,7 +222,12 @@ describe("config form renderer", () => {
     );
     expect(tags).toContain("security");
     expect(tags).toContain("secret");
+  });
 
+  it("filters by tag query", () => {
+    const onPatch = vi.fn();
+    const container = document.createElement("div");
+    const analysis = analyzeConfigSchema(rootSchema);
     render(
       renderConfigForm({
         schema: analysis.schema,
@@ -210,6 +246,65 @@ describe("config form renderer", () => {
     expect(container.textContent).toContain("Token");
     expect(container.textContent).not.toContain("Allow From");
     expect(container.textContent).not.toContain("Mode");
+  });
+
+  it("does not treat plain text as tag filter", () => {
+    const onPatch = vi.fn();
+    const container = document.createElement("div");
+    const analysis = analyzeConfigSchema(rootSchema);
+    render(
+      renderConfigForm({
+        schema: analysis.schema,
+        uiHints: {
+          "gateway.auth.token": { tags: ["security"] },
+        },
+        unsupportedPaths: analysis.unsupportedPaths,
+        value: {},
+        searchQuery: "security",
+        onPatch,
+      }),
+      container,
+    );
+
+    expect(container.textContent).toContain('No settings match "security"');
+  });
+
+  it("requires both text and tag when combined", () => {
+    const onPatch = vi.fn();
+    const container = document.createElement("div");
+    const analysis = analyzeConfigSchema(rootSchema);
+    render(
+      renderConfigForm({
+        schema: analysis.schema,
+        uiHints: {
+          "gateway.auth.token": { tags: ["security"] },
+        },
+        unsupportedPaths: analysis.unsupportedPaths,
+        value: {},
+        searchQuery: "token tag:security",
+        onPatch,
+      }),
+      container,
+    );
+
+    expect(container.textContent).toContain("Token");
+    expect(container.textContent).not.toContain('No settings match "token tag:security"');
+
+    const noMatchContainer = document.createElement("div");
+    render(
+      renderConfigForm({
+        schema: analysis.schema,
+        uiHints: {
+          "gateway.auth.token": { tags: ["security"] },
+        },
+        unsupportedPaths: analysis.unsupportedPaths,
+        value: {},
+        searchQuery: "mode tag:security",
+        onPatch,
+      }),
+      noMatchContainer,
+    );
+    expect(noMatchContainer.textContent).toContain('No settings match "mode tag:security"');
   });
 
   it("supports SecretInput unions in additionalProperties maps", () => {
@@ -293,7 +388,7 @@ describe("config form renderer", () => {
   });
 
   it("accepts renderable unions", () => {
-    const renderableUnionSchema = {
+    const schema = {
       type: "object",
       properties: {
         mixed: {
@@ -301,19 +396,23 @@ describe("config form renderer", () => {
         },
       },
     };
-    let analysis = analyzeConfigSchema(renderableUnionSchema);
+    const analysis = analyzeConfigSchema(schema);
     expect(analysis.unsupportedPaths).not.toContain("mixed");
+  });
 
-    const nullableSchema = {
+  it("supports nullable types", () => {
+    const schema = {
       type: "object",
       properties: {
         note: { type: ["string", "null"] },
       },
     };
-    analysis = analyzeConfigSchema(nullableSchema);
+    const analysis = analyzeConfigSchema(schema);
     expect(analysis.unsupportedPaths).not.toContain("note");
+  });
 
-    const untypedAdditionalPropertiesSchema = {
+  it("ignores untyped additionalProperties schemas", () => {
+    const schema = {
       type: "object",
       properties: {
         channels: {
@@ -330,7 +429,7 @@ describe("config form renderer", () => {
         },
       },
     };
-    analysis = analyzeConfigSchema(untypedAdditionalPropertiesSchema);
+    const analysis = analyzeConfigSchema(schema);
     expect(analysis.unsupportedPaths).not.toContain("channels");
   });
 

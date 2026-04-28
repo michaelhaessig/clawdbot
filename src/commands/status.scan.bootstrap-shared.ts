@@ -57,7 +57,7 @@ type StatusScanExecRunner = (
   opts?: number | { timeoutMs?: number; maxBuffer?: number; cwd?: string },
 ) => Promise<{ stdout: string; stderr: string }>;
 
-type StatusScanCoreBootstrapParams<TAgentStatus> = {
+export async function createStatusScanCoreBootstrap<TAgentStatus>(params: {
   coldStart: boolean;
   cfg: OpenClawConfig;
   hasConfiguredChannels: boolean;
@@ -69,20 +69,7 @@ type StatusScanCoreBootstrapParams<TAgentStatus> = {
     includeRegistry: boolean;
   }) => Promise<UpdateCheckResult>;
   getAgentLocalStatuses: (cfg: OpenClawConfig) => Promise<TAgentStatus>;
-};
-
-type StatusScanBootstrapParams<TAgentStatus, TSummary> =
-  StatusScanCoreBootstrapParams<TAgentStatus> & {
-    sourceConfig: OpenClawConfig;
-    getStatusSummary: (params: {
-      config: OpenClawConfig;
-      sourceConfig: OpenClawConfig;
-    }) => Promise<TSummary>;
-  };
-
-export async function createStatusScanCoreBootstrap<TAgentStatus>(
-  params: StatusScanCoreBootstrapParams<TAgentStatus>,
-) {
+}) {
   const tailscaleMode = params.cfg.gateway?.tailscale?.mode ?? "off";
   const skipColdStartNetworkChecks = shouldSkipStatusScanNetworkChecks({
     coldStart: params.coldStart,
@@ -132,9 +119,24 @@ export async function createStatusScanCoreBootstrap<TAgentStatus>(
   };
 }
 
-export async function createStatusScanBootstrap<TAgentStatus, TSummary>(
-  params: StatusScanBootstrapParams<TAgentStatus, TSummary>,
-) {
+export async function createStatusScanBootstrap<TAgentStatus, TSummary>(params: {
+  coldStart: boolean;
+  cfg: OpenClawConfig;
+  sourceConfig: OpenClawConfig;
+  hasConfiguredChannels: boolean;
+  opts: { timeoutMs?: number; all?: boolean };
+  getTailnetHostname: (runner: StatusScanExecRunner) => Promise<string | null>;
+  getUpdateCheckResult: (params: {
+    timeoutMs: number;
+    fetchGit: boolean;
+    includeRegistry: boolean;
+  }) => Promise<UpdateCheckResult>;
+  getAgentLocalStatuses: (cfg: OpenClawConfig) => Promise<TAgentStatus>;
+  getStatusSummary: (params: {
+    config: OpenClawConfig;
+    sourceConfig: OpenClawConfig;
+  }) => Promise<TSummary>;
+}) {
   const core = await createStatusScanCoreBootstrap<TAgentStatus>({
     coldStart: params.coldStart,
     cfg: params.cfg,

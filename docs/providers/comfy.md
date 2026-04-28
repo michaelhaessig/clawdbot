@@ -1,11 +1,13 @@
 ---
-summary: "ComfyUI workflow image, video, and music generation setup in OpenClaw"
 title: "ComfyUI"
+summary: "ComfyUI workflow image, video, and music generation setup in OpenClaw"
 read_when:
   - You want to use local ComfyUI workflows with OpenClaw
   - You want to use Comfy Cloud with image, video, or music workflows
   - You need the bundled comfy plugin config keys
 ---
+
+# ComfyUI
 
 OpenClaw ships a bundled `comfy` plugin for workflow-driven ComfyUI runs. The plugin is entirely workflow-driven, so OpenClaw does not try to map generic `size`, `aspectRatio`, `resolution`, `durationSeconds`, or TTS-style controls onto your graph.
 
@@ -46,17 +48,15 @@ Choose between running ComfyUI on your own machine or using Comfy Cloud.
 
         ```json5
         {
-          plugins: {
-            entries: {
+          models: {
+            providers: {
               comfy: {
-                config: {
-                  mode: "local",
-                  baseUrl: "http://127.0.0.1:8188",
-                  image: {
-                    workflowPath: "./workflows/flux-api.json",
-                    promptNodeId: "6",
-                    outputNodeId: "9",
-                  },
+                mode: "local",
+                baseUrl: "http://127.0.0.1:8188",
+                image: {
+                  workflowPath: "./workflows/flux-api.json",
+                  promptNodeId: "6",
+                  outputNodeId: "9",
                 },
               },
             },
@@ -106,7 +106,7 @@ Choose between running ComfyUI on your own machine or using Comfy Cloud.
         export COMFY_CLOUD_API_KEY="your-key"
 
         # Or inline in config
-        openclaw config set plugins.entries.comfy.config.apiKey "your-key"
+        openclaw config set models.providers.comfy.apiKey "your-key"
         ```
       </Step>
       <Step title="Prepare your workflow JSON">
@@ -117,16 +117,14 @@ Choose between running ComfyUI on your own machine or using Comfy Cloud.
 
         ```json5
         {
-          plugins: {
-            entries: {
+          models: {
+            providers: {
               comfy: {
-                config: {
-                  mode: "cloud",
-                  image: {
-                    workflowPath: "./workflows/flux-api.json",
-                    promptNodeId: "6",
-                    outputNodeId: "9",
-                  },
+                mode: "cloud",
+                image: {
+                  workflowPath: "./workflows/flux-api.json",
+                  promptNodeId: "6",
+                  outputNodeId: "9",
                 },
               },
             },
@@ -167,27 +165,25 @@ Comfy supports shared top-level connection settings plus per-capability workflow
 
 ```json5
 {
-  plugins: {
-    entries: {
+  models: {
+    providers: {
       comfy: {
-        config: {
-          mode: "local",
-          baseUrl: "http://127.0.0.1:8188",
-          image: {
-            workflowPath: "./workflows/flux-api.json",
-            promptNodeId: "6",
-            outputNodeId: "9",
-          },
-          video: {
-            workflowPath: "./workflows/video-api.json",
-            promptNodeId: "12",
-            outputNodeId: "21",
-          },
-          music: {
-            workflowPath: "./workflows/music-api.json",
-            promptNodeId: "3",
-            outputNodeId: "18",
-          },
+        mode: "local",
+        baseUrl: "http://127.0.0.1:8188",
+        image: {
+          workflowPath: "./workflows/flux-api.json",
+          promptNodeId: "6",
+          outputNodeId: "9",
+        },
+        video: {
+          workflowPath: "./workflows/video-api.json",
+          promptNodeId: "12",
+          outputNodeId: "21",
+        },
+        music: {
+          workflowPath: "./workflows/music-api.json",
+          promptNodeId: "3",
+          outputNodeId: "18",
         },
       },
     },
@@ -248,17 +244,15 @@ The `image` and `video` sections also support:
 
     ```json5
     {
-      plugins: {
-        entries: {
+      models: {
+        providers: {
           comfy: {
-            config: {
-              image: {
-                workflowPath: "./workflows/edit-api.json",
-                promptNodeId: "6",
-                inputImageNodeId: "7",
-                inputImageInputName: "image",
-                outputNodeId: "9",
-              },
+            image: {
+              workflowPath: "./workflows/edit-api.json",
+              promptNodeId: "6",
+              inputImageNodeId: "7",
+              inputImageInputName: "image",
+              outputNodeId: "9",
             },
           },
         },
@@ -307,14 +301,12 @@ The `image` and `video` sections also support:
 
     ```json5
     {
-      plugins: {
-        entries: {
+      models: {
+        providers: {
           comfy: {
-            config: {
-              workflowPath: "./workflows/flux-api.json",
-              promptNodeId: "6",
-              outputNodeId: "9",
-            },
+            workflowPath: "./workflows/flux-api.json",
+            promptNodeId: "6",
+            outputNodeId: "9",
           },
         },
       },
@@ -356,7 +348,7 @@ The `image` and `video` sections also support:
   <Card title="Provider Directory" href="/providers/index" icon="layers">
     Overview of all providers and model refs.
   </Card>
-  <Card title="Configuration reference" href="/gateway/config-agents#agent-defaults" icon="gear">
+  <Card title="Configuration Reference" href="/gateway/configuration-reference#agent-defaults" icon="gear">
     Full config reference including agent defaults.
   </Card>
 </CardGroup>

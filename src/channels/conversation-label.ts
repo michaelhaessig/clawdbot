@@ -18,7 +18,7 @@ function shouldAppendId(id: string): boolean {
   if (/^[0-9]+$/.test(id)) {
     return true;
   }
-  if (/^[^\s:@]+@[^\s:@]+$/.test(id)) {
+  if (id.includes("@g.us")) {
     return true;
   }
   return false;

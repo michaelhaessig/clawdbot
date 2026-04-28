@@ -116,33 +116,6 @@ async function expectInlineActionSkipped(params: {
   expect(handleCommandsMock).not.toHaveBeenCalled();
 }
 
-async function runInlineStatusAction(storePath?: string) {
-  const typing = createTypingController();
-  const ctx = buildTestCtx({
-    Body: "/status",
-    CommandBody: "/status",
-  });
-  const result = await handleInlineActions(
-    createHandleInlineActionsInput({
-      ctx,
-      typing,
-      cleanedBody: stripInlineStatus("/status").cleaned,
-      command: {
-        isAuthorizedSender: true,
-        rawBodyNormalized: "/status",
-        commandBodyNormalized: "/status",
-      },
-      overrides: {
-        allowTextCommands: true,
-        inlineStatusRequested: true,
-        ...(storePath ? { storePath } : {}),
-      },
-    }),
-  );
-
-  return { result, typing };
-}
-
 describe("handleInlineActions", () => {
   beforeEach(() => {
     handleCommandsMock.mockReset();
@@ -262,7 +235,28 @@ describe("handleInlineActions", () => {
   });
 
   it("does not run command handlers after replying to an inline status-only turn", async () => {
-    const { result, typing } = await runInlineStatusAction();
+    const typing = createTypingController();
+    const ctx = buildTestCtx({
+      Body: "/status",
+      CommandBody: "/status",
+    });
+
+    const result = await handleInlineActions(
+      createHandleInlineActionsInput({
+        ctx,
+        typing,
+        cleanedBody: stripInlineStatus("/status").cleaned,
+        command: {
+          isAuthorizedSender: true,
+          rawBodyNormalized: "/status",
+          commandBodyNormalized: "/status",
+        },
+        overrides: {
+          allowTextCommands: true,
+          inlineStatusRequested: true,
+        },
+      }),
+    );
 
     expect(result).toEqual({ kind: "reply", reply: undefined });
     expect(buildStatusReplyMock).toHaveBeenCalledTimes(1);
@@ -276,7 +270,29 @@ describe("handleInlineActions", () => {
   });
 
   it("preserves storePath when routing inline status through the shared status builder", async () => {
-    const { result } = await runInlineStatusAction("/tmp/inline-status-store.json");
+    const typing = createTypingController();
+    const ctx = buildTestCtx({
+      Body: "/status",
+      CommandBody: "/status",
+    });
+
+    const result = await handleInlineActions(
+      createHandleInlineActionsInput({
+        ctx,
+        typing,
+        cleanedBody: stripInlineStatus("/status").cleaned,
+        command: {
+          isAuthorizedSender: true,
+          rawBodyNormalized: "/status",
+          commandBodyNormalized: "/status",
+        },
+        overrides: {
+          allowTextCommands: true,
+          inlineStatusRequested: true,
+          storePath: "/tmp/inline-status-store.json",
+        },
+      }),
+    );
 
     expect(result).toEqual({ kind: "reply", reply: undefined });
     expect(buildStatusReplyMock).toHaveBeenCalledWith(

@@ -175,14 +175,10 @@ function summarizeViewState(values: unknown): ModalInputSummary[] {
   return entries;
 }
 
-export function registerSlackInteractionEvents(params: {
-  ctx: SlackMonitorContext;
-  trackEvent?: () => void;
-}) {
-  const { ctx, trackEvent } = params;
+export function registerSlackInteractionEvents(params: { ctx: SlackMonitorContext }) {
+  const { ctx } = params;
   registerSlackBlockActionHandler({
     ctx,
-    trackEvent,
     formatSystemEvent: formatSlackInteractionSystemEvent,
   });
 
@@ -196,7 +192,6 @@ export function registerSlackInteractionEvents(params: {
     register: (matcher, handler) => ctx.app.view(matcher, handler),
     matcher: modalMatcher,
     ctx,
-    trackEvent,
     interactionType: "view_submission",
     contextPrefix: "slack:interaction:view",
     summarizeViewState,
@@ -217,7 +212,6 @@ export function registerSlackInteractionEvents(params: {
     register: viewClosed,
     matcher: modalMatcher,
     ctx,
-    trackEvent,
     interactionType: "view_closed",
     contextPrefix: "slack:interaction:view-closed",
     summarizeViewState,

@@ -48,19 +48,18 @@ describe("resolveCommandAuthorization", () => {
     setActivePluginRegistry(createTestRegistry(plugins));
   }
 
-  function resolveTestChannelAuthorization(params: {
+  function resolveWhatsAppAuthorization(params: {
     from: string;
     senderId?: string;
     senderE164?: string;
     allowFrom: string[];
   }) {
-    registerAllowFromPlugins(createAllowFromPlugin("mobilechat", () => params.allowFrom));
     const cfg = {
-      channels: { mobilechat: { allowFrom: params.allowFrom } },
+      channels: { whatsapp: { allowFrom: params.allowFrom } },
     } as OpenClawConfig;
     const ctx = {
-      Provider: "mobilechat",
-      Surface: "mobilechat",
+      Provider: "whatsapp",
+      Surface: "whatsapp",
       From: params.from,
       SenderId: params.senderId,
       SenderE164: params.senderE164,
@@ -75,7 +74,7 @@ describe("resolveCommandAuthorization", () => {
   it.each([
     {
       name: "falls back from empty SenderId to SenderE164",
-      from: "mobilechat:+999",
+      from: "whatsapp:+999",
       senderId: "",
       senderE164: "+123",
       allowFrom: ["+123"],
@@ -83,7 +82,7 @@ describe("resolveCommandAuthorization", () => {
     },
     {
       name: "falls back from whitespace SenderId to SenderE164",
-      from: "mobilechat:+999",
+      from: "whatsapp:+999",
       senderId: "   ",
       senderE164: "+123",
       allowFrom: ["+123"],
@@ -91,7 +90,7 @@ describe("resolveCommandAuthorization", () => {
     },
     {
       name: "falls back to From when SenderId and SenderE164 are whitespace",
-      from: "+999",
+      from: "whatsapp:+999",
       senderId: "   ",
       senderE164: "   ",
       allowFrom: ["+999"],
@@ -99,7 +98,7 @@ describe("resolveCommandAuthorization", () => {
     },
     {
       name: "falls back from un-normalizable SenderId to SenderE164",
-      from: "mobilechat:+999",
+      from: "whatsapp:+999",
       senderId: "wat",
       senderE164: "+123",
       allowFrom: ["+123"],
@@ -107,14 +106,14 @@ describe("resolveCommandAuthorization", () => {
     },
     {
       name: "prefers SenderE164 when SenderId does not match allowFrom",
-      from: "mobilechat:group:room-1",
-      senderId: "opaque-user",
+      from: "whatsapp:120363401234567890@g.us",
+      senderId: "123@lid",
       senderE164: "+41796666864",
       allowFrom: ["+41796666864"],
       expectedSenderId: "+41796666864",
     },
   ])("$name", ({ from, senderId, senderE164, allowFrom, expectedSenderId }) => {
-    const auth = resolveTestChannelAuthorization({
+    const auth = resolveWhatsAppAuthorization({
       from,
       senderId,
       senderE164,
@@ -158,48 +157,6 @@ describe("resolveCommandAuthorization", () => {
     });
     expect(otherAuth.senderIsOwner).toBe(false);
     expect(otherAuth.isAuthorizedSender).toBe(false);
-  });
-
-  it("rejects wildcard channel senders when the plugin enforces owner-only commands", () => {
-    setActivePluginRegistry(
-      createTestRegistry([
-        {
-          pluginId: "discord",
-          plugin: {
-            ...createOutboundTestPlugin({
-              id: "discord",
-              outbound: { deliveryMode: "direct" },
-            }),
-            commands: { enforceOwnerForCommands: true },
-            config: {
-              listAccountIds: () => ["default"],
-              resolveAccount: () => ({}),
-              resolveAllowFrom: () => ["*"],
-              formatAllowFrom,
-            },
-          },
-          source: "test",
-        },
-      ]),
-    );
-    const cfg = {
-      channels: { discord: { allowFrom: ["*"] } },
-    } as OpenClawConfig;
-
-    const auth = resolveCommandAuthorization({
-      ctx: {
-        Provider: "discord",
-        Surface: "discord",
-        ChatType: "direct",
-        From: "discord:123",
-        SenderId: "123",
-      } as MsgContext,
-      cfg,
-      commandAuthorized: true,
-    });
-
-    expect(auth.senderIsOwner).toBe(false);
-    expect(auth.isAuthorizedSender).toBe(false);
   });
 
   it("uses explicit owner allowlist when allowFrom is empty", () => {
@@ -560,7 +517,7 @@ describe("resolveCommandAuthorization", () => {
       const cfg = {
         commands: {
           allowFrom: {
-            "*": ["demo:group:room-1"],
+            "*": ["120363411111111111@g.us"],
           },
         },
       } as OpenClawConfig;
@@ -569,7 +526,7 @@ describe("resolveCommandAuthorization", () => {
         ctx: {
           Provider: "whatsapp",
           Surface: "whatsapp",
-          From: "demo:group:room-1",
+          From: "120363411111111111@g.us",
           SenderId: " ",
           SenderE164: " ",
         } as MsgContext,

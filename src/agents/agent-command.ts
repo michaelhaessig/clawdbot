@@ -1,9 +1,9 @@
 import {
   formatThinkingLevels,
-  isThinkingLevelSupported,
+  formatXHighModelHint,
   normalizeThinkLevel,
   normalizeVerboseLevel,
-  resolveSupportedThinkingLevel,
+  supportsXHighThinking,
   type VerboseLevel,
 } from "../auto-reply/thinking.js";
 import { formatCliCommand } from "../cli/command-format.js";
@@ -40,8 +40,6 @@ import { ensureAuthProfileStore } from "./auth-profiles/store.js";
 import {
   persistSessionEntry as persistSessionEntryBase,
   prependInternalEventContext,
-  resolveAcpPromptBody,
-  resolveInternalEventTranscriptBody,
 } from "./command/attempt-execution.shared.js";
 import { resolveAgentRunContext } from "./command/run-context.js";
 import { resolveSession } from "./command/session.js";
@@ -60,7 +58,6 @@ import {
   resolveDefaultModelForAgent,
   resolveThinkingDefault,
 } from "./model-selection.js";
-import { resolveProviderIdForAuth } from "./provider-auth-aliases.js";
 import { normalizeSpawnedRunMetadata } from "./spawned-context.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
 import { ensureAgentWorkspace } from "./workspace.js";
@@ -73,7 +70,6 @@ type AcpRuntimeErrorsRuntime = typeof import("../acp/runtime/errors.js");
 type AcpSessionIdentifiersRuntime = typeof import("../acp/runtime/session-identifiers.js");
 type DeliveryRuntime = typeof import("./command/delivery.runtime.js");
 type SessionStoreRuntime = typeof import("./command/session-store.runtime.js");
-type CliCompactionRuntime = typeof import("./command/cli-compaction.js");
 type TranscriptResolveRuntime = typeof import("../config/sessions/transcript-resolve.runtime.js");
 type CliDepsRuntime = typeof import("../cli/deps.js");
 type ExecDefaultsRuntime = typeof import("./exec-defaults.js");
@@ -89,7 +85,6 @@ let acpRuntimeErrorsRuntimePromise: Promise<AcpRuntimeErrorsRuntime> | undefined
 let acpSessionIdentifiersRuntimePromise: Promise<AcpSessionIdentifiersRuntime> | undefined;
 let deliveryRuntimePromise: Promise<DeliveryRuntime> | undefined;
 let sessionStoreRuntimePromise: Promise<SessionStoreRuntime> | undefined;
-let cliCompactionRuntimePromise: Promise<CliCompactionRuntime> | undefined;
 let transcriptResolveRuntimePromise: Promise<TranscriptResolveRuntime> | undefined;
 let cliDepsRuntimePromise: Promise<CliDepsRuntime> | undefined;
 let execDefaultsRuntimePromise: Promise<ExecDefaultsRuntime> | undefined;
@@ -131,11 +126,6 @@ function loadDeliveryRuntime(): Promise<DeliveryRuntime> {
 function loadSessionStoreRuntime(): Promise<SessionStoreRuntime> {
   sessionStoreRuntimePromise ??= import("./command/session-store.runtime.js");
   return sessionStoreRuntimePromise;
-}
-
-function loadCliCompactionRuntime(): Promise<CliCompactionRuntime> {
-  cliCompactionRuntimePromise ??= import("./command/cli-compaction.js");
-  return cliCompactionRuntimePromise;
 }
 
 function loadTranscriptResolveRuntime(): Promise<TranscriptResolveRuntime> {
@@ -256,6 +246,7 @@ async function prepareAgentCommandExecution(
   if (!message.trim()) {
     throw new Error("Message (--message) is required");
   }
+  const body = prependInternalEventContext(message, opts.internalEvents);
   if (!opts.to && !opts.sessionId && !opts.sessionKey && !opts.agentId) {
     throw new Error("Pass --to <E.164>, --session-id, or --agent to choose a session");
   }
@@ -373,16 +364,9 @@ async function prepareAgentCommandExecution(
         sessionKey,
       })
     : null;
-  const body =
-    acpResolution?.kind === "ready"
-      ? resolveAcpPromptBody(message, opts.internalEvents)
-      : prependInternalEventContext(message, opts.internalEvents);
-  const transcriptBody =
-    opts.transcriptMessage ?? resolveInternalEventTranscriptBody(message, opts.internalEvents);
 
   return {
     body,
-    transcriptBody,
     cfg,
     normalizedSpawned,
     agentCfg,
@@ -417,7 +401,6 @@ async function agentCommandInternal(
   const prepared = await prepareAgentCommandExecution(opts, runtime);
   const {
     body,
-    transcriptBody,
     cfg,
     normalizedSpawned,
     agentCfg,
@@ -471,17 +454,11 @@ async function agentCommandInternal(
       const visibleTextAccumulator = attemptExecutionRuntime.createAcpVisibleTextAccumulator();
       let stopReason: string | undefined;
       try {
-        const {
-          resolveAcpAgentPolicyError,
-          resolveAcpDispatchPolicyError,
-          resolveAcpExplicitTurnPolicyError,
-        } = await loadAcpPolicyRuntime();
-        const turnPolicyError =
-          opts.acpTurnSource === "manual_spawn"
-            ? resolveAcpExplicitTurnPolicyError(cfg)
-            : resolveAcpDispatchPolicyError(cfg);
-        if (turnPolicyError) {
-          throw turnPolicyError;
+        const { resolveAcpAgentPolicyError, resolveAcpDispatchPolicyError } =
+          await loadAcpPolicyRuntime();
+        const dispatchPolicyError = resolveAcpDispatchPolicyError(cfg);
+        if (dispatchPolicyError) {
+          throw dispatchPolicyError;
         }
         const acpAgent = normalizeAgentId(
           acpResolution.meta.agent || resolveAgentIdFromSessionKey(sessionKey),
@@ -545,7 +522,6 @@ async function agentCommandInternal(
         const { resolveAcpSessionCwd } = await loadAcpSessionIdentifiersRuntime();
         sessionEntry = await attemptExecutionRuntime.persistAcpTurnTranscript({
           body,
-          transcriptBody,
           finalText: finalTextRaw,
           sessionId,
           sessionKey,
@@ -635,17 +611,14 @@ async function agentCommandInternal(
       : currentSkillsSnapshot;
 
     if (skillsSnapshot && sessionStore && sessionKey && needsSkillsSnapshot) {
-      const now = Date.now();
       const current = sessionEntry ?? {
         sessionId,
-        updatedAt: now,
-        sessionStartedAt: now,
+        updatedAt: Date.now(),
       };
       const next: SessionEntry = {
         ...current,
         sessionId,
-        updatedAt: now,
-        sessionStartedAt: current.sessionStartedAt ?? now,
+        updatedAt: Date.now(),
         skillsSnapshot,
       };
       await persistSessionEntry({
@@ -659,16 +632,9 @@ async function agentCommandInternal(
 
     // Persist explicit /command overrides to the session store when we have a key.
     if (sessionStore && sessionKey) {
-      const now = Date.now();
       const entry = sessionStore[sessionKey] ??
-        sessionEntry ?? { sessionId, updatedAt: now, sessionStartedAt: now };
-      const next: SessionEntry = {
-        ...entry,
-        sessionId,
-        updatedAt: now,
-        sessionStartedAt: entry.sessionStartedAt ?? now,
-        lastInteractionAt: now,
-      };
+        sessionEntry ?? { sessionId, updatedAt: Date.now() };
+      const next: SessionEntry = { ...entry, sessionId, updatedAt: Date.now() };
       if (thinkOverride) {
         next.thinkingLevel = thinkOverride;
       }
@@ -708,11 +674,11 @@ async function agentCommandInternal(
     if (hasExplicitRunOverride && opts.allowModelOverride !== true) {
       throw new Error("Model override is not authorized for this caller.");
     }
-    const needsModelCatalog = Boolean(hasAllowlist);
+    const needsModelCatalog = hasAllowlist || hasStoredOverride || hasExplicitRunOverride;
     let allowedModelKeys = new Set<string>();
     let allowedModelCatalog: Awaited<ReturnType<typeof loadModelCatalog>> = [];
     let modelCatalog: Awaited<ReturnType<typeof loadModelCatalog>> | null = null;
-    let allowAnyModel = !hasAllowlist;
+    let allowAnyModel = false;
 
     if (needsModelCatalog) {
       modelCatalog = await loadModelCatalog({ config: cfg });
@@ -790,14 +756,7 @@ async function agentCommandInternal(
         const entry = sessionEntry;
         const store = ensureAuthProfileStore();
         const profile = store.profiles[authProfileId];
-        const profileAuthProvider = profile
-          ? resolveProviderIdForAuth(profile.provider, { config: cfg, workspaceDir })
-          : undefined;
-        const validationAuthProvider = resolveProviderIdForAuth(providerForAuthProfileValidation, {
-          config: cfg,
-          workspaceDir,
-        });
-        if (!profile || profileAuthProvider !== validationAuthProvider) {
+        if (!profile || profile.provider !== providerForAuthProfileValidation) {
           if (sessionStore && sessionKey) {
             await clearSessionAuthProfileOverride({
               sessionEntry: entry,
@@ -811,55 +770,34 @@ async function agentCommandInternal(
     }
 
     if (!resolvedThinkLevel) {
-      const catalogForThinking = modelCatalog ?? allowedModelCatalog;
+      let catalogForThinking = modelCatalog ?? allowedModelCatalog;
+      if (!catalogForThinking || catalogForThinking.length === 0) {
+        modelCatalog = await loadModelCatalog({ config: cfg });
+        catalogForThinking = modelCatalog;
+      }
       resolvedThinkLevel = resolveThinkingDefault({
         cfg,
         provider,
         model,
-        catalog: catalogForThinking.length > 0 ? catalogForThinking : undefined,
+        catalog: catalogForThinking,
       });
     }
-    const catalogForThinking = modelCatalog ?? allowedModelCatalog;
-    const thinkingCatalog = catalogForThinking.length > 0 ? catalogForThinking : undefined;
-    if (
-      !isThinkingLevelSupported({
-        provider,
-        model,
-        level: resolvedThinkLevel,
-        catalog: thinkingCatalog,
-      })
-    ) {
+    if (resolvedThinkLevel === "xhigh" && !supportsXHighThinking(provider, model)) {
       const explicitThink = Boolean(thinkOnce || thinkOverride);
       if (explicitThink) {
-        throw new Error(
-          `Thinking level "${resolvedThinkLevel}" is not supported for ${provider}/${model}. Use one of: ${formatThinkingLevels(provider, model, ", ", thinkingCatalog)}.`,
-        );
+        throw new Error(`Thinking level "xhigh" is only supported for ${formatXHighModelHint()}.`);
       }
-      const fallbackThinkLevel = resolveSupportedThinkingLevel({
-        provider,
-        model,
-        level: resolvedThinkLevel,
-        catalog: thinkingCatalog,
-      });
-      if (fallbackThinkLevel !== resolvedThinkLevel) {
-        const previousThinkLevel = resolvedThinkLevel;
-        resolvedThinkLevel = fallbackThinkLevel;
-        if (
-          sessionEntry &&
-          sessionStore &&
-          sessionKey &&
-          sessionEntry.thinkingLevel === previousThinkLevel
-        ) {
-          const entry = sessionEntry;
-          entry.thinkingLevel = fallbackThinkLevel;
-          entry.updatedAt = Date.now();
-          await persistSessionEntry({
-            sessionStore,
-            sessionKey,
-            storePath,
-            entry,
-          });
-        }
+      resolvedThinkLevel = "high";
+      if (sessionEntry && sessionStore && sessionKey && sessionEntry.thinkingLevel === "xhigh") {
+        const entry = sessionEntry;
+        entry.thinkingLevel = "high";
+        entry.updatedAt = Date.now();
+        await persistSessionEntry({
+          sessionStore,
+          sessionKey,
+          storePath,
+          entry,
+        });
       }
     }
     const { resolveSessionTranscriptFile } = await loadTranscriptResolveRuntime();
@@ -893,11 +831,6 @@ async function agentCommandInternal(
     const startedAt = Date.now();
     let lifecycleEnded = false;
     const attemptExecutionRuntime = await loadAttemptExecutionRuntime();
-    const runContext = resolveAgentRunContext(opts);
-    const messageChannel = resolveMessageChannel(
-      runContext.messageChannel,
-      opts.replyChannel ?? opts.channel,
-    );
 
     let result: Awaited<ReturnType<AttemptExecutionRuntime["runAgentAttempt"]>>;
     let fallbackProvider = provider;
@@ -906,6 +839,11 @@ async function agentCommandInternal(
     let liveSwitchRetries = 0;
     for (;;) {
       try {
+        const runContext = resolveAgentRunContext(opts);
+        const messageChannel = resolveMessageChannel(
+          runContext.messageChannel,
+          opts.replyChannel ?? opts.channel,
+        );
         const spawnedBy = normalizedSpawned.spawnedBy ?? sessionEntry?.spawnedBy;
         const effectiveFallbacksOverride = resolveEffectiveModelFallbacks({
           cfg,
@@ -953,13 +891,6 @@ async function agentCommandInternal(
               sessionHasHistory:
                 !isNewSession || (await attemptExecutionRuntime.sessionFileHasContent(sessionFile)),
               onAgentEvent: (evt) => {
-                if (evt.stream.startsWith("codex_app_server.")) {
-                  emitAgentEvent({
-                    runId,
-                    stream: evt.stream,
-                    data: evt.data ?? {},
-                  });
-                }
                 if (
                   evt.stream === "lifecycle" &&
                   typeof evt.data?.phase === "string" &&
@@ -1099,10 +1030,6 @@ async function agentCommandInternal(
         fallbackProvider,
         fallbackModel,
         result,
-        touchInteraction:
-          opts.bootstrapContextRunKind !== "cron" &&
-          opts.bootstrapContextRunKind !== "heartbeat" &&
-          !opts.internalEvents?.length,
       });
       sessionEntry = sessionStore[sessionKey] ?? sessionEntry;
     }
@@ -1111,7 +1038,6 @@ async function agentCommandInternal(
       try {
         sessionEntry = await attemptExecutionRuntime.persistCliTurnTranscript({
           body,
-          transcriptBody,
           result,
           sessionId,
           sessionKey: sessionKey ?? sessionId,
@@ -1121,27 +1047,6 @@ async function agentCommandInternal(
           sessionAgentId,
           threadId: opts.threadId,
           sessionCwd: workspaceDir,
-        });
-        sessionEntry = await (
-          await loadCliCompactionRuntime()
-        ).runCliTurnCompactionLifecycle({
-          cfg,
-          sessionId,
-          sessionKey: sessionKey ?? sessionId,
-          sessionEntry,
-          sessionStore,
-          storePath,
-          sessionAgentId,
-          workspaceDir,
-          agentDir,
-          provider: result.meta.agentMeta?.provider ?? provider,
-          model: result.meta.agentMeta?.model ?? model,
-          skillsSnapshot,
-          messageChannel,
-          agentAccountId: runContext.accountId,
-          senderIsOwner: opts.senderIsOwner,
-          thinkLevel: resolvedThinkLevel,
-          extraSystemPrompt: opts.extraSystemPrompt,
         });
       } catch (error) {
         log.warn(

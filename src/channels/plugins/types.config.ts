@@ -1,5 +1,3 @@
-import type { JsonSchemaObject } from "../../shared/json-schema.types.js";
-
 export type ChannelConfigUiHint = {
   label?: string;
   help?: string;
@@ -31,7 +29,7 @@ export type ChannelConfigRuntimeSchema = {
 };
 
 export type ChannelConfigSchema = {
-  schema: JsonSchemaObject;
+  schema: Record<string, unknown>;
   uiHints?: Record<string, ChannelConfigUiHint>;
   runtime?: ChannelConfigRuntimeSchema;
 };

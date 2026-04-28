@@ -7,7 +7,7 @@ import {
   resolveRequiredHomeDir,
 } from "./infra/home-dir.js";
 import { isPlainObject } from "./infra/plain-object.js";
-export { escapeRegExp } from "./shared/regexp.js";
+import { formatTerminalLink } from "./terminal/terminal-link.js";
 
 export async function ensureDir(dir: string) {
   await fs.promises.mkdir(dir, { recursive: true });
@@ -37,9 +37,15 @@ export function clampInt(value: number, min: number, max: number): number {
 export const clamp = clampNumber;
 
 /**
+ * Escapes special regex characters in a string so it can be used in a RegExp constructor.
+ */
+export function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Safely parse JSON, returning null on error instead of throwing.
  */
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- JSON parsing helper lets callers ascribe the expected payload type.
 export function safeParseJson<T>(raw: string): T | null {
   try {
     return JSON.parse(raw) as T;
@@ -48,7 +54,7 @@ export function safeParseJson<T>(raw: string): T | null {
   }
 }
 
-export { isPlainObject };
+export { formatTerminalLink, isPlainObject };
 
 /**
  * Type guard for Record<string, unknown> (less strict than isPlainObject).

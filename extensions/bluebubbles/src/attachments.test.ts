@@ -1,4 +1,3 @@
-import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "./test-mocks.js";
 import {
@@ -7,6 +6,7 @@ import {
   sendBlueBubblesAttachment,
 } from "./attachments.js";
 import { fetchBlueBubblesServerInfo, getCachedBlueBubblesPrivateApiStatus } from "./probe.js";
+import type { PluginRuntime } from "./runtime-api.js";
 import { setBlueBubblesRuntime } from "./runtime.js";
 import {
   BLUE_BUBBLES_PRIVATE_API_STATUS,
@@ -14,27 +14,53 @@ import {
   mockBlueBubblesPrivateApiStatus,
   mockBlueBubblesPrivateApiStatusOnce,
 } from "./test-harness.js";
-import {
-  createBlueBubblesFetchRemoteMediaMock,
-  createBlueBubblesRuntimeStub,
-} from "./test-helpers.js";
 import type { BlueBubblesAttachment } from "./types.js";
 
 const mockFetch = vi.fn();
 const fetchServerInfoMock = vi.mocked(fetchBlueBubblesServerInfo);
-const fetchRemoteMediaMock = createBlueBubblesFetchRemoteMediaMock({
-  createHttpError: async ({ response, url }) => {
-    const text = await response.text().catch(() => "unknown");
-    return new Error(`Failed to fetch media from ${url}: HTTP ${response.status}; body: ${text}`);
+const fetchRemoteMediaMock = vi.fn(
+  async (params: {
+    url: string;
+    maxBytes?: number;
+    fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  }) => {
+    const fetchFn = params.fetchImpl ?? fetch;
+    const res = await fetchFn(params.url);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      throw new Error(
+        `Failed to fetch media from ${params.url}: HTTP ${res.status}; body: ${text}`,
+      );
+    }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (typeof params.maxBytes === "number" && buffer.byteLength > params.maxBytes) {
+      const error = new Error(`payload exceeds maxBytes ${params.maxBytes}`) as Error & {
+        code?: string;
+      };
+      error.code = "max_bytes";
+      throw error;
+    }
+    return {
+      buffer,
+      contentType: res.headers.get("content-type") ?? undefined,
+      fileName: undefined,
+    };
   },
-});
+);
 
 installBlueBubblesFetchTestHooks({
   mockFetch,
   privateApiStatusMock: vi.mocked(getCachedBlueBubblesPrivateApiStatus),
 });
 
-const runtimeStub = createBlueBubblesRuntimeStub(fetchRemoteMediaMock);
+const runtimeStub = {
+  channel: {
+    media: {
+      fetchRemoteMedia:
+        fetchRemoteMediaMock as unknown as PluginRuntime["channel"]["media"]["fetchRemoteMedia"],
+    },
+  },
+} as unknown as PluginRuntime;
 
 describe("downloadBlueBubblesAttachment", () => {
   beforeEach(() => {
@@ -315,12 +341,8 @@ describe("downloadBlueBubblesAttachment", () => {
       },
     });
 
-    // Default-deny policy via the guard, NOT unguarded fetch. Aisle #68234
-    // flagged the previous `undefined` fallback as a real SSRF bypass because
-    // `blueBubblesFetchWithTimeout` treats `undefined` as "skip the SSRF
-    // guard entirely", exactly when the user asked us to block private nets.
     const fetchMediaArgs = fetchRemoteMediaMock.mock.calls[0][0] as Record<string, unknown>;
-    expect(fetchMediaArgs.ssrfPolicy).toEqual({});
+    expect(fetchMediaArgs.ssrfPolicy).toBeUndefined();
   });
 
   it("allowlists public serverUrl hostname when allowPrivateNetwork is not set", async () => {

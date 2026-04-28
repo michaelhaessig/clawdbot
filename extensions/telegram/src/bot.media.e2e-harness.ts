@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { resetInboundDedupe } from "openclaw/plugin-sdk/reply-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import { beforeEach, vi, type Mock } from "vitest";
@@ -145,10 +145,10 @@ const mediaHarnessDispatchReplyWithBufferedBlockDispatcher = vi.hoisted(() =>
 );
 
 export const telegramBotDepsForTest: TelegramBotDeps = {
-  getRuntimeConfig: (() =>
+  loadConfig: (() =>
     ({
       channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
-    }) as OpenClawConfig) as TelegramBotDeps["getRuntimeConfig"],
+    }) as OpenClawConfig) as TelegramBotDeps["loadConfig"],
   resolveStorePath: vi.fn(
     (storePath?: string) => storePath ?? "/tmp/telegram-media-sessions.json",
   ) as TelegramBotDeps["resolveStorePath"],

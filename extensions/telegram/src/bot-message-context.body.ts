@@ -7,15 +7,15 @@ import {
   resolveInboundMentionDecision,
   type NormalizedLocation,
 } from "openclaw/plugin-sdk/channel-inbound";
-import { resolveChannelGroupPolicy } from "openclaw/plugin-sdk/channel-policy";
 import { resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth-native";
 import { hasControlCommand } from "openclaw/plugin-sdk/command-detection";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type {
   TelegramDirectConfig,
   TelegramGroupConfig,
   TelegramTopicConfig,
-} from "openclaw/plugin-sdk/config-types";
+} from "openclaw/plugin-sdk/config-runtime";
+import { resolveChannelGroupPolicy } from "openclaw/plugin-sdk/config-runtime";
 import {
   createInternalHookEvent,
   fireAndForgetHook,
@@ -49,22 +49,6 @@ import { buildTelegramGroupPeerId } from "./bot/helpers.js";
 import type { TelegramContext } from "./bot/types.js";
 import { isTelegramForumServiceMessage } from "./forum-service-message.js";
 
-type StickerVisionRuntime = typeof import("./sticker-vision.runtime.js");
-type MediaUnderstandingRuntime = typeof import("./media-understanding.runtime.js");
-
-let stickerVisionRuntimePromise: Promise<StickerVisionRuntime> | undefined;
-let mediaUnderstandingRuntimePromise: Promise<MediaUnderstandingRuntime> | undefined;
-
-function loadStickerVisionRuntime(): Promise<StickerVisionRuntime> {
-  stickerVisionRuntimePromise ??= import("./sticker-vision.runtime.js");
-  return stickerVisionRuntimePromise;
-}
-
-function loadMediaUnderstandingRuntime(): Promise<MediaUnderstandingRuntime> {
-  mediaUnderstandingRuntimePromise ??= import("./media-understanding.runtime.js");
-  return mediaUnderstandingRuntimePromise;
-}
-
 export type TelegramInboundBodyResult = {
   bodyText: string;
   rawBody: string;
@@ -73,21 +57,16 @@ export type TelegramInboundBodyResult = {
   effectiveWasMentioned: boolean;
   canDetectMention: boolean;
   shouldBypassMention: boolean;
-  audioTranscribedMediaIndex?: number;
   stickerCacheHit: boolean;
   locationData?: NormalizedLocation;
 };
-
-function formatAudioTranscriptForAgent(transcript: string): string {
-  return `[Audio transcript (machine-generated, untrusted)]: ${JSON.stringify(transcript)}`;
-}
 
 async function resolveStickerVisionSupport(params: {
   cfg: OpenClawConfig;
   agentId?: string;
 }): Promise<boolean> {
   try {
-    const { resolveStickerVisionSupportRuntime } = await loadStickerVisionRuntime();
+    const { resolveStickerVisionSupportRuntime } = await import("./sticker-vision.runtime.js");
     return await resolveStickerVisionSupportRuntime(params);
   } catch {
     return false;
@@ -214,7 +193,7 @@ export async function resolveTelegramInboundBody(params: {
 
   if (needsPreflightTranscription) {
     try {
-      const { transcribeFirstAudio } = await loadMediaUnderstandingRuntime();
+      const { transcribeFirstAudio } = await import("./media-understanding.runtime.js");
       const tempCtx: MsgContext = {
         MediaPaths: allMedia.length > 0 ? allMedia.map((m) => m.path) : undefined,
         MediaTypes:
@@ -231,20 +210,14 @@ export async function resolveTelegramInboundBody(params: {
       logVerbose(`telegram: audio preflight transcription failed: ${String(err)}`);
     }
   }
-  const audioTranscribedMediaIndex =
-    preflightTranscript === undefined
-      ? undefined
-      : allMedia.findIndex((media) => media.contentType?.startsWith("audio/"));
 
   if (hasAudio && bodyText === "<media:audio>" && preflightTranscript) {
-    bodyText = formatAudioTranscriptForAgent(preflightTranscript);
+    bodyText = preflightTranscript;
   }
 
   if (!bodyText && allMedia.length > 0) {
     if (hasAudio) {
-      bodyText = preflightTranscript
-        ? formatAudioTranscriptForAgent(preflightTranscript)
-        : "<media:audio>";
+      bodyText = preflightTranscript || "<media:audio>";
     } else {
       bodyText = `<media:image>${allMedia.length > 1 ? ` (${allMedia.length} images)` : ""}`;
     }
@@ -368,9 +341,6 @@ export async function resolveTelegramInboundBody(params: {
     effectiveWasMentioned,
     canDetectMention,
     shouldBypassMention: mentionDecision.shouldBypassMention,
-    ...(audioTranscribedMediaIndex !== undefined && audioTranscribedMediaIndex >= 0
-      ? { audioTranscribedMediaIndex }
-      : {}),
     stickerCacheHit,
     locationData: locationData ?? undefined,
   };

@@ -40,12 +40,10 @@ export type FeishuIdType = "open_id" | "user_id" | "union_id" | "chat_id";
 export type FeishuMessageContext = {
   chatId: string;
   messageId: string;
-  replyTargetMessageId?: string;
-  suppressReplyTarget?: boolean;
   senderId: string;
   senderOpenId: string;
   senderName?: string;
-  chatType: FeishuChatType;
+  chatType: "p2p" | "group" | "private";
   mentionedBot: boolean;
   hasAnyMention?: boolean;
   rootId?: string;
@@ -62,11 +60,7 @@ export type FeishuSendResult = {
   chatId: string;
 };
 
-export type FeishuChatType = "p2p" | "group" | "topic_group" | "private";
-
-export function isFeishuGroupChatType(chatType: FeishuChatType | undefined): boolean {
-  return chatType === "group" || chatType === "topic_group";
-}
+export type FeishuChatType = "p2p" | "group" | "private";
 
 export type FeishuMessageInfo = {
   messageId: string;

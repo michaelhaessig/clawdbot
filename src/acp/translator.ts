@@ -26,6 +26,7 @@ import type {
   ToolCallLocation,
   ToolKind,
 } from "@agentclientprotocol/sdk";
+import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import { listThinkingLevels } from "../auto-reply/thinking.js";
 import type { GatewayClient } from "../gateway/client.js";
 import type { EventFrame } from "../gateway/protocol/index.js";
@@ -36,6 +37,7 @@ import {
 } from "../infra/fixed-window-rate-limit.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { shortenHomePath } from "../utils.js";
+import { getAvailableCommands } from "./commands.js";
 import {
   extractAttachmentsFromPrompt,
   extractToolCallContent,
@@ -60,21 +62,6 @@ const ACP_RESPONSE_USAGE_CONFIG_ID = "response_usage";
 const ACP_ELEVATED_LEVEL_CONFIG_ID = "elevated_level";
 const ACP_LOAD_SESSION_REPLAY_LIMIT = 1_000_000;
 const ACP_GATEWAY_DISCONNECT_GRACE_MS = 5_000;
-
-let acpCommandsModulePromise: Promise<typeof import("./commands.js")> | undefined;
-let acpSdkModulePromise: Promise<typeof import("@agentclientprotocol/sdk")> | undefined;
-
-async function getAvailableCommandsForAcp() {
-  acpCommandsModulePromise ??= import("./commands.js");
-  const { getAvailableCommands } = await acpCommandsModulePromise;
-  return getAvailableCommands();
-}
-
-async function getAcpProtocolVersion() {
-  acpSdkModulePromise ??= import("@agentclientprotocol/sdk");
-  const { PROTOCOL_VERSION } = await acpSdkModulePromise;
-  return PROTOCOL_VERSION;
-}
 
 type DisconnectContext = {
   generation: number;
@@ -515,7 +502,7 @@ export class AcpGatewayAgent implements Agent {
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
     return {
-      protocolVersion: await getAcpProtocolVersion(),
+      protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: {
@@ -1225,7 +1212,7 @@ export class AcpGatewayAgent implements Agent {
       sessionId,
       update: {
         sessionUpdate: "available_commands_update",
-        availableCommands: await getAvailableCommandsForAcp(),
+        availableCommands: getAvailableCommands(),
       },
     });
   }

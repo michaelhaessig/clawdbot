@@ -100,19 +100,6 @@ const slackApproveTestPlugin: ChannelPlugin = {
   }),
 };
 
-const whatsappApproveTestPlugin: ChannelPlugin = {
-  ...createChannelTestPluginBase({
-    id: "whatsapp",
-    label: "WhatsApp",
-    docsPath: "/channels/whatsapp",
-    capabilities: {
-      chatTypes: ["direct", "group"],
-      media: true,
-      nativeCommands: true,
-    },
-  }),
-};
-
 const signalApproveTestPlugin: ChannelPlugin = {
   ...createChannelTestPluginBase({
     id: "signal",
@@ -359,7 +346,6 @@ function setApprovePluginRegistry(): void {
     createTestRegistry([
       { pluginId: "discord", plugin: discordApproveTestPlugin, source: "test" },
       { pluginId: "slack", plugin: slackApproveTestPlugin, source: "test" },
-      { pluginId: "whatsapp", plugin: whatsappApproveTestPlugin, source: "test" },
       { pluginId: "signal", plugin: signalApproveTestPlugin, source: "test" },
       { pluginId: "telegram", plugin: telegramApproveTestPlugin, source: "test" },
     ]),

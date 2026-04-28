@@ -1,21 +1,12 @@
-import type {
-  AnyMessageContent,
-  MiscMessageGenerationOptions,
-  proto,
-  WAMessage,
-  WASocket,
-} from "@whiskeysockets/baileys";
-import { formatLocationText } from "openclaw/plugin-sdk/channel-inbound";
-import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
+import type { AnyMessageContent, proto, WAMessage, WASocket } from "@whiskeysockets/baileys";
+import { createInboundDebouncer, formatLocationText } from "openclaw/plugin-sdk/channel-inbound";
 import { recordChannelActivity } from "openclaw/plugin-sdk/infra-runtime";
-import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
+import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger } from "openclaw/plugin-sdk/text-runtime";
-import { readWebSelfIdentityForDecision, WhatsAppAuthUnstableError } from "../auth-store.js";
+import { readWebSelfIdentity } from "../auth-store.js";
 import { getPrimaryIdentityId, resolveComparableIdentity } from "../identity.js";
-import { cacheInboundMessageMeta } from "../quoted-message.js";
 import { DEFAULT_RECONNECT_POLICY, computeBackoff, sleepWithAbort } from "../reconnect.js";
-import type { OpenClawConfig } from "../runtime-api.js";
 import { createWaSocket, formatError, getStatusCode, waitForWaConnection } from "../session.js";
 import { resolveJidToE164 } from "../text-runtime.js";
 import { checkInboundAccessControl } from "./access-control.js";
@@ -30,7 +21,6 @@ import {
 import {
   describeReplyContext,
   extractLocationData,
-  extractContactContext,
   extractMediaPlaceholder,
   extractMentionedJids,
   extractText,
@@ -43,13 +33,6 @@ import type { WebInboundMessage, WebListenerCloseReason } from "./types.js";
 
 const LOGGED_OUT_STATUS = DisconnectReason?.loggedOut ?? 401;
 const RECONNECT_IN_PROGRESS_ERROR = "no active socket - reconnection in progress";
-
-function logWhatsAppVerbose(enabled: boolean | undefined, message: string) {
-  if (!enabled) {
-    return;
-  }
-  defaultRuntime.log(message);
-}
 
 function isGroupJid(jid: string): boolean {
   return (typeof isJidGroup === "function" ? isJidGroup(jid) : jid.endsWith("@g.us")) === true;
@@ -68,7 +51,6 @@ function isNonEmptyString(value: string | undefined): value is string {
 }
 
 export type MonitorWebInboxOptions = {
-  cfg: OpenClawConfig;
   verbose: boolean;
   accountId: string;
   authDir: string;
@@ -134,24 +116,17 @@ export async function attachWebInboxToSocket(
 
   try {
     await sock.sendPresenceUpdate(presence);
-    logWhatsAppVerbose(options.verbose, `Sent global '${presence}' presence on connect`);
+    if (shouldLogVerbose()) {
+      logVerbose(`Sent global '${presence}' presence on connect`);
+    }
   } catch (err) {
-    logWhatsAppVerbose(
-      options.verbose,
-      `Failed to send '${presence}' presence on connect: ${String(err)}`,
-    );
+    logVerbose(`Failed to send '${presence}' presence on connect: ${String(err)}`);
   }
 
-  const selfIdentity = await readWebSelfIdentityForDecision(
+  const self = await readWebSelfIdentity(
     options.authDir,
     sock.user as { id?: string | null; lid?: string | null } | undefined,
   );
-  if (selfIdentity.outcome === "unstable") {
-    throw new WhatsAppAuthUnstableError(
-      "WhatsApp auth state is still stabilizing; retrying inbox attach.",
-    );
-  }
-  const self = selfIdentity.identity;
   type QueuedInboundMessage = WebInboundMessage & {
     dedupeKey?: string;
   };
@@ -218,7 +193,6 @@ export async function attachWebInboxToSocket(
           body: combinedBody,
           mentions: mentioned.size > 0 ? Array.from(mentioned) : undefined,
           mentionedJids: mentioned.size > 0 ? Array.from(mentioned) : undefined,
-          isBatched: true,
         };
         await options.onMessage(combinedMessage);
         await finalizeInboundDedupe(entries);
@@ -257,19 +231,13 @@ export async function attachWebInboxToSocket(
     });
   };
 
-  const sendTrackedMessage = async (
-    jid: string,
-    content: AnyMessageContent,
-    sendOptions?: MiscMessageGenerationOptions,
-  ) => {
+  const sendTrackedMessage = async (jid: string, content: AnyMessageContent) => {
     let lastErr: unknown = new Error(RECONNECT_IN_PROGRESS_ERROR);
     for (let attempt = 1; ; attempt++) {
       const currentSock = getCurrentSock();
       if (currentSock) {
         try {
-          const result = sendOptions
-            ? await currentSock.sendMessage(jid, content, sendOptions)
-            : await currentSock.sendMessage(jid, content);
+          const result = await currentSock.sendMessage(jid, content);
           rememberOutboundMessage(jid, result);
           return result;
         } catch (err) {
@@ -292,8 +260,7 @@ export async function attachWebInboxToSocket(
         throw lastErr;
       }
       const delayMs = computeBackoff(disconnectRetryPolicy, attempt);
-      logWhatsAppVerbose(
-        options.verbose,
+      logVerbose(
         `Waiting ${delayMs}ms for WhatsApp reconnect before retrying send to ${jid}: ${formatError(lastErr)}`,
       );
       try {
@@ -328,10 +295,7 @@ export async function attachWebInboxToSocket(
       groupMetaCache.set(jid, entry);
       return entry;
     } catch (err) {
-      logWhatsAppVerbose(
-        options.verbose,
-        `Failed to fetch group metadata for ${jid}: ${String(err)}`,
-      );
+      logVerbose(`Failed to fetch group metadata for ${jid}: ${String(err)}`);
       return { expires: Date.now() + GROUP_META_TTL_MS };
     }
   };
@@ -374,10 +338,7 @@ export async function attachWebInboxToSocket(
         messageId: id,
       })
     ) {
-      logWhatsAppVerbose(
-        options.verbose,
-        `Skipping recent outbound WhatsApp echo ${id} for ${remoteJid}`,
-      );
+      logVerbose(`Skipping recent outbound WhatsApp echo ${id} for ${remoteJid}`);
       return null;
     }
     const participantJid = msg.key?.participant ?? undefined;
@@ -403,7 +364,6 @@ export async function attachWebInboxToSocket(
       : undefined;
 
     const access = await checkInboundAccessControl({
-      cfg: options.cfg,
       accountId: options.accountId,
       from,
       selfE164: self.e164 ?? null,
@@ -413,10 +373,7 @@ export async function attachWebInboxToSocket(
       isFromMe: Boolean(msg.key?.fromMe),
       messageTimestampMs,
       connectedAtMs,
-      verbose: options.verbose,
-      sock: {
-        sendMessage: (jid: string, content: AnyMessageContent) => sendTrackedMessage(jid, content),
-      },
+      sock: { sendMessage: (jid, content) => sendTrackedMessage(jid, content) },
       remoteJid,
     });
     if (!access.allowed) {
@@ -442,24 +399,22 @@ export async function attachWebInboxToSocket(
     if (id && !access.isSelfChat && options.sendReadReceipts !== false) {
       try {
         await sock.readMessages([{ remoteJid, id, participant: participantJid, fromMe: false }]);
-        const suffix = participantJid ? ` (participant ${participantJid})` : "";
-        logWhatsAppVerbose(
-          options.verbose,
-          `Marked message ${id} as read for ${remoteJid}${suffix}`,
-        );
+        if (shouldLogVerbose()) {
+          const suffix = participantJid ? ` (participant ${participantJid})` : "";
+          logVerbose(`Marked message ${id} as read for ${remoteJid}${suffix}`);
+        }
       } catch (err) {
-        logWhatsAppVerbose(options.verbose, `Failed to mark message ${id} read: ${String(err)}`);
+        logVerbose(`Failed to mark message ${id} read: ${String(err)}`);
       }
-    } else if (id && access.isSelfChat && options.verbose) {
+    } else if (id && access.isSelfChat && shouldLogVerbose()) {
       // Self-chat mode: never auto-send read receipts (blue ticks) on behalf of the owner.
-      logWhatsAppVerbose(options.verbose, `Self-chat mode: skipping read receipt for ${id}`);
+      logVerbose(`Self-chat mode: skipping read receipt for ${id}`);
     }
   };
 
   type EnrichedInboundMessage = {
     body: string;
     location?: ReturnType<typeof extractLocationData>;
-    contactContext?: ReturnType<typeof extractContactContext>;
     replyContext?: ReturnType<typeof describeReplyContext>;
     mediaPath?: string;
     mediaType?: string;
@@ -469,7 +424,6 @@ export async function attachWebInboxToSocket(
   const enrichInboundMessage = async (msg: WAMessage): Promise<EnrichedInboundMessage | null> => {
     const location = extractLocationData(msg.message ?? undefined);
     const locationText = location ? formatLocationText(location) : undefined;
-    const contactContext = extractContactContext(msg.message ?? undefined);
     let body = extractText(msg.message ?? undefined);
     if (locationText) {
       body = [body, locationText].filter(Boolean).join("\n").trim();
@@ -505,13 +459,12 @@ export async function attachWebInboxToSocket(
         mediaFileName = inboundMedia.fileName;
       }
     } catch (err) {
-      logWhatsAppVerbose(options.verbose, `Inbound media download failed: ${String(err)}`);
+      logVerbose(`Inbound media download failed: ${String(err)}`);
     }
 
     return {
       body,
       location: location ?? undefined,
-      contactContext,
       replyContext,
       mediaPath,
       mediaType,
@@ -533,17 +486,14 @@ export async function attachWebInboxToSocket(
       try {
         await currentSock.sendPresenceUpdate("composing", chatJid);
       } catch (err) {
-        logWhatsAppVerbose(options.verbose, `Presence update failed: ${String(err)}`);
+        logVerbose(`Presence update failed: ${String(err)}`);
       }
     };
-    const reply = async (text: string, options?: MiscMessageGenerationOptions) => {
-      await sendTrackedMessage(chatJid, { text }, options);
+    const reply = async (text: string) => {
+      await sendTrackedMessage(chatJid, { text });
     };
-    const sendMedia = async (
-      payload: AnyMessageContent,
-      options?: MiscMessageGenerationOptions,
-    ) => {
-      await sendTrackedMessage(chatJid, payload, options);
+    const sendMedia = async (payload: AnyMessageContent) => {
+      await sendTrackedMessage(chatJid, payload);
     };
     const timestamp = inbound.messageTimestampMs;
     const mentionedJids = extractMentionedJids(msg.message as proto.IMessage | undefined);
@@ -567,7 +517,6 @@ export async function attachWebInboxToSocket(
       conversationId: inbound.from,
       to: self.e164 ?? "me",
       accountId: inbound.access.resolvedAccountId,
-      accessControlPassed: true,
       body: enriched.body,
       pushName: senderName,
       timestamp,
@@ -597,16 +546,6 @@ export async function attachWebInboxToSocket(
       selfE164: self.e164 ?? undefined,
       fromMe: Boolean(msg.key?.fromMe),
       location: enriched.location ?? undefined,
-      untrustedStructuredContext: enriched.contactContext
-        ? [
-            {
-              label: "WhatsApp contact",
-              source: "whatsapp",
-              type: enriched.contactContext.kind,
-              payload: enriched.contactContext,
-            },
-          ]
-        : undefined,
       sendComposing,
       reply,
       sendMedia,
@@ -615,15 +554,6 @@ export async function attachWebInboxToSocket(
       mediaFileName: enriched.mediaFileName,
       dedupeKey: inbound.id ? `${options.accountId}:${inbound.remoteJid}:${inbound.id}` : undefined,
     };
-    if (inboundMessage.id) {
-      cacheInboundMessageMeta(inboundMessage.accountId, inboundMessage.chatId, inboundMessage.id, {
-        participant: inboundMessage.senderJid,
-        participantE164:
-          inboundMessage.chatType === "direct" ? inboundMessage.senderE164 : undefined,
-        body: inboundMessage.body,
-        fromMe: inboundMessage.fromMe,
-      });
-    }
     try {
       const task = Promise.resolve(debouncer.enqueue(inboundMessage));
       void task.catch((err) => {
@@ -657,7 +587,7 @@ export async function attachWebInboxToSocket(
       if (upsert.type === "append") {
         const APPEND_RECENT_GRACE_MS = 60_000;
         const msgTsRaw = msg.messageTimestamp;
-        const msgTsNum = msgTsRaw != null ? Number(msgTsRaw) : Number.NaN;
+        const msgTsNum = msgTsRaw != null ? Number(msgTsRaw) : NaN;
         const msgTsMs = Number.isFinite(msgTsNum) ? msgTsNum * 1000 : 0;
         if (msgTsMs < connectedAtMs - APPEND_RECENT_GRACE_MS) {
           continue;
@@ -719,28 +649,20 @@ export async function attachWebInboxToSocket(
   void (async () => {
     try {
       const groups = await sock.groupFetchAllParticipating();
-      logWhatsAppVerbose(
-        options.verbose,
-        `Hydrated ${Object.keys(groups ?? {}).length} participating groups on connect`,
-      );
+      if (shouldLogVerbose()) {
+        logVerbose(`Hydrated ${Object.keys(groups ?? {}).length} participating groups on connect`);
+      }
     } catch (err) {
       const error = String(err);
       inboundLogger.warn({ error }, "failed hydrating participating groups on connect");
       inboundConsoleLog.warn(`Failed hydrating participating groups on connect: ${error}`);
-      logWhatsAppVerbose(
-        options.verbose,
-        `Failed to hydrate participating groups on connect: ${error}`,
-      );
+      logVerbose(`Failed to hydrate participating groups on connect: ${error}`);
     }
   })();
 
   const sendApi = createWebSendApi({
     sock: {
-      sendMessage: (
-        jid: string,
-        content: AnyMessageContent,
-        options?: MiscMessageGenerationOptions,
-      ) => sendTrackedMessage(jid, content, options),
+      sendMessage: (jid: string, content: AnyMessageContent) => sendTrackedMessage(jid, content),
       sendPresenceUpdate: async (presence, jid?: string) => {
         const currentSock = getCurrentSock();
         if (!currentSock) {
@@ -759,7 +681,7 @@ export async function attachWebInboxToSocket(
         detachConnectionUpdate();
         closeInboundMonitorSocket(sock);
       } catch (err) {
-        logWhatsAppVerbose(options.verbose, `Socket close failed: ${String(err)}`);
+        logVerbose(`Socket close failed: ${String(err)}`);
       }
     },
     onClose,

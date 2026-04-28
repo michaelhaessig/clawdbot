@@ -88,7 +88,6 @@ export async function applyInlineDirectivesFastLane(
     currentVerboseLevel,
     currentReasoningLevel,
     currentElevatedLevel,
-    ctx,
     surface: ctx.Surface,
     gatewayClientScopes: ctx.GatewayClientScopes,
     senderIsOwner: params.senderIsOwner,

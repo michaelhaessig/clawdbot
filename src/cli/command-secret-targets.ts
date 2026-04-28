@@ -1,4 +1,3 @@
-import { listReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeOptionalAccountId } from "../routing/session-key.js";
 import {
@@ -27,10 +26,19 @@ const STATIC_AGENT_RUNTIME_BASE_TARGET_IDS = [
   ...STATIC_MODEL_TARGET_IDS,
   "agents.defaults.memorySearch.remote.apiKey",
   "agents.list[].memorySearch.remote.apiKey",
-  "agents.list[].tts.providers.*.apiKey",
   "messages.tts.providers.*.apiKey",
   "skills.entries.*.apiKey",
   "tools.web.search.apiKey",
+  "plugins.entries.brave.config.webSearch.apiKey",
+  "plugins.entries.google.config.webSearch.apiKey",
+  "plugins.entries.exa.config.webSearch.apiKey",
+  "plugins.entries.xai.config.webSearch.apiKey",
+  "plugins.entries.moonshot.config.webSearch.apiKey",
+  "plugins.entries.perplexity.config.webSearch.apiKey",
+  "plugins.entries.firecrawl.config.webSearch.apiKey",
+  "plugins.entries.firecrawl.config.webFetch.apiKey",
+  "plugins.entries.tavily.config.webSearch.apiKey",
+  "plugins.entries.minimax.config.webSearch.apiKey",
 ] as const;
 const STATIC_STATUS_TARGET_IDS = [
   "agents.defaults.memorySearch.remote.apiKey",
@@ -58,7 +66,6 @@ type CommandSecretTargets = {
 };
 
 let cachedCommandSecretTargets: CommandSecretTargets | undefined;
-let cachedAgentRuntimeBaseTargetIds: string[] | undefined;
 let cachedChannelSecretTargetIds: string[] | undefined;
 
 function getChannelSecretTargetIds(): string[] {
@@ -66,73 +73,11 @@ function getChannelSecretTargetIds(): string[] {
   return cachedChannelSecretTargetIds;
 }
 
-function isPluginWebCredentialTargetId(id: string): boolean {
-  const segments = id.split(".");
-  if (segments[0] !== "plugins" || segments[1] !== "entries" || segments[3] !== "config") {
-    return false;
-  }
-  const configPath = segments.slice(4).join(".");
-  return configPath === "webSearch.apiKey" || configPath === "webFetch.apiKey";
-}
-
-function getAgentRuntimeBaseTargetIds(): string[] {
-  cachedAgentRuntimeBaseTargetIds ??= [
-    ...STATIC_AGENT_RUNTIME_BASE_TARGET_IDS,
-    ...listSecretTargetRegistryEntries()
-      .map((entry) => entry.id)
-      .filter(isPluginWebCredentialTargetId)
-      .toSorted(),
-  ];
-  return cachedAgentRuntimeBaseTargetIds;
-}
-
-function isScopedChannelSecretTargetEntry(params: {
-  entry: {
-    id: string;
-    configFile?: string;
-    pathPattern?: string;
-    refPathPattern?: string;
-  };
-  pluginChannelId: string;
-}): boolean {
-  const channelId = normalizeOptionalString(params.pluginChannelId);
-  if (!channelId) {
-    return false;
-  }
-  const allowedPrefix = `channels.${channelId}.`;
-  return (
-    params.entry.id.startsWith(allowedPrefix) &&
-    params.entry.configFile === "openclaw.json" &&
-    typeof params.entry.pathPattern === "string" &&
-    params.entry.pathPattern.startsWith(allowedPrefix) &&
-    (params.entry.refPathPattern === undefined ||
-      params.entry.refPathPattern.startsWith(allowedPrefix))
-  );
-}
-
-function getConfiguredChannelSecretTargetIds(
-  config: OpenClawConfig,
-  env: NodeJS.ProcessEnv = process.env,
-): string[] {
-  const targetIds = new Set<string>();
-  for (const plugin of listReadOnlyChannelPluginsForConfig(config, {
-    env,
-    includePersistedAuthState: false,
-  })) {
-    for (const entry of plugin.secrets?.secretTargetRegistryEntries ?? []) {
-      if (isScopedChannelSecretTargetEntry({ entry, pluginChannelId: plugin.id })) {
-        targetIds.add(entry.id);
-      }
-    }
-  }
-  return [...targetIds].toSorted((left, right) => left.localeCompare(right));
-}
-
 function buildCommandSecretTargets(): CommandSecretTargets {
   const channelTargetIds = getChannelSecretTargetIds();
   return {
     channels: channelTargetIds,
-    agentRuntime: [...getAgentRuntimeBaseTargetIds(), ...channelTargetIds],
+    agentRuntime: [...STATIC_AGENT_RUNTIME_BASE_TARGET_IDS, ...channelTargetIds],
     status: [...STATIC_STATUS_TARGET_IDS, ...channelTargetIds],
     securityAudit: [...STATIC_SECURITY_AUDIT_TARGET_IDS, ...channelTargetIds],
   };
@@ -210,13 +155,6 @@ export function getChannelsCommandSecretTargetIds(): Set<string> {
   return toTargetIdSet(getCommandSecretTargets().channels);
 }
 
-export function getConfiguredChannelsCommandSecretTargetIds(
-  config: OpenClawConfig,
-  env?: NodeJS.ProcessEnv,
-): Set<string> {
-  return toTargetIdSet(getConfiguredChannelSecretTargetIds(config, env));
-}
-
 export function getModelsCommandSecretTargetIds(): Set<string> {
   return toTargetIdSet(STATIC_MODEL_TARGET_IDS);
 }
@@ -225,19 +163,13 @@ export function getAgentRuntimeCommandSecretTargetIds(params?: {
   includeChannelTargets?: boolean;
 }): Set<string> {
   if (params?.includeChannelTargets !== true) {
-    return toTargetIdSet(getAgentRuntimeBaseTargetIds());
+    return toTargetIdSet(STATIC_AGENT_RUNTIME_BASE_TARGET_IDS);
   }
   return toTargetIdSet(getCommandSecretTargets().agentRuntime);
 }
 
-export function getStatusCommandSecretTargetIds(
-  config?: OpenClawConfig,
-  env?: NodeJS.ProcessEnv,
-): Set<string> {
-  const channelTargetIds = config
-    ? getConfiguredChannelSecretTargetIds(config, env)
-    : getChannelSecretTargetIds();
-  return toTargetIdSet([...STATIC_STATUS_TARGET_IDS, ...channelTargetIds]);
+export function getStatusCommandSecretTargetIds(): Set<string> {
+  return toTargetIdSet(getCommandSecretTargets().status);
 }
 
 export function getSecurityAuditCommandSecretTargetIds(): Set<string> {

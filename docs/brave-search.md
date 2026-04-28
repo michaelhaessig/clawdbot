@@ -3,7 +3,7 @@ summary: "Brave Search API setup for web_search"
 read_when:
   - You want to use Brave Search for web_search
   - You need a BRAVE_API_KEY or plan details
-title: "Brave search (legacy path)"
+title: "Brave Search (legacy path)"
 ---
 
 # Brave Search API
@@ -101,7 +101,3 @@ await web_search({
 - Results are cached for 15 minutes by default (configurable via `cacheTtlMinutes`).
 
 See [Web tools](/tools/web) for the full web_search configuration.
-
-## Related
-
-- [Brave search](/tools/brave-search)

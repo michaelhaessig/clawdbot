@@ -10,7 +10,7 @@ const gatewayRpcMock = vi.hoisted(() => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk/gateway-runtime", () => ({
+vi.mock("./runtime-api.js", () => ({
   callGatewayFromCli: gatewayRpcMock.callGatewayFromCli,
 }));
 

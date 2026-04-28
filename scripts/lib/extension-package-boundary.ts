@@ -130,7 +130,6 @@ export type ExtensionPackageBoundaryPackageJson = {
   devDependencies?: Record<string, string>;
 };
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Boundary helper lets callers ascribe JSON file shape.
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
 }

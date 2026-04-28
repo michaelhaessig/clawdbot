@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveBrewExecutable as defaultResolveBrewExecutable } from "../infra/brew.js";
+import { resolveBrewExecutable } from "../infra/brew.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
   type InstallSafetyOverrides,
@@ -15,9 +14,9 @@ import { installDownloadSpec } from "./skills-install-download.js";
 import { formatInstallFailureMessage } from "./skills-install-output.js";
 import type { SkillInstallResult } from "./skills-install.types.js";
 import {
-  hasBinary as defaultHasBinary,
-  loadWorkspaceSkillEntries as defaultLoadWorkspaceSkillEntries,
-  resolveSkillsInstallPreferences as defaultResolveSkillsInstallPreferences,
+  hasBinary,
+  loadWorkspaceSkillEntries,
+  resolveSkillsInstallPreferences,
   type SkillEntry,
   type SkillInstallSpec,
   type SkillsInstallPreferences,
@@ -32,28 +31,6 @@ export type SkillInstallRequest = InstallSafetyOverrides & {
   config?: OpenClawConfig;
 };
 export type { SkillInstallResult } from "./skills-install.types.js";
-
-type SkillsInstallDeps = {
-  hasBinary: (bin: string) => boolean;
-  loadWorkspaceSkillEntries: typeof defaultLoadWorkspaceSkillEntries;
-  resolveNodeInstallStateDir: () => string;
-  resolveBrewExecutable: () => string | undefined;
-  resolveSkillsInstallPreferences: typeof defaultResolveSkillsInstallPreferences;
-};
-
-const defaultSkillsInstallDeps: SkillsInstallDeps = {
-  hasBinary: defaultHasBinary,
-  loadWorkspaceSkillEntries: defaultLoadWorkspaceSkillEntries,
-  resolveNodeInstallStateDir: resolveDefaultNodeInstallStateDir,
-  resolveBrewExecutable: defaultResolveBrewExecutable,
-  resolveSkillsInstallPreferences: defaultResolveSkillsInstallPreferences,
-};
-
-let skillsInstallDeps = defaultSkillsInstallDeps;
-
-function getSkillsInstallDeps(): SkillsInstallDeps {
-  return skillsInstallDeps;
-}
 
 function withWarnings(result: SkillInstallResult, warnings: string[]): SkillInstallResult {
   if (warnings.length === 0) {
@@ -108,37 +85,6 @@ function buildNodeInstallCommand(packageName: string, prefs: SkillsInstallPrefer
     default:
       return ["npm", "install", "-g", "--ignore-scripts", packageName];
   }
-}
-
-function resolveDefaultNodeInstallStateDir({
-  cwd = process.cwd(),
-  getuid = process.getuid?.bind(process),
-  homedir = os.homedir,
-  platform = process.platform,
-}: {
-  cwd?: string;
-  getuid?: () => number;
-  homedir?: () => string;
-  platform?: NodeJS.Platform;
-} = {}): string {
-  if (platform !== "win32" && getuid?.() === 0) {
-    return path.join(path.parse(cwd).root, "var", "lib", "openclaw");
-  }
-  return path.join(homedir(), ".openclaw");
-}
-
-async function buildNodeInstallEnv(prefs: SkillsInstallPreferences): Promise<NodeJS.ProcessEnv> {
-  if (prefs.nodeManager !== "npm") {
-    return {};
-  }
-
-  const stateDir = getSkillsInstallDeps().resolveNodeInstallStateDir();
-  const prefix = path.join(stateDir, "tools", "node", "npm");
-  await fs.promises.mkdir(prefix, { recursive: true, mode: 0o700 });
-  return {
-    NPM_CONFIG_PREFIX: prefix,
-    npm_config_prefix: prefix,
-  };
 }
 
 // Strict allowlist patterns to prevent option injection and malicious package names.
@@ -218,8 +164,7 @@ function buildInstallCommand(
 }
 
 async function resolveBrewBinDir(timeoutMs: number, brewExe?: string): Promise<string | undefined> {
-  const deps = getSkillsInstallDeps();
-  const exe = brewExe ?? (deps.hasBinary("brew") ? "brew" : deps.resolveBrewExecutable());
+  const exe = brewExe ?? (hasBinary("brew") ? "brew" : resolveBrewExecutable());
   if (!exe) {
     return undefined;
   }
@@ -323,7 +268,7 @@ async function ensureUvInstalled(params: {
   brewExe?: string;
   timeoutMs: number;
 }): Promise<SkillInstallResult | undefined> {
-  if (params.spec.kind !== "uv" || getSkillsInstallDeps().hasBinary("uv")) {
+  if (params.spec.kind !== "uv" || hasBinary("uv")) {
     return undefined;
   }
 
@@ -367,7 +312,7 @@ async function installGoViaApt(timeoutMs: number): Promise<SkillInstallResult | 
     });
   }
 
-  if (!getSkillsInstallDeps().hasBinary("sudo")) {
+  if (!hasBinary("sudo")) {
     return createInstallFailure({
       message:
         "go not installed — apt-get is available but sudo is not installed. Install manually: https://go.dev/doc/install",
@@ -405,7 +350,7 @@ async function ensureGoInstalled(params: {
   brewExe?: string;
   timeoutMs: number;
 }): Promise<SkillInstallResult | undefined> {
-  if (params.spec.kind !== "go" || getSkillsInstallDeps().hasBinary("go")) {
+  if (params.spec.kind !== "go" || hasBinary("go")) {
     return undefined;
   }
 
@@ -422,7 +367,7 @@ async function ensureGoInstalled(params: {
     });
   }
 
-  if (getSkillsInstallDeps().hasBinary("apt-get")) {
+  if (hasBinary("apt-get")) {
     return installGoViaApt(params.timeoutMs);
   }
 
@@ -457,8 +402,7 @@ async function executeInstallCommand(params: {
 export async function installSkill(params: SkillInstallRequest): Promise<SkillInstallResult> {
   const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 300_000, 1_000), 900_000);
   const workspaceDir = resolveUserPath(params.workspaceDir);
-  const deps = getSkillsInstallDeps();
-  const entries = deps.loadWorkspaceSkillEntries(workspaceDir);
+  const entries = loadWorkspaceSkillEntries(workspaceDir);
   const entry = entries.find((item) => item.skill.name === params.skillName);
   if (!entry) {
     return {
@@ -522,7 +466,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
     return withWarnings(downloadResult, warnings);
   }
 
-  const prefs = deps.resolveSkillsInstallPreferences(params.config);
+  const prefs = resolveSkillsInstallPreferences(params.config);
   const command = buildInstallCommand(spec, prefs);
   if (command.error) {
     return withWarnings(
@@ -537,7 +481,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
     );
   }
 
-  const brewExe = deps.hasBinary("brew") ? "brew" : deps.resolveBrewExecutable();
+  const brewExe = hasBinary("brew") ? "brew" : resolveBrewExecutable();
   if (spec.kind === "brew" && !brewExe) {
     return withWarnings(resolveBrewMissingFailure(spec), warnings);
   }
@@ -558,9 +502,6 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   }
 
   const envOverrides: NodeJS.ProcessEnv = {};
-  if (spec.kind === "node") {
-    Object.assign(envOverrides, await buildNodeInstallEnv(prefs));
-  }
   if (spec.kind === "go" && brewExe) {
     const brewBin = await resolveBrewBinDir(timeoutMs, brewExe);
     if (brewBin) {
@@ -571,13 +512,3 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
 
   return withWarnings(await executeInstallCommand({ argv, timeoutMs, env }), warnings);
 }
-
-export const __testing = {
-  resolveDefaultNodeInstallStateDir,
-  setDepsForTest(overrides?: Partial<SkillsInstallDeps>): void {
-    skillsInstallDeps = {
-      ...defaultSkillsInstallDeps,
-      ...overrides,
-    };
-  },
-};

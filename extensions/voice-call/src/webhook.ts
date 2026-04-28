@@ -1,7 +1,6 @@
 import http from "node:http";
 import { URL } from "node:url";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { resolveConfiguredCapabilityProvider } from "openclaw/plugin-sdk/provider-selection-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import {
   createWebhookInFlightLimiter,
@@ -12,13 +11,13 @@ import {
   readRequestBodyWithLimit,
   requestBodyErrorToText,
 } from "../api.js";
-import { isAllowlistedCaller, normalizePhoneNumber } from "./allowlist.js";
 import { normalizeVoiceCallConfig, type VoiceCallConfig } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { getHeader } from "./http-headers.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
 import { MediaStreamHandler } from "./media-stream.js";
+import { resolveConfiguredCapabilityProvider } from "./provider-runtime-resolution.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import { isProviderStatusTerminal } from "./providers/shared/call-status.js";
 import type { TwilioProvider } from "./providers/twilio.js";
@@ -31,22 +30,6 @@ const MAX_WEBHOOK_BODY_BYTES = WEBHOOK_BODY_READ_DEFAULTS.preAuth.maxBytes;
 const WEBHOOK_BODY_TIMEOUT_MS = WEBHOOK_BODY_READ_DEFAULTS.preAuth.timeoutMs;
 const STREAM_DISCONNECT_HANGUP_GRACE_MS = 2000;
 const TRANSCRIPT_LOG_MAX_CHARS = 200;
-
-type RealtimeTranscriptionRuntime = typeof import("./realtime-transcription.runtime.js");
-type ResponseGeneratorModule = typeof import("./response-generator.js");
-
-let realtimeTranscriptionRuntimePromise: Promise<RealtimeTranscriptionRuntime> | undefined;
-let responseGeneratorModulePromise: Promise<ResponseGeneratorModule> | undefined;
-
-function loadRealtimeTranscriptionRuntime(): Promise<RealtimeTranscriptionRuntime> {
-  realtimeTranscriptionRuntimePromise ??= import("./realtime-transcription.runtime.js");
-  return realtimeTranscriptionRuntimePromise;
-}
-
-function loadResponseGeneratorModule(): Promise<ResponseGeneratorModule> {
-  responseGeneratorModulePromise ??= import("./response-generator.js");
-  return responseGeneratorModulePromise;
-}
 
 type WebhookHeaderGateResult =
   | { ok: true }
@@ -135,14 +118,6 @@ function normalizeWebhookResponse(parsed: {
   };
 }
 
-function buildRealtimeRejectedTwiML(): WebhookResponsePayload {
-  return {
-    statusCode: 200,
-    headers: { "Content-Type": "text/xml" },
-    body: '<?xml version="1.0" encoding="UTF-8"?><Response><Reject reason="rejected" /></Response>',
-  };
-}
-
 /**
  * HTTP server for receiving voice call webhooks from providers.
  * Supports WebSocket upgrades for media streams when streaming is enabled.
@@ -150,7 +125,6 @@ function buildRealtimeRejectedTwiML(): WebhookResponsePayload {
 export class VoiceCallWebhookServer {
   private server: http.Server | null = null;
   private listeningUrl: string | null = null;
-  private startPromise: Promise<string> | null = null;
   private config: VoiceCallConfig;
   private manager: CallManager;
   private provider: VoiceCallProvider;
@@ -259,7 +233,7 @@ export class VoiceCallWebhookServer {
     const pluginConfig =
       this.fullConfig ?? (this.coreConfig as unknown as OpenClawConfig | undefined);
     const { getRealtimeTranscriptionProvider, listRealtimeTranscriptionProviders } =
-      await loadRealtimeTranscriptionRuntime();
+      await import("./realtime-transcription.runtime.js");
     const resolution = resolveConfiguredCapabilityProvider({
       configuredProviderId: streaming.provider,
       providerConfigs: streaming.providers,
@@ -444,11 +418,7 @@ export class VoiceCallWebhookServer {
       await this.initializeMediaStreaming();
     }
 
-    if (this.startPromise) {
-      return this.startPromise;
-    }
-
-    this.startPromise = new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
         this.handleRequest(req, res, webhookPath).catch((err) => {
           console.error("[voice-call] Webhook error:", err);
@@ -473,17 +443,11 @@ export class VoiceCallWebhookServer {
         });
       }
 
-      this.server.on("error", (err) => {
-        this.server = null;
-        this.listeningUrl = null;
-        this.startPromise = null;
-        reject(err);
-      });
+      this.server.on("error", reject);
 
       this.server.listen(port, bind, () => {
         const url = this.resolveListeningUrl(bind, webhookPath);
         this.listeningUrl = url;
-        this.startPromise = null;
         console.log(`[voice-call] Webhook server listening on ${url}`);
         if (this.mediaStreamHandler) {
           const address = this.server?.address();
@@ -502,8 +466,6 @@ export class VoiceCallWebhookServer {
         });
       });
     });
-
-    return this.startPromise;
   }
 
   /**
@@ -515,7 +477,6 @@ export class VoiceCallWebhookServer {
     }
     this.pendingDisconnectHangups.clear();
     this.webhookInFlightLimiter.clear();
-    this.startPromise = null;
 
     if (this.stopStaleCallReaper) {
       this.stopStaleCallReaper();
@@ -655,15 +616,8 @@ export class VoiceCallWebhookServer {
         return { statusCode: 401, body: "Unauthorized" };
       }
 
-      const realtimeParams = this.getRealtimeTwimlParams(ctx);
-      if (realtimeParams) {
-        const direction = realtimeParams.get("Direction");
-        const isInboundRealtimeRequest = !direction || direction === "inbound";
-        if (isInboundRealtimeRequest && !this.shouldAcceptRealtimeInboundRequest(realtimeParams)) {
-          console.log("[voice-call] Realtime inbound call rejected before stream setup");
-          return buildRealtimeRejectedTwiML();
-        }
-        return this.realtimeHandler!.buildTwiMLPayload(req, realtimeParams);
+      if (this.shouldShortCircuitToRealtimeTwiml(ctx)) {
+        return this.realtimeHandler!.buildTwiMLPayload(req, new URLSearchParams(ctx.rawBody));
       }
 
       const parsed = this.provider.parseWebhookEvent(ctx, {
@@ -727,47 +681,30 @@ export class VoiceCallWebhookServer {
     }
   }
 
-  private getRealtimeTwimlParams(ctx: WebhookContext): URLSearchParams | null {
+  private shouldShortCircuitToRealtimeTwiml(ctx: WebhookContext): boolean {
     if (!this.realtimeHandler || this.provider.name !== "twilio") {
-      return null;
+      return false;
     }
 
     const params = new URLSearchParams(ctx.rawBody);
     const direction = params.get("Direction");
-    const isSupportedDirection =
-      !direction || direction === "inbound" || direction.startsWith("outbound");
-    if (!isSupportedDirection) {
-      return null;
+    const isInbound = !direction || direction === "inbound";
+    if (!isInbound) {
+      return false;
     }
 
     if (ctx.query?.type === "status") {
-      return null;
+      return false;
     }
 
     const callStatus = params.get("CallStatus");
     if (callStatus && isProviderStatusTerminal(callStatus)) {
-      return null;
+      return false;
     }
 
     // Replays must return the same TwiML body so Twilio retries reconnect cleanly.
     // The one-time token still changes, but the behavior stays identical.
-    return !params.get("SpeechResult") && !params.get("Digits") ? params : null;
-  }
-
-  private shouldAcceptRealtimeInboundRequest(params: URLSearchParams): boolean {
-    switch (this.config.inboundPolicy) {
-      case "open":
-        return true;
-      case "allowlist":
-      case "pairing":
-        return isAllowlistedCaller(
-          normalizePhoneNumber(params.get("From") ?? undefined),
-          this.config.allowFrom,
-        );
-      case "disabled":
-      default:
-        return false;
-    }
+    return !params.get("SpeechResult") && !params.get("Digits");
   }
 
   private processParsedEvents(events: NormalizedEvent[]): void {
@@ -825,7 +762,7 @@ export class VoiceCallWebhookServer {
     }
 
     try {
-      const { generateVoiceResponse } = await loadResponseGeneratorModule();
+      const { generateVoiceResponse } = await import("./response-generator.js");
 
       const result = await generateVoiceResponse({
         voiceConfig: this.config,

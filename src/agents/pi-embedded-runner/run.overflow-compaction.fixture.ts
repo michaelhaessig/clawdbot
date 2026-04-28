@@ -13,8 +13,6 @@ export function makeCompactionSuccess(params: {
   firstKeptEntryId?: string;
   tokensBefore?: number;
   tokensAfter?: number;
-  sessionId?: string;
-  sessionFile?: string;
 }) {
   return {
     ok: true as const,
@@ -24,8 +22,6 @@ export function makeCompactionSuccess(params: {
       ...(params.firstKeptEntryId ? { firstKeptEntryId: params.firstKeptEntryId } : {}),
       ...(params.tokensBefore !== undefined ? { tokensBefore: params.tokensBefore } : {}),
       ...(params.tokensAfter !== undefined ? { tokensAfter: params.tokensAfter } : {}),
-      ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
-      ...(params.sessionFile !== undefined ? { sessionFile: params.sessionFile } : {}),
     },
   };
 }
@@ -35,8 +31,6 @@ export function makeAttemptResult(
 ): EmbeddedRunAttemptResult {
   const toolMetas = overrides.toolMetas ?? [];
   const didSendViaMessagingTool = overrides.didSendViaMessagingTool ?? false;
-  const messagingToolSentTexts = overrides.messagingToolSentTexts ?? [];
-  const messagingToolSentMediaUrls = overrides.messagingToolSentMediaUrls ?? [];
   const successfulCronAdds = overrides.successfulCronAdds;
   return {
     aborted: false,
@@ -56,8 +50,6 @@ export function makeAttemptResult(
       buildAttemptReplayMetadata({
         toolMetas,
         didSendViaMessagingTool,
-        messagingToolSentTexts,
-        messagingToolSentMediaUrls,
         successfulCronAdds,
       }),
     itemLifecycle: {
@@ -66,8 +58,8 @@ export function makeAttemptResult(
       activeCount: 0,
     },
     didSendViaMessagingTool,
-    messagingToolSentTexts,
-    messagingToolSentMediaUrls,
+    messagingToolSentTexts: [],
+    messagingToolSentMediaUrls: [],
     messagingToolSentTargets: [],
     cloudCodeAssistFormatError: false,
     ...overrides,
@@ -87,8 +79,6 @@ type MockCompactDirect = {
       firstKeptEntryId?: string;
       tokensBefore?: number;
       tokensAfter?: number;
-      sessionId?: string;
-      sessionFile?: string;
     };
   }) => unknown;
 };

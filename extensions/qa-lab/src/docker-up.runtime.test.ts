@@ -5,8 +5,6 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { runQaDockerUp } from "./docker-up.runtime.js";
 
-type QaDockerUpDeps = NonNullable<Parameters<typeof runQaDockerUp>[1]>;
-
 async function occupyPortOrAcceptExisting(port: number): Promise<{ close: () => Promise<void> }> {
   const server = createServer();
   const listening = await new Promise<boolean>((resolve, reject) => {
@@ -29,20 +27,6 @@ async function occupyPortOrAcceptExisting(port: number): Promise<{ close: () => 
         server.close((error) => (error ? reject(error) : resolve())),
       );
     },
-  };
-}
-
-function createHealthyDockerDeps(calls: string[]): QaDockerUpDeps {
-  return {
-    async runCommand(command, args, cwd) {
-      calls.push([command, ...args, `@${cwd}`].join(" "));
-      if (args.join(" ").includes("ps --format json openclaw-qa-gateway")) {
-        return { stdout: '{"Health":"healthy","State":"running"}\n', stderr: "" };
-      }
-      return { stdout: "", stderr: "" };
-    },
-    fetchImpl: vi.fn(async () => ({ ok: true })),
-    sleepImpl: vi.fn(async () => {}),
   };
 }
 
@@ -112,7 +96,17 @@ describe("runQaDockerUp", () => {
           bindUiDist: true,
           skipUiBuild: true,
         },
-        createHealthyDockerDeps(calls),
+        {
+          async runCommand(command, args, cwd) {
+            calls.push([command, ...args, `@${cwd}`].join(" "));
+            if (args.join(" ").includes("ps --format json openclaw-qa-gateway")) {
+              return { stdout: '{"Health":"healthy","State":"running"}\n', stderr: "" };
+            }
+            return { stdout: "", stderr: "" };
+          },
+          fetchImpl: vi.fn(async () => ({ ok: true })),
+          sleepImpl: vi.fn(async () => {}),
+        },
       );
 
       expect(calls).toEqual([
@@ -139,7 +133,17 @@ describe("runQaDockerUp", () => {
           usePrebuiltImage: true,
           skipUiBuild: true,
         },
-        createHealthyDockerDeps(calls),
+        {
+          async runCommand(command, args, cwd) {
+            calls.push([command, ...args, `@${cwd}`].join(" "));
+            if (args.join(" ").includes("ps --format json openclaw-qa-gateway")) {
+              return { stdout: '{"Health":"healthy","State":"running"}\n', stderr: "" };
+            }
+            return { stdout: "", stderr: "" };
+          },
+          fetchImpl: vi.fn(async () => ({ ok: true })),
+          sleepImpl: vi.fn(async () => {}),
+        },
       );
 
       expect(result.outputDir).toBe(path.join(repoRoot, ".artifacts/qa-docker"));

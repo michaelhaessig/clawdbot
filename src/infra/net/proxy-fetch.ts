@@ -1,7 +1,7 @@
 import { EnvHttpProxyAgent, ProxyAgent, fetch as undiciFetch } from "undici";
 import { logWarn } from "../../logger.js";
 import { formatErrorMessage } from "../errors.js";
-import { resolveEnvHttpProxyAgentOptions } from "./proxy-env.js";
+import { hasEnvHttpProxyConfigured } from "./proxy-env.js";
 
 export const PROXY_FETCH_PROXY_URL = Symbol.for("openclaw.proxyFetch.proxyUrl");
 type ProxyFetchWithMetadata = typeof fetch & {
@@ -46,7 +46,8 @@ export function getProxyUrlFromFetch(fetchImpl?: typeof fetch): string | undefin
 }
 
 /**
- * Resolve a proxy-aware fetch from standard environment variables.
+ * Resolve a proxy-aware fetch from standard environment variables
+ * (HTTPS_PROXY, HTTP_PROXY, https_proxy, http_proxy).
  * Respects NO_PROXY / no_proxy exclusions via undici's EnvHttpProxyAgent.
  * Returns undefined when no proxy is configured.
  * Gracefully returns undefined if the proxy URL is malformed.
@@ -54,12 +55,11 @@ export function getProxyUrlFromFetch(fetchImpl?: typeof fetch): string | undefin
 export function resolveProxyFetchFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): typeof fetch | undefined {
-  const proxyOptions = resolveEnvHttpProxyAgentOptions(env);
-  if (!proxyOptions) {
+  if (!hasEnvHttpProxyConfigured("https", env)) {
     return undefined;
   }
   try {
-    const agent = new EnvHttpProxyAgent(proxyOptions);
+    const agent = new EnvHttpProxyAgent();
     return ((input: RequestInfo | URL, init?: RequestInit) =>
       undiciFetch(input as string | URL, {
         ...(init as Record<string, unknown>),

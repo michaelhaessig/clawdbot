@@ -6,6 +6,8 @@ read_when:
 title: "Timezones"
 ---
 
+# Timezones
+
 OpenClaw standardizes timestamps so the model sees a **single reference time**.
 
 ## Message envelopes (local by default)

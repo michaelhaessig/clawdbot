@@ -1,4 +1,4 @@
-import { isVoiceCompatibleAudio } from "openclaw/plugin-sdk/media-runtime";
+import { isTelegramVoiceCompatibleAudio } from "openclaw/plugin-sdk/media-runtime";
 
 export function resolveTelegramVoiceDecision(opts: {
   wantsVoice: boolean;
@@ -8,7 +8,7 @@ export function resolveTelegramVoiceDecision(opts: {
   if (!opts.wantsVoice) {
     return { useVoice: false };
   }
-  if (isVoiceCompatibleAudio(opts)) {
+  if (isTelegramVoiceCompatibleAudio(opts)) {
     return { useVoice: true };
   }
   const contentType = opts.contentType ?? "unknown";

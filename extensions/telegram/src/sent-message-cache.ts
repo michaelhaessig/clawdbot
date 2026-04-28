@@ -1,21 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import { loadConfig, resolveStorePath } from "openclaw/plugin-sdk/config-runtime";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import { resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 const TELEGRAM_SENT_MESSAGES_STATE_KEY = Symbol.for("openclaw.telegramSentMessagesState");
 
 type SentMessageStore = Map<string, Map<string, number>>;
 
-type SentMessageBucket = {
-  persistedPath: string;
-  store: SentMessageStore;
-};
-
 type SentMessageState = {
-  bucketsByPath: Map<string, SentMessageBucket>;
+  persistedPath?: string;
+  store?: SentMessageStore;
 };
 
 function getSentMessageState(): SentMessageState {
@@ -24,9 +19,7 @@ function getSentMessageState(): SentMessageState {
   if (existing) {
     return existing;
   }
-  const state: SentMessageState = {
-    bucketsByPath: new Map(),
-  };
+  const state: SentMessageState = {};
   globalStore[TELEGRAM_SENT_MESSAGES_STATE_KEY] = state;
   return state;
 }
@@ -35,23 +28,19 @@ function createSentMessageStore(): SentMessageStore {
   return new Map<string, Map<string, number>>();
 }
 
-function resolveSentMessageStorePath(cfg?: Pick<OpenClawConfig, "session">): string {
-  return `${resolveStorePath(cfg?.session?.store)}.telegram-sent-messages.json`;
+function resolveSentMessageStorePath(): string {
+  const cfg = loadConfig();
+  return `${resolveStorePath(cfg.session?.store)}.telegram-sent-messages.json`;
 }
 
-function cleanupExpired(
-  store: SentMessageStore,
-  scopeKey: string,
-  entry: Map<string, number>,
-  now: number,
-): void {
+function cleanupExpired(scopeKey: string, entry: Map<string, number>, now: number): void {
   for (const [id, timestamp] of entry) {
     if (now - timestamp > TTL_MS) {
       entry.delete(id);
     }
   }
   if (entry.size === 0) {
-    store.delete(scopeKey);
+    getSentMessages().delete(scopeKey);
   }
 }
 
@@ -86,55 +75,46 @@ function readPersistedSentMessages(filePath: string): SentMessageStore {
   }
 }
 
-function getSentMessageBucket(cfg?: Pick<OpenClawConfig, "session">): SentMessageBucket {
+function getSentMessages(): SentMessageStore {
   const state = getSentMessageState();
-  const persistedPath = resolveSentMessageStorePath(cfg);
-  const existing = state.bucketsByPath.get(persistedPath);
-  if (existing) {
-    return existing;
+  const persistedPath = resolveSentMessageStorePath();
+  if (!state.store || state.persistedPath !== persistedPath) {
+    state.store = readPersistedSentMessages(persistedPath);
+    state.persistedPath = persistedPath;
   }
-  const bucket = {
-    persistedPath,
-    store: readPersistedSentMessages(persistedPath),
-  };
-  state.bucketsByPath.set(persistedPath, bucket);
-  return bucket;
+  return state.store;
 }
 
-function getSentMessages(cfg?: Pick<OpenClawConfig, "session">): SentMessageStore {
-  return getSentMessageBucket(cfg).store;
-}
-
-function persistSentMessages(bucket: SentMessageBucket): void {
-  const { store, persistedPath } = bucket;
+function persistSentMessages(): void {
+  const state = getSentMessageState();
+  const store = state.store;
+  const filePath = state.persistedPath;
+  if (!store || !filePath) {
+    return;
+  }
   const now = Date.now();
   const serialized: Record<string, Record<string, number>> = {};
   for (const [chatId, entry] of store) {
-    cleanupExpired(store, chatId, entry, now);
+    cleanupExpired(chatId, entry, now);
     if (entry.size > 0) {
       serialized[chatId] = Object.fromEntries(entry);
     }
   }
   if (Object.keys(serialized).length === 0) {
-    fs.rmSync(persistedPath, { force: true });
+    fs.rmSync(filePath, { force: true });
     return;
   }
-  fs.mkdirSync(path.dirname(persistedPath), { recursive: true });
-  const tempPath = `${persistedPath}.${process.pid}.tmp`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(serialized), "utf-8");
-  fs.renameSync(tempPath, persistedPath);
+  fs.renameSync(tempPath, filePath);
 }
 
-export function recordSentMessage(
-  chatId: number | string,
-  messageId: number,
-  cfg?: Pick<OpenClawConfig, "session">,
-): void {
+export function recordSentMessage(chatId: number | string, messageId: number): void {
   const scopeKey = String(chatId);
   const idKey = String(messageId);
   const now = Date.now();
-  const bucket = getSentMessageBucket(cfg);
-  const { store } = bucket;
+  const store = getSentMessages();
   let entry = store.get(scopeKey);
   if (!entry) {
     entry = new Map<string, number>();
@@ -142,40 +122,34 @@ export function recordSentMessage(
   }
   entry.set(idKey, now);
   if (entry.size > 100) {
-    cleanupExpired(store, scopeKey, entry, now);
+    cleanupExpired(scopeKey, entry, now);
   }
   try {
-    persistSentMessages(bucket);
+    persistSentMessages();
   } catch (error) {
     logVerbose(`telegram: failed to persist sent-message cache: ${String(error)}`);
   }
 }
 
-export function wasSentByBot(
-  chatId: number | string,
-  messageId: number,
-  cfg?: Pick<OpenClawConfig, "session">,
-): boolean {
+export function wasSentByBot(chatId: number | string, messageId: number): boolean {
   const scopeKey = String(chatId);
   const idKey = String(messageId);
-  const store = getSentMessages(cfg);
-  const entry = store.get(scopeKey);
+  const entry = getSentMessages().get(scopeKey);
   if (!entry) {
     return false;
   }
-  cleanupExpired(store, scopeKey, entry, Date.now());
+  cleanupExpired(scopeKey, entry, Date.now());
   return entry.has(idKey);
 }
 
 export function clearSentMessageCache(): void {
   const state = getSentMessageState();
-  for (const bucket of state.bucketsByPath.values()) {
-    bucket.store.clear();
-    fs.rmSync(bucket.persistedPath, { force: true });
+  getSentMessages().clear();
+  if (state.persistedPath) {
+    fs.rmSync(state.persistedPath, { force: true });
   }
-  state.bucketsByPath.clear();
 }
 
 export function resetSentMessageCacheForTest(): void {
-  getSentMessageState().bucketsByPath.clear();
+  getSentMessageState().store = undefined;
 }

@@ -27,7 +27,7 @@ import {
   resolveAcpClientSpawnInvocation,
   resolvePermissionRequest,
   shouldStripProviderAuthEnvVarsForAcpServer,
-} from "./client-helpers.js";
+} from "./client.js";
 import {
   extractAttachmentsFromPrompt,
   extractTextFromPrompt,
@@ -428,6 +428,13 @@ describe("resolvePermissionRequest", () => {
       rawInput: {
         name: "nodes",
         action: "list",
+      },
+    },
+    {
+      toolName: "whatsapp_login",
+      title: "whatsapp_login: start",
+      rawInput: {
+        name: "whatsapp_login",
       },
     },
   ] as const)(

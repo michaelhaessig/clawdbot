@@ -5,13 +5,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { shouldLogVerbose } from "../globals.js";
 import { logDebug } from "../logger.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import {
-  normalizeRouteBindingId,
-  normalizeRouteBindingRoles,
-  routeBindingScopeMatches,
-} from "./binding-scope.js";
 import { listBindings } from "./bindings.js";
-import { peerKindMatches } from "./peer-kind-match.js";
 import {
   buildAgentMainSessionKey,
   buildAgentPeerSessionKey,
@@ -87,7 +81,13 @@ function normalizeToken(value: string | undefined | null): string {
 }
 
 function normalizeId(value: unknown): string {
-  return normalizeRouteBindingId(value);
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value).trim();
+  }
+  return "";
 }
 
 export function buildAgentSessionKey(params: {
@@ -514,7 +514,7 @@ function normalizeBindingMatch(
     peer: normalizePeerConstraint(match?.peer),
     guildId: normalizeId(match?.guildId) || null,
     teamId: normalizeId(match?.teamId) || null,
-    roles: normalizeRouteBindingRoles(rawRoles),
+    roles: Array.isArray(rawRoles) && rawRoles.length > 0 ? rawRoles : null,
   };
 }
 
@@ -586,6 +586,14 @@ function hasRolesConstraint(match: NormalizedBindingMatch): boolean {
   return Boolean(match.roles);
 }
 
+function peerKindMatches(bindingKind: ChatType, scopeKind: ChatType): boolean {
+  if (bindingKind === scopeKind) {
+    return true;
+  }
+  const both = new Set([bindingKind, scopeKind]);
+  return both.has("group") && both.has("channel");
+}
+
 function matchesBindingScope(match: NormalizedBindingMatch, scope: BindingScope): boolean {
   if (match.peer.state === "invalid") {
     return false;
@@ -604,7 +612,21 @@ function matchesBindingScope(match: NormalizedBindingMatch, scope: BindingScope)
       return false;
     }
   }
-  return routeBindingScopeMatches(match, scope);
+  if (match.guildId && match.guildId !== scope.guildId) {
+    return false;
+  }
+  if (match.teamId && match.teamId !== scope.teamId) {
+    return false;
+  }
+  if (match.roles) {
+    for (const role of match.roles) {
+      if (scope.memberRoleIds.has(role)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
 }
 
 export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentRoute {
@@ -654,20 +676,15 @@ export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentR
   const bindings = getEvaluatedBindingsForChannelAccount(input.cfg, channel, accountId);
   const bindingsIndex = getEvaluatedBindingIndexForChannelAccount(input.cfg, channel, accountId);
 
-  const choose = (
-    agentId: string,
-    matchedBy: ResolvedAgentRoute["matchedBy"],
-    sessionOverride?: { dmScope?: Parameters<typeof buildAgentSessionKey>[0]["dmScope"] },
-  ) => {
+  const choose = (agentId: string, matchedBy: ResolvedAgentRoute["matchedBy"]) => {
     const resolvedAgentId = pickFirstExistingAgentId(input.cfg, agentId);
-    const effectiveDmScope = sessionOverride?.dmScope ?? dmScope;
     const sessionKey = normalizeLowercaseStringOrEmpty(
       buildAgentSessionKey({
         agentId: resolvedAgentId,
         channel,
         accountId,
         peer,
-        dmScope: effectiveDmScope,
+        dmScope,
         identityLinks,
       }),
     );
@@ -811,7 +828,7 @@ export function resolveAgentRoute(input: ResolveAgentRouteInput): ResolvedAgentR
       if (shouldLogDebug) {
         logDebug(`[routing] match: matchedBy=${tier.matchedBy} agentId=${matched.binding.agentId}`);
       }
-      return choose(matched.binding.agentId, tier.matchedBy, matched.binding.session);
+      return choose(matched.binding.agentId, tier.matchedBy);
     }
   }
 

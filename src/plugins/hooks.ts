@@ -5,7 +5,6 @@
  * error handling, priority ordering, and async support.
  */
 
-import { formatHookErrorForLog } from "../hooks/fire-and-forget.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { concatOptionalTextSegments } from "../shared/text/join-segments.js";
 import type { GlobalHookRunnerRegistry, HookRunnerRegistry } from "./hook-registry.types.js";
@@ -14,8 +13,6 @@ import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentContext,
   PluginHookAgentEndEvent,
-  PluginHookBeforeAgentFinalizeEvent,
-  PluginHookBeforeAgentFinalizeResult,
   PluginHookBeforeAgentReplyEvent,
   PluginHookBeforeAgentReplyResult,
   PluginHookBeforeAgentStartEvent,
@@ -31,8 +28,6 @@ import type {
   PluginHookBeforePromptBuildEvent,
   PluginHookBeforePromptBuildResult,
   PluginHookBeforeCompactionEvent,
-  PluginHookModelCallEndedEvent,
-  PluginHookModelCallStartedEvent,
   PluginHookInboundClaimContext,
   PluginHookInboundClaimEvent,
   PluginHookInboundClaimResult,
@@ -89,12 +84,8 @@ export type {
   PluginHookBeforeModelResolveResult,
   PluginHookBeforePromptBuildEvent,
   PluginHookBeforePromptBuildResult,
-  PluginHookModelCallEndedEvent,
-  PluginHookModelCallStartedEvent,
   PluginHookLlmInputEvent,
   PluginHookLlmOutputEvent,
-  PluginHookBeforeAgentFinalizeEvent,
-  PluginHookBeforeAgentFinalizeResult,
   PluginHookAgentEndEvent,
   PluginHookBeforeCompactionEvent,
   PluginHookBeforeResetEvent,
@@ -257,34 +248,6 @@ export function createHookRunner(
     }),
   });
 
-  const mergeBeforeAgentFinalize = (
-    acc: PluginHookBeforeAgentFinalizeResult | undefined,
-    next: PluginHookBeforeAgentFinalizeResult,
-  ): PluginHookBeforeAgentFinalizeResult => {
-    if (acc?.action === "finalize") {
-      return acc;
-    }
-    if (next.action === "finalize") {
-      return { action: "finalize", reason: next.reason };
-    }
-    if (acc?.action === "revise" && next.action === "revise") {
-      return {
-        action: "revise",
-        reason: concatOptionalTextSegments({
-          left: acc.reason,
-          right: next.reason,
-        }),
-      };
-    }
-    if (acc?.action === "revise") {
-      return acc;
-    }
-    if (next.action === "revise") {
-      return { action: "revise", reason: next.reason };
-    }
-    return next.action === "continue" ? { action: "continue", reason: next.reason } : (acc ?? next);
-  };
-
   const mergeSubagentSpawningResult = (
     acc: PluginHookSubagentSpawningResult | undefined,
     next: PluginHookSubagentSpawningResult,
@@ -318,7 +281,9 @@ export function createHookRunner(
     pluginId: string;
     error: unknown;
   }): never | void => {
-    const msg = `[hooks] ${params.hookName} handler from ${params.pluginId} failed: ${formatHookErrorForLog(params.error)}`;
+    const msg = `[hooks] ${params.hookName} handler from ${params.pluginId} failed: ${String(
+      params.error,
+    )}`;
     if (shouldCatchHookErrors(params.hookName)) {
       logger?.error(msg);
       return;
@@ -490,7 +455,6 @@ export function createHookRunner(
 
   async function runClaimingHookForPluginOutcome<
     K extends PluginHookName,
-    // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Targeted hook outcomes preserve caller-specific handled result types.
     TResult extends { handled: boolean },
   >(
     hookName: K,
@@ -545,16 +509,6 @@ export function createHookRunner(
   // Agent Hooks
   // =========================================================================
 
-  function withAgentRunId<TEvent extends { runId?: string }>(
-    event: TEvent,
-    ctx: PluginHookAgentContext,
-  ): TEvent {
-    if (event.runId || !ctx.runId) {
-      return event;
-    }
-    return { ...event, runId: ctx.runId };
-  }
-
   /**
    * Run before_model_resolve hook.
    * Allows plugins to override provider/model before model resolution.
@@ -597,7 +551,7 @@ export function createHookRunner(
   ): Promise<PluginHookBeforeAgentStartResult | undefined> {
     return runModifyingHook<"before_agent_start", PluginHookBeforeAgentStartResult>(
       "before_agent_start",
-      withAgentRunId(event, ctx),
+      event,
       ctx,
       {
         mergeResults: (acc, next) => ({
@@ -625,30 +579,6 @@ export function createHookRunner(
   }
 
   /**
-   * Run model_call_started hook.
-   * Allows plugins to observe sanitized model-call metadata.
-   * Runs in parallel (fire-and-forget).
-   */
-  async function runModelCallStarted(
-    event: PluginHookModelCallStartedEvent,
-    ctx: PluginHookAgentContext,
-  ): Promise<void> {
-    return runVoidHook("model_call_started", event, ctx);
-  }
-
-  /**
-   * Run model_call_ended hook.
-   * Allows plugins to observe sanitized terminal model-call metadata.
-   * Runs in parallel (fire-and-forget).
-   */
-  async function runModelCallEnded(
-    event: PluginHookModelCallEndedEvent,
-    ctx: PluginHookAgentContext,
-  ): Promise<void> {
-    return runVoidHook("model_call_ended", event, ctx);
-  }
-
-  /**
    * Run agent_end hook.
    * Allows plugins to analyze completed conversations.
    * Runs in parallel (fire-and-forget).
@@ -657,7 +587,7 @@ export function createHookRunner(
     event: PluginHookAgentEndEvent,
     ctx: PluginHookAgentContext,
   ): Promise<void> {
-    return runVoidHook("agent_end", withAgentRunId(event, ctx), ctx);
+    return runVoidHook("agent_end", event, ctx);
   }
 
   /**
@@ -676,23 +606,6 @@ export function createHookRunner(
    */
   async function runLlmOutput(event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext) {
     return runVoidHook("llm_output", event, ctx);
-  }
-
-  /**
-   * Run before_agent_finalize hook.
-   * Allows plugins to request one more model pass before a natural final reply
-   * is accepted. This is not the user-facing /stop cancellation path.
-   */
-  async function runBeforeAgentFinalize(
-    event: PluginHookBeforeAgentFinalizeEvent,
-    ctx: PluginHookAgentContext,
-  ): Promise<PluginHookBeforeAgentFinalizeResult | undefined> {
-    return runModifyingHook<"before_agent_finalize", PluginHookBeforeAgentFinalizeResult>(
-      "before_agent_finalize",
-      withAgentRunId(event, ctx),
-      ctx,
-      { mergeResults: mergeBeforeAgentFinalize },
-    );
   }
 
   /**
@@ -1201,11 +1114,8 @@ export function createHookRunner(
     runBeforePromptBuild,
     runBeforeAgentStart,
     runBeforeAgentReply,
-    runModelCallStarted,
-    runModelCallEnded,
     runLlmInput,
     runLlmOutput,
-    runBeforeAgentFinalize,
     runAgentEnd,
     runBeforeCompaction,
     runAfterCompaction,

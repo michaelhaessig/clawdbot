@@ -63,7 +63,7 @@ export async function resolveBareSessionResetPromptState(params: {
   nowMs?: number;
   isPrimaryRun?: boolean;
   isCanonicalWorkspace?: boolean;
-  hasBootstrapFileAccess?: boolean | (() => boolean);
+  hasBootstrapFileAccess?: boolean;
 }): Promise<{
   bootstrapMode: BootstrapMode;
   prompt: string;
@@ -72,18 +72,13 @@ export async function resolveBareSessionResetPromptState(params: {
   const bootstrapPending = params.workspaceDir
     ? await isWorkspaceBootstrapPending(params.workspaceDir)
     : false;
-  const hasBootstrapFileAccess = bootstrapPending
-    ? typeof params.hasBootstrapFileAccess === "function"
-      ? params.hasBootstrapFileAccess()
-      : (params.hasBootstrapFileAccess ?? true)
-    : true;
   const bootstrapMode = resolveBootstrapMode({
     bootstrapPending,
     runKind: "default",
     isInteractiveUserFacing: true,
     isPrimaryRun: params.isPrimaryRun ?? true,
     isCanonicalWorkspace: params.isCanonicalWorkspace ?? true,
-    hasBootstrapFileAccess,
+    hasBootstrapFileAccess: params.hasBootstrapFileAccess ?? true,
   });
   return {
     bootstrapMode,

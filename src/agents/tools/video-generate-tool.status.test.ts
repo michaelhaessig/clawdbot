@@ -12,15 +12,13 @@ const taskRuntimeInternalMocks = vi.hoisted(() => ({
 
 vi.mock("../../tasks/runtime-internal.js", () => taskRuntimeInternalMocks);
 
-function resetVideoStatusMocks() {
-  vi.restoreAllMocks();
-  vi.spyOn(videoGenerationRuntime, "listRuntimeVideoGenerationProviders").mockReturnValue([]);
-  taskRuntimeInternalMocks.listTasksForOwnerKey.mockReset();
-  taskRuntimeInternalMocks.listTasksForOwnerKey.mockReturnValue([]);
-}
-
 describe("createVideoGenerateTool status actions", () => {
-  beforeEach(resetVideoStatusMocks);
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(videoGenerationRuntime, "listRuntimeVideoGenerationProviders").mockReturnValue([]);
+    taskRuntimeInternalMocks.listTasksForOwnerKey.mockReset();
+    taskRuntimeInternalMocks.listTasksForOwnerKey.mockReturnValue([]);
+  });
 
   afterEach(() => {
     vi.unstubAllEnvs();

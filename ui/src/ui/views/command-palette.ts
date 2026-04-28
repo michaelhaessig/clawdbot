@@ -29,61 +29,61 @@ function getPaletteBaseItems(): PaletteItem[] {
   return [
     {
       id: "nav-overview",
-      label: t("overview.palette.items.overview"),
+      label: "Overview",
       icon: "barChart",
       category: "navigation",
       action: "nav:overview",
     },
     {
       id: "nav-sessions",
-      label: t("overview.palette.items.sessions"),
+      label: "Sessions",
       icon: "fileText",
       category: "navigation",
       action: "nav:sessions",
     },
     {
       id: "nav-cron",
-      label: t("overview.palette.items.scheduled"),
+      label: "Scheduled",
       icon: "scrollText",
       category: "navigation",
       action: "nav:cron",
     },
     {
       id: "nav-skills",
-      label: t("overview.palette.items.skills"),
+      label: "Skills",
       icon: "zap",
       category: "navigation",
       action: "nav:skills",
     },
     {
       id: "nav-config",
-      label: t("overview.palette.items.settings"),
+      label: "Settings",
       icon: "settings",
       category: "navigation",
       action: "nav:config",
     },
     {
       id: "nav-agents",
-      label: t("overview.palette.items.agents"),
+      label: "Agents",
       icon: "folder",
       category: "navigation",
       action: "nav:agents",
     },
     {
       id: "skill-shell",
-      label: t("overview.palette.items.shellCommand"),
+      label: "Shell Command",
       icon: "monitor",
       category: "skills",
       action: "/skill shell",
-      description: t("overview.palette.descriptions.shellCommand"),
+      description: "Run shell",
     },
     {
       id: "skill-debug",
-      label: t("overview.palette.items.debugMode"),
+      label: "Debug Mode",
       icon: "bug",
       category: "skills",
       action: "/verbose full",
-      description: t("overview.palette.descriptions.debugMode"),
+      description: "Toggle debug",
     },
   ];
 }
@@ -118,10 +118,6 @@ function filteredItems(query: string): PaletteItem[] {
       normalizeLowercaseStringOrEmpty(item.label).includes(q) ||
       normalizeLowercaseStringOrEmpty(item.description).includes(q),
   );
-}
-
-export function getFilteredPaletteItems(query: string): readonly PaletteItem[] {
-  return filteredItems(query);
 }
 
 function groupItems(items: PaletteItem[]): Array<[string, PaletteItem[]]> {
@@ -194,18 +190,11 @@ function handleKeydown(e: KeyboardEvent, props: CommandPaletteProps) {
   }
 }
 
-function getCategoryLabel(category: string): string {
-  switch (category) {
-    case "search":
-      return t("overview.palette.categories.search");
-    case "navigation":
-      return t("overview.palette.categories.navigation");
-    case "skills":
-      return t("overview.palette.categories.skills");
-    default:
-      return category;
-  }
-}
+const CATEGORY_LABELS: Record<string, string> = {
+  search: "Search",
+  navigation: "Navigation",
+  skills: "Skills",
+};
 
 function focusInput(el: Element | undefined) {
   if (el) {
@@ -255,7 +244,9 @@ export function renderCommandPalette(props: CommandPaletteProps) {
               </div>`
             : grouped.map(
                 ([category, groupedItems]) => html`
-                  <div class="cmd-palette__group-label">${getCategoryLabel(category)}</div>
+                  <div class="cmd-palette__group-label">
+                    ${CATEGORY_LABELS[category] ?? category}
+                  </div>
                   ${groupedItems.map((item) => {
                     const globalIndex = items.indexOf(item);
                     const isActive = globalIndex === props.activeIndex;
@@ -282,9 +273,9 @@ export function renderCommandPalette(props: CommandPaletteProps) {
               )}
         </div>
         <div class="cmd-palette__footer">
-          <span><kbd>↑↓</kbd> ${t("overview.palette.footer.navigate")}</span>
-          <span><kbd>↵</kbd> ${t("overview.palette.footer.select")}</span>
-          <span><kbd>esc</kbd> ${t("overview.palette.footer.close")}</span>
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> select</span>
+          <span><kbd>esc</kbd> close</span>
         </div>
       </div>
     </div>

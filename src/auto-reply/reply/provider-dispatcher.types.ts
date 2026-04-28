@@ -9,7 +9,7 @@ import type {
 } from "./reply-dispatcher.js";
 
 type DispatchReplyContext = MsgContext | FinalizedMsgContext;
-type DispatchReplyOptions = Omit<GetReplyOptions, "onBlockReply">;
+type DispatchReplyOptions = Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
 
 export type DispatchReplyWithBufferedBlockDispatcher = (params: {
   ctx: DispatchReplyContext;

@@ -6,6 +6,8 @@ read_when:
 title: "Signal"
 ---
 
+# Signal (signal-cli)
+
 Status: external CLI integration. Gateway talks to `signal-cli` over HTTP JSON-RPC + SSE.
 
 ## Prerequisites
@@ -97,7 +99,7 @@ Example:
 }
 ```
 
-Multi-account support: use `channels.signal.accounts` with per-account config and optional `name`. See [`gateway/configuration`](/gateway/config-channels#multi-account-all-channels) for the shared pattern.
+Multi-account support: use `channels.signal.accounts` with per-account config and optional `name`. See [`gateway/configuration`](/gateway/configuration-reference#multi-account-all-channels) for the shared pattern.
 
 ## Setup path B: register dedicated bot number (SMS, Linux)
 
@@ -152,9 +154,7 @@ openclaw channels status --probe
    - Approve code on the server: `openclaw pairing approve signal <PAIRING_CODE>`.
    - Save the bot number as a contact on your phone to avoid "Unknown contact".
 
-<Warning>
-Registering a phone number account with `signal-cli` can de-authenticate the main Signal app session for that number. Prefer a dedicated bot number, or use QR link mode if you need to keep your existing phone app setup.
-</Warning>
+Important: registering a phone number account with `signal-cli` can de-authenticate the main Signal app session for that number. Prefer a dedicated bot number, or use QR link mode if you need to keep your existing phone app setup.
 
 Upstream references:
 
@@ -210,7 +210,6 @@ Groups:
 - Outbound text is chunked to `channels.signal.textChunkLimit` (default 4000).
 - Optional newline chunking: set `channels.signal.chunkMode="newline"` to split on blank lines (paragraph boundaries) before length chunking.
 - Attachments supported (base64 fetched from `signal-cli`).
-- Voice-note attachments use the `signal-cli` filename as a MIME fallback when `contentType` is missing, so audio transcription can still classify AAC voice memos.
 - Default media cap: `channels.signal.mediaMaxMb` (default 8).
 - Use `channels.signal.ignoreAttachments` to skip downloading media.
 - Group history context uses `channels.signal.historyLimit` (or `channels.signal.accounts.*.historyLimit`), falling back to `messages.groupChat.historyLimit`. Set `0` to disable (default 50).

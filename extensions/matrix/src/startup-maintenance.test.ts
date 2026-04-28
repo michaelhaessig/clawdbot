@@ -67,31 +67,6 @@ function createSuccessfulMatrixMigrationDeps() {
   };
 }
 
-function createWarningOnlyMaintenanceHarness() {
-  return {
-    deps: {
-      maybeCreateMatrixMigrationSnapshot: vi.fn(),
-      autoMigrateLegacyMatrixState: vi.fn(),
-      autoPrepareLegacyMatrixCrypto: vi.fn(),
-    },
-    log: {
-      info: vi.fn(),
-      warn: vi.fn(),
-    },
-  };
-}
-
-function expectWarningOnlyMaintenanceSkipped(
-  harness: ReturnType<typeof createWarningOnlyMaintenanceHarness>,
-) {
-  expect(harness.deps.maybeCreateMatrixMigrationSnapshot).not.toHaveBeenCalled();
-  expect(harness.deps.autoMigrateLegacyMatrixState).not.toHaveBeenCalled();
-  expect(harness.deps.autoPrepareLegacyMatrixCrypto).not.toHaveBeenCalled();
-  expect(harness.log.info).toHaveBeenCalledWith(
-    "matrix: migration remains in a warning-only state; no pre-migration snapshot was needed yet",
-  );
-}
-
 describe("runMatrixStartupMaintenance", () => {
   beforeEach(() => {
     legacyCryptoInspectorAvailability.available = true;
@@ -129,19 +104,30 @@ describe("runMatrixStartupMaintenance", () => {
   it("skips snapshot creation when startup only has warning-only migration state", async () => {
     await withTempHome(async (home) => {
       await seedLegacyMatrixState(home);
-      const harness = createWarningOnlyMaintenanceHarness();
+      const maybeCreateMatrixMigrationSnapshotMock = vi.fn();
+      const autoMigrateLegacyMatrixStateMock = vi.fn();
+      const autoPrepareLegacyMatrixCryptoMock = vi.fn();
+      const info = vi.fn();
+      const warn = vi.fn();
 
       await runMatrixStartupMaintenance({
         cfg: makeMatrixStartupConfig(false),
         env: process.env,
-        deps: harness.deps as never,
-        log: harness.log,
+        deps: {
+          maybeCreateMatrixMigrationSnapshot: maybeCreateMatrixMigrationSnapshotMock as never,
+          autoMigrateLegacyMatrixState: autoMigrateLegacyMatrixStateMock as never,
+          autoPrepareLegacyMatrixCrypto: autoPrepareLegacyMatrixCryptoMock as never,
+        },
+        log: { info, warn },
       });
 
-      expectWarningOnlyMaintenanceSkipped(harness);
-      expect(harness.log.warn).toHaveBeenCalledWith(
-        expect.stringContaining("could not be resolved yet"),
+      expect(maybeCreateMatrixMigrationSnapshotMock).not.toHaveBeenCalled();
+      expect(autoMigrateLegacyMatrixStateMock).not.toHaveBeenCalled();
+      expect(autoPrepareLegacyMatrixCryptoMock).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        "matrix: migration remains in a warning-only state; no pre-migration snapshot was needed yet",
       );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not be resolved yet"));
     });
   });
 
@@ -150,17 +136,30 @@ describe("runMatrixStartupMaintenance", () => {
 
     await withTempHome(async (home) => {
       await seedLegacyMatrixCrypto(home);
-      const harness = createWarningOnlyMaintenanceHarness();
+      const maybeCreateMatrixMigrationSnapshotMock = vi.fn();
+      const autoMigrateLegacyMatrixStateMock = vi.fn();
+      const autoPrepareLegacyMatrixCryptoMock = vi.fn();
+      const info = vi.fn();
+      const warn = vi.fn();
 
       await runMatrixStartupMaintenance({
         cfg: makeMatrixStartupConfig(),
         env: process.env,
-        deps: harness.deps as never,
-        log: harness.log,
+        deps: {
+          maybeCreateMatrixMigrationSnapshot: maybeCreateMatrixMigrationSnapshotMock as never,
+          autoMigrateLegacyMatrixState: autoMigrateLegacyMatrixStateMock as never,
+          autoPrepareLegacyMatrixCrypto: autoPrepareLegacyMatrixCryptoMock as never,
+        },
+        log: { info, warn },
       });
 
-      expectWarningOnlyMaintenanceSkipped(harness);
-      expect(harness.log.warn).toHaveBeenCalledWith(
+      expect(maybeCreateMatrixMigrationSnapshotMock).not.toHaveBeenCalled();
+      expect(autoMigrateLegacyMatrixStateMock).not.toHaveBeenCalled();
+      expect(autoPrepareLegacyMatrixCryptoMock).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        "matrix: migration remains in a warning-only state; no pre-migration snapshot was needed yet",
+      );
+      expect(warn).toHaveBeenCalledWith(
         "matrix: legacy encrypted-state warnings:\n- Legacy Matrix encrypted state was detected, but the Matrix crypto inspector is unavailable.",
       );
     });

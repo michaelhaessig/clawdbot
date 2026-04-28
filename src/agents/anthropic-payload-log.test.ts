@@ -11,7 +11,6 @@ describe("createAnthropicPayloadLogger", () => {
       writer: {
         filePath: "memory",
         write: (line) => lines.push(line),
-        flush: async () => undefined,
       },
     });
     expect(logger).not.toBeNull();

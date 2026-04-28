@@ -3,10 +3,9 @@ import { formatAllowlistMatchMeta } from "openclaw/plugin-sdk/allow-from";
 import type {
   OpenClawConfig,
   SlackReactionNotificationMode,
-} from "openclaw/plugin-sdk/config-types";
-import type { SessionScope } from "openclaw/plugin-sdk/config-types";
-import type { DmPolicy, GroupPolicy } from "openclaw/plugin-sdk/config-types";
-import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+} from "openclaw/plugin-sdk/config-runtime";
+import type { SessionScope } from "openclaw/plugin-sdk/config-runtime";
+import type { DmPolicy, GroupPolicy } from "openclaw/plugin-sdk/config-runtime";
 import { createDedupeCache } from "openclaw/plugin-sdk/infra-runtime";
 import type { HistoryEntry } from "openclaw/plugin-sdk/reply-history";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
@@ -25,11 +24,7 @@ import { normalizeSlackChannelType } from "./channel-type.js";
 import { resolveSessionKey } from "./config.runtime.js";
 import { isSlackChannelAllowedByPolicy } from "./policy.js";
 
-export {
-  inferSlackChannelType,
-  normalizeSlackChannelType,
-  resolveSlackChatType,
-} from "./channel-type.js";
+export { inferSlackChannelType, normalizeSlackChannelType } from "./channel-type.js";
 
 export type SlackMonitorContext = {
   cfg: OpenClawConfig;
@@ -39,7 +34,6 @@ export type SlackMonitorContext = {
   runtime: RuntimeEnv;
 
   botUserId: string;
-  botId?: string;
   teamId: string;
   apiAppId: string;
 
@@ -65,7 +59,7 @@ export type SlackMonitorContext = {
   threadHistoryScope: "thread" | "channel";
   threadInheritParent: boolean;
   threadRequireExplicitMention: boolean;
-  slashCommand: Required<import("openclaw/plugin-sdk/config-types").SlackSlashCommandConfig>;
+  slashCommand: Required<import("openclaw/plugin-sdk/config-runtime").SlackSlashCommandConfig>;
   textLimit: number;
   ackReactionScope: string;
   typingReaction: string;
@@ -108,7 +102,6 @@ export function createSlackMonitorContext(params: {
   runtime: RuntimeEnv;
 
   botUserId: string;
-  botId?: string;
   teamId: string;
   apiAppId: string;
 
@@ -289,9 +282,7 @@ export function createSlackMonitorContext(params: {
         status: p.status,
       });
     } catch (err) {
-      logVerbose(
-        `slack status update failed for channel ${p.channelId}: ${formatErrorMessage(err)}`,
-      );
+      logVerbose(`slack status update failed for channel ${p.channelId}: ${String(err)}`);
     }
   };
 
@@ -404,7 +395,6 @@ export function createSlackMonitorContext(params: {
     app: params.app,
     runtime: params.runtime,
     botUserId: params.botUserId,
-    botId: params.botId,
     teamId: params.teamId,
     apiAppId: params.apiAppId,
     historyLimit: params.historyLimit,

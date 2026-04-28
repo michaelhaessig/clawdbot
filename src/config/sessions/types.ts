@@ -58,8 +58,6 @@ export type AcpSessionRuntimeOptions = {
   runtimeMode?: string;
   /** ACP runtime config option: model id. */
   model?: string;
-  /** ACP runtime config option: thinking/reasoning effort. */
-  thinking?: string;
   /** Working directory override for ACP session turns. */
   cwd?: string;
   /** ACP runtime config option: permission profile id. */
@@ -74,10 +72,8 @@ export type CliSessionBinding = {
   sessionId: string;
   authProfileId?: string;
   authEpoch?: string;
-  authEpochVersion?: number;
   extraSystemPromptHash?: string;
   mcpConfigHash?: string;
-  mcpResumeHash?: string;
 };
 
 export type SessionCompactionCheckpointReason =
@@ -145,14 +141,8 @@ export type SessionEntry = {
   subagentRole?: "orchestrator" | "leaf";
   /** Explicit control scope assigned at spawn time for subagent control decisions. */
   subagentControlScope?: "children" | "none";
-  /** Plugin id that created this session through api.runtime.subagent. */
-  pluginOwnerId?: string;
   systemSent?: boolean;
   abortedLastRun?: boolean;
-  /** Timestamp (ms) when the current sessionId first became active. */
-  sessionStartedAt?: number;
-  /** Timestamp (ms) of the last user/channel interaction that should extend idle lifetime. */
-  lastInteractionAt?: number;
   /** Stable first-run start time for subagent sessions, persisted after completion. */
   startedAt?: number;
   /** Latest completed run end time for subagent sessions, persisted after completion. */
@@ -177,10 +167,6 @@ export type SessionEntry = {
   reasoningLevel?: string;
   elevatedLevel?: string;
   ttsAuto?: TtsAutoMode;
-  /** Hash of the latest assistant reply that was sent through `/tts latest`. */
-  lastTtsReadLatestHash?: string;
-  /** Timestamp (ms) when `/tts latest` last sent audio for this session. */
-  lastTtsReadLatestAt?: number;
   execHost?: string;
   execSecurity?: string;
   execAsk?: string;
@@ -188,8 +174,6 @@ export type SessionEntry = {
   responseUsage?: "on" | "off" | "tokens" | "full";
   providerOverride?: string;
   modelOverride?: string;
-  /** Session-scoped agent runtime/harness override selected with the model picker. */
-  agentRuntimeOverride?: string;
   /**
    * Tracks whether the persisted model override came from an explicit user
    * action (`/model`, `sessions.patch`) or from a temporary runtime fallback.
@@ -236,12 +220,6 @@ export type SessionEntry = {
   modelProvider?: string;
   model?: string;
   /**
-   * Embedded agent harness selected for this session id.
-   * Prevents config/env changes from moving an existing transcript between
-   * incompatible runtime harnesses.
-   */
-  agentHarnessId?: string;
-  /**
    * Last selected/runtime model pair for which a fallback notice was emitted.
    * Used to avoid repeating the same fallback notice every turn.
    */
@@ -285,32 +263,38 @@ function isSessionPluginTraceLine(line: string): boolean {
   return trimmed.startsWith("🔎 ") || /(?:^|\s)(?:Debug|Trace):/.test(trimmed);
 }
 
-function resolveSessionPluginLines(
+export function resolveSessionPluginStatusLines(
   entry: Pick<SessionEntry, "pluginDebugEntries"> | undefined,
-  includeLine: (line: string) => boolean,
 ): string[] {
   return Array.isArray(entry?.pluginDebugEntries)
     ? entry.pluginDebugEntries.flatMap((pluginEntry) =>
         Array.isArray(pluginEntry?.lines)
           ? pluginEntry.lines.filter(
               (line): line is string =>
-                typeof line === "string" && line.trim().length > 0 && includeLine(line),
+                typeof line === "string" &&
+                line.trim().length > 0 &&
+                !isSessionPluginTraceLine(line),
             )
           : [],
       )
     : [];
 }
 
-export function resolveSessionPluginStatusLines(
-  entry: Pick<SessionEntry, "pluginDebugEntries"> | undefined,
-): string[] {
-  return resolveSessionPluginLines(entry, (line) => !isSessionPluginTraceLine(line));
-}
-
 export function resolveSessionPluginTraceLines(
   entry: Pick<SessionEntry, "pluginDebugEntries"> | undefined,
 ): string[] {
-  return resolveSessionPluginLines(entry, isSessionPluginTraceLine);
+  return Array.isArray(entry?.pluginDebugEntries)
+    ? entry.pluginDebugEntries.flatMap((pluginEntry) =>
+        Array.isArray(pluginEntry?.lines)
+          ? pluginEntry.lines.filter(
+              (line): line is string =>
+                typeof line === "string" &&
+                line.trim().length > 0 &&
+                isSessionPluginTraceLine(line),
+            )
+          : [],
+      )
+    : [];
 }
 
 export function normalizeSessionRuntimeModelFields(entry: SessionEntry): SessionEntry {
@@ -393,22 +377,9 @@ export function mergeSessionEntryWithPolicy(
   const sessionId = patch.sessionId ?? existing?.sessionId ?? crypto.randomUUID();
   const updatedAt = resolveMergedUpdatedAt(existing, patch, options);
   if (!existing) {
-    return normalizeSessionRuntimeModelFields({
-      ...patch,
-      sessionId,
-      updatedAt,
-      sessionStartedAt: patch.sessionStartedAt ?? updatedAt,
-    });
+    return normalizeSessionRuntimeModelFields({ ...patch, sessionId, updatedAt });
   }
-  const next = {
-    ...existing,
-    ...patch,
-    sessionId,
-    updatedAt,
-    sessionStartedAt:
-      patch.sessionStartedAt ??
-      (existing.sessionId === sessionId ? existing.sessionStartedAt : updatedAt),
-  };
+  const next = { ...existing, ...patch, sessionId, updatedAt };
 
   // Guard against stale provider carry-over when callers patch runtime model
   // without also patching runtime provider.
@@ -438,21 +409,11 @@ export function mergeSessionEntryPreserveActivity(
   });
 }
 
-export function resolveSessionTotalTokens(
+export function resolveFreshSessionTotalTokens(
   entry?: Pick<SessionEntry, "totalTokens" | "totalTokensFresh"> | null,
 ): number | undefined {
   const total = entry?.totalTokens;
   if (typeof total !== "number" || !Number.isFinite(total) || total < 0) {
-    return undefined;
-  }
-  return total;
-}
-
-export function resolveFreshSessionTotalTokens(
-  entry?: Pick<SessionEntry, "totalTokens" | "totalTokensFresh"> | null,
-): number | undefined {
-  const total = resolveSessionTotalTokens(entry);
-  if (total === undefined) {
     return undefined;
   }
   if (entry?.totalTokensFresh === false) {

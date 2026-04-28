@@ -1,5 +1,5 @@
 import type { RequestClient } from "@buape/carbon";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { describe, expect, it } from "vitest";
 import { createDiscordRestClient } from "./client.js";
 
@@ -19,7 +19,13 @@ describe("createDiscordRestClient", () => {
       },
     } as OpenClawConfig;
 
-    const result = createDiscordRestClient({ cfg, token: "Bot explicit-token", rest: fakeRest });
+    const result = createDiscordRestClient(
+      {
+        token: "Bot explicit-token",
+        rest: fakeRest,
+      },
+      cfg,
+    );
 
     expect(result.token).toBe("explicit-token");
     expect(result.rest).toBe(fakeRest);
@@ -46,12 +52,14 @@ describe("createDiscordRestClient", () => {
       },
     } as OpenClawConfig;
 
-    const result = createDiscordRestClient({
+    const result = createDiscordRestClient(
+      {
+        accountId: "ops",
+        token: "Bot explicit-account-token",
+        rest: fakeRest,
+      },
       cfg,
-      accountId: "ops",
-      token: "Bot explicit-account-token",
-      rest: fakeRest,
-    });
+    );
 
     expect(result.token).toBe("explicit-account-token");
     expect(result.account.accountId).toBe("ops");
@@ -71,6 +79,13 @@ describe("createDiscordRestClient", () => {
       },
     } as OpenClawConfig;
 
-    expect(() => createDiscordRestClient({ cfg, rest: fakeRest })).toThrow(/unresolved SecretRef/i);
+    expect(() =>
+      createDiscordRestClient(
+        {
+          rest: fakeRest,
+        },
+        cfg,
+      ),
+    ).toThrow(/unresolved SecretRef/i);
   });
 });

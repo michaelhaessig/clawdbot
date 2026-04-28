@@ -3,8 +3,10 @@ summary: "Skills config schema and examples"
 read_when:
   - Adding or modifying skills config
   - Adjusting bundled allowlist or install behavior
-title: "Skills config"
+title: "Skills Config"
 ---
+
+# Skills Config
 
 Most skills loader/install configuration lives under `skills` in
 `~/.openclaw/openclaw.json`. Agent-specific skill visibility lives under
@@ -48,7 +50,7 @@ auth/API key. Typical examples: `GEMINI_API_KEY` or `GOOGLE_API_KEY` for
 
 Examples:
 
-- Native Nano Banana Pro-style setup: `agents.defaults.imageGenerationModel.primary: "google/gemini-3-pro-image-preview"`
+- Native Nano Banana-style setup: `agents.defaults.imageGenerationModel.primary: "google/gemini-3.1-flash-image-preview"`
 - Native fal setup: `agents.defaults.imageGenerationModel.primary: "fal/fal-ai/flux/dev"`
 
 ## Agent skill allowlists
@@ -120,18 +122,12 @@ Per-skill fields:
 
 ### Sandboxed skills + env vars
 
-When a session is **sandboxed**, skill processes run inside the configured
-sandbox backend. The sandbox does **not** inherit the host `process.env`.
+When a session is **sandboxed**, skill processes run inside Docker. The sandbox
+does **not** inherit the host `process.env`.
 
 Use one of:
 
-- `agents.defaults.sandbox.docker.env` for the Docker backend (or per-agent `agents.list[].sandbox.docker.env`)
-- bake the env into your custom sandbox image or remote sandbox environment
+- `agents.defaults.sandbox.docker.env` (or per-agent `agents.list[].sandbox.docker.env`)
+- bake the env into your custom sandbox image
 
 Global `env` and `skills.entries.<skill>.env/apiKey` apply to **host** runs only.
-
-## Related
-
-- [Skills](/tools/skills)
-- [Creating skills](/tools/creating-skills)
-- [Slash commands](/tools/slash-commands)

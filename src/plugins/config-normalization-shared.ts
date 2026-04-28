@@ -21,7 +21,6 @@ export type NormalizedPluginsConfig = {
       enabled?: boolean;
       hooks?: {
         allowPromptInjection?: boolean;
-        allowConversationAccess?: boolean;
       };
       subagent?: {
         allowModelOverride?: boolean;
@@ -81,21 +80,12 @@ function normalizePluginEntries(
         ? {
             allowPromptInjection: (hooksRaw as { allowPromptInjection?: unknown })
               .allowPromptInjection,
-            allowConversationAccess: (hooksRaw as { allowConversationAccess?: unknown })
-              .allowConversationAccess,
           }
         : undefined;
     const normalizedHooks =
-      hooks &&
-      (typeof hooks.allowPromptInjection === "boolean" ||
-        typeof hooks.allowConversationAccess === "boolean")
+      hooks && typeof hooks.allowPromptInjection === "boolean"
         ? {
-            ...(typeof hooks.allowPromptInjection === "boolean"
-              ? { allowPromptInjection: hooks.allowPromptInjection }
-              : {}),
-            ...(typeof hooks.allowConversationAccess === "boolean"
-              ? { allowConversationAccess: hooks.allowConversationAccess }
-              : {}),
+            allowPromptInjection: hooks.allowPromptInjection,
           }
         : undefined;
     const subagentRaw = entry.subagent;

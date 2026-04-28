@@ -18,10 +18,14 @@ const storeMocks = vi.hoisted(() => ({
 }));
 const fetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock("./store.js", () => ({
-  updateAuthProfileStoreWithLock: storeMocks.updateAuthProfileStoreWithLock,
-  saveAuthProfileStore: storeMocks.saveAuthProfileStore,
-}));
+vi.mock("./store.js", async () => {
+  const original = await vi.importActual<typeof import("./store.js")>("./store.js");
+  return {
+    ...original,
+    updateAuthProfileStoreWithLock: storeMocks.updateAuthProfileStoreWithLock,
+    saveAuthProfileStore: storeMocks.saveAuthProfileStore,
+  };
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -521,7 +525,7 @@ describe("clearExpiredCooldowns", () => {
   it("ignores NaN and Infinity cooldown values", () => {
     const store = makeStore({
       "anthropic:default": {
-        cooldownUntil: Number.NaN,
+        cooldownUntil: NaN,
         errorCount: 2,
       },
       "openai:default": {

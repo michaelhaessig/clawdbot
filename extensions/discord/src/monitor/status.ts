@@ -1,7 +1,6 @@
 export type DiscordMonitorStatusPatch = {
   connected?: boolean;
   lastEventAt?: number | null;
-  lastTransportActivityAt?: number | null;
   lastConnectedAt?: number | null;
   lastDisconnect?:
     | string

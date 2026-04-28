@@ -22,7 +22,6 @@ import type {
   GatewayServiceControlArgs,
   GatewayServiceEnv,
   GatewayServiceEnvArgs,
-  GatewayServiceEnvironmentValueSource,
   GatewayServiceInstallArgs,
   GatewayServiceManageArgs,
   GatewayServiceRestartResult,
@@ -115,10 +114,10 @@ export async function readSystemdServiceExecStart(
       ...inlineEnvironment,
       ...environmentFromFiles.environment,
     };
-    const mergedEnvironmentSources = mergeEnvironmentValueSources(
-      inlineEnvironment,
-      environmentFromFiles.environment,
-    );
+    const mergedEnvironmentSources = {
+      ...buildEnvironmentValueSources(inlineEnvironment, "inline"),
+      ...buildEnvironmentValueSources(environmentFromFiles.environment, "file"),
+    };
     const programArguments = parseSystemdExecStart(execStart);
     return {
       programArguments,
@@ -137,19 +136,8 @@ export async function readSystemdServiceExecStart(
 function buildEnvironmentValueSources(
   environment: Record<string, string>,
   source: "inline" | "file",
-): Record<string, GatewayServiceEnvironmentValueSource> {
+): Record<string, "inline" | "file"> {
   return Object.fromEntries(Object.keys(environment).map((key) => [key, source]));
-}
-
-function mergeEnvironmentValueSources(
-  inlineEnvironment: Record<string, string>,
-  fileEnvironment: Record<string, string>,
-): Record<string, GatewayServiceEnvironmentValueSource> {
-  const sources = buildEnvironmentValueSources(inlineEnvironment, "inline");
-  for (const key of Object.keys(fileEnvironment)) {
-    sources[key] = Object.hasOwn(inlineEnvironment, key) ? "inline-and-file" : "file";
-  }
-  return sources;
 }
 
 function expandSystemdSpecifier(input: string, env: GatewayServiceEnv): string {
@@ -306,18 +294,6 @@ function isSystemdUnitNotEnabled(detail: string): boolean {
   );
 }
 
-function isSystemdUnitMissingDetail(detail: string): boolean {
-  if (!detail) {
-    return false;
-  }
-  const normalized = normalizeLowercaseStringOrEmpty(detail);
-  return (
-    (normalized.includes("unit file") && normalized.includes("does not exist")) ||
-    normalized.includes("not-found") ||
-    normalized.includes("could not be found")
-  );
-}
-
 const isSystemctlBusUnavailable = isSystemdUserBusUnavailableDetail;
 
 function isSystemdUserScopeUnavailable(detail: string): boolean {
@@ -354,54 +330,20 @@ function resolveSystemctlDirectUserScopeArgs(): string[] {
   return ["--user"];
 }
 
-function readSystemctlEnvUser(env: GatewayServiceEnv): string | null {
-  return env.USER?.trim() || env.LOGNAME?.trim() || null;
-}
-
-function readSystemctlEffectiveUser(): string | null {
+function resolveSystemctlMachineScopeUser(env: GatewayServiceEnv): string | null {
+  const sudoUser = env.SUDO_USER?.trim();
+  if (sudoUser && sudoUser !== "root") {
+    return sudoUser;
+  }
+  const fromEnv = env.USER?.trim() || env.LOGNAME?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
   try {
     return os.userInfo().username;
   } catch {
     return null;
   }
-}
-
-function readSystemctlEffectiveUid(): number | null {
-  if (typeof process.geteuid !== "function") {
-    return null;
-  }
-  try {
-    return process.geteuid();
-  } catch {
-    return null;
-  }
-}
-
-function isNonRootUser(user: string | null): user is string {
-  return Boolean(user && user !== "root");
-}
-
-function resolveSystemctlUserScope(env: GatewayServiceEnv): {
-  machineUser: string | null;
-  preferMachineScope: boolean;
-} {
-  const sudoUser = env.SUDO_USER?.trim() || null;
-  const envUser = readSystemctlEnvUser(env);
-  const effectiveUid = readSystemctlEffectiveUid();
-  const effectiveUser = readSystemctlEffectiveUser();
-  const isEffectiveRoot = effectiveUid === null ? effectiveUser === "root" : effectiveUid === 0;
-  const isSudoToRoot = isEffectiveRoot && isNonRootUser(sudoUser);
-  const machineUser = isSudoToRoot
-    ? sudoUser
-    : isNonRootUser(envUser)
-      ? envUser
-      : isNonRootUser(sudoUser)
-        ? sudoUser
-        : effectiveUser || envUser || sudoUser || null;
-  return {
-    machineUser,
-    preferMachineScope: isSudoToRoot,
-  };
 }
 
 function resolveSystemctlMachineUserScopeArgs(user: string): string[] {
@@ -426,10 +368,11 @@ async function execSystemctlUser(
   env: GatewayServiceEnv,
   args: string[],
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  const { machineUser, preferMachineScope } = resolveSystemctlUserScope(env);
+  const machineUser = resolveSystemctlMachineScopeUser(env);
+  const sudoUser = env.SUDO_USER?.trim();
 
-  // Under sudo-to-root, prefer the invoking non-root user's scope directly via machine scope.
-  if (preferMachineScope && machineUser) {
+  // Under sudo, prefer the invoking non-root user's scope directly via machine scope.
+  if (sudoUser && sudoUser !== "root" && machineUser) {
     const machineScopeArgs = resolveSystemctlMachineUserScopeArgs(machineUser);
     if (machineScopeArgs.length > 0) {
       // Do not fall through to bare --user: under sudo that can target root's user manager.
@@ -596,44 +539,21 @@ export async function stageSystemdService({
 }
 
 async function activateSystemdService(params: { env: GatewayServiceEnv }) {
-  const serviceName = resolveSystemdServiceName(params.env);
+  const serviceName = resolveGatewaySystemdServiceName(params.env.OPENCLAW_PROFILE);
   const unitName = `${serviceName}.service`;
-  const reloadSystemd = async () => await execSystemctlUser(params.env, ["daemon-reload"]);
-  const throwActivationFailure = (
-    action: "daemon-reload" | "enable" | "restart",
-    result: { stdout: string; stderr: string },
-  ): never => {
-    const detail = readSystemctlDetail(result);
-    if (isSystemdUserScopeUnavailable(detail)) {
-      throw new Error(`systemctl --user unavailable: ${detail || "unknown error"}`.trim());
-    }
-    throw new Error(`systemctl ${action} failed: ${detail || "unknown error"}`.trim());
-  };
-  const reload = await reloadSystemd();
+  const reload = await execSystemctlUser(params.env, ["daemon-reload"]);
   if (reload.code !== 0) {
-    throwActivationFailure("daemon-reload", reload);
+    throw new Error(`systemctl daemon-reload failed: ${reload.stderr || reload.stdout}`.trim());
   }
 
-  const runAfterReloadRetry = async (action: "enable" | "restart") => {
-    const result = await execSystemctlUser(params.env, [action, unitName]);
-    if (result.code === 0 || !isSystemdUnitMissingDetail(readSystemctlDetail(result))) {
-      return result;
-    }
-    const retryReload = await reloadSystemd();
-    if (retryReload.code !== 0) {
-      throwActivationFailure("daemon-reload", retryReload);
-    }
-    return await execSystemctlUser(params.env, [action, unitName]);
-  };
-
-  const enable = await runAfterReloadRetry("enable");
+  const enable = await execSystemctlUser(params.env, ["enable", unitName]);
   if (enable.code !== 0) {
-    throwActivationFailure("enable", enable);
+    throw new Error(`systemctl enable failed: ${enable.stderr || enable.stdout}`.trim());
   }
 
-  const restart = await runAfterReloadRetry("restart");
+  const restart = await execSystemctlUser(params.env, ["restart", unitName]);
   if (restart.code !== 0) {
-    throwActivationFailure("restart", restart);
+    throw new Error(`systemctl restart failed: ${restart.stderr || restart.stdout}`.trim());
   }
 }
 
@@ -668,7 +588,7 @@ export async function uninstallSystemdService({
   stdout,
 }: GatewayServiceManageArgs): Promise<void> {
   await assertSystemdAvailable(env);
-  const serviceName = resolveSystemdServiceName(env);
+  const serviceName = resolveGatewaySystemdServiceName(env.OPENCLAW_PROFILE);
   const unitName = `${serviceName}.service`;
   await execSystemctlUser(env, ["disable", "--now", unitName]);
 

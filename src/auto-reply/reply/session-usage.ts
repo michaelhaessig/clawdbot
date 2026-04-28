@@ -4,7 +4,7 @@ import {
   hasNonzeroUsage,
   type NormalizedUsage,
 } from "../../agents/usage.js";
-import { getRuntimeConfig } from "../../config/config.js";
+import { loadConfig } from "../../config/config.js";
 import {
   type SessionSystemPromptReport,
   type SessionEntry,
@@ -96,7 +96,7 @@ export async function persistSessionUsageUpdate(params: {
   }
 
   const label = params.logLabel ? `${params.logLabel} ` : "";
-  const cfg = params.cfg ?? getRuntimeConfig();
+  const cfg = params.cfg ?? loadConfig();
   const hasUsage = hasNonzeroUsage(params.usage);
   const hasPromptTokens =
     typeof params.promptTokens === "number" &&
@@ -132,6 +132,7 @@ export async function persistSessionUsageUpdate(params: {
             providerUsed: params.providerUsed ?? entry.modelProvider,
             modelUsed: params.modelUsed ?? entry.model,
           });
+          const existingEstimatedCostUsd = resolveNonNegativeNumber(entry.estimatedCostUsd) ?? 0;
           const patch: Partial<SessionEntry> = {
             modelProvider: params.providerUsed ?? entry.modelProvider,
             model: params.modelUsed ?? entry.model,
@@ -148,11 +149,10 @@ export async function persistSessionUsageUpdate(params: {
             patch.cacheRead = cacheUsage?.cacheRead ?? 0;
             patch.cacheWrite = cacheUsage?.cacheWrite ?? 0;
           }
-          // Snapshot cost like tokens (runEstimatedCostUsd is already computed from
-          // cumulative run usage, so assign directly instead of accumulating).
-          // Fixes #69347: cost was inflated 1x-72x by accumulating on every persist.
           if (runEstimatedCostUsd !== undefined) {
-            patch.estimatedCostUsd = runEstimatedCostUsd;
+            patch.estimatedCostUsd = existingEstimatedCostUsd + runEstimatedCostUsd;
+          } else if (entry.estimatedCostUsd !== undefined) {
+            patch.estimatedCostUsd = entry.estimatedCostUsd;
           }
           // Missing a last-call snapshot (and promptTokens fallback) means
           // context utilization is stale/unknown.

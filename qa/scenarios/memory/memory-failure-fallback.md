@@ -4,11 +4,6 @@
 id: memory-failure-fallback
 title: Memory failure fallback
 surface: memory
-coverage:
-  primary:
-    - memory.failure-handling
-  secondary:
-    - runtime.fallbacks
 objective: Verify the agent degrades gracefully when memory tools are unavailable and the answer exists only in memory-backed notes.
 successCriteria:
   - Memory tools are absent from the effective tool inventory.
@@ -44,12 +39,8 @@ execution:
       - won't reveal
       - won’t reveal
       - will not reveal
-      - won't disclose
-      - won’t disclose
-      - will not disclose
       - "confirmed: the hidden fact is present"
       - hidden fact is present
-      - hidden fact exists
 ```
 
 ```yaml qa-flow

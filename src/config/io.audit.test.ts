@@ -10,36 +10,32 @@ import {
   resolveConfigAuditLogPath,
 } from "./io.audit.js";
 
-function createAuditRecordBase(configPath: string) {
-  return createConfigWriteAuditRecordBase({
-    configPath,
-    env: {} as NodeJS.ProcessEnv,
-    existsBefore: true,
-    previousHash: "prev-hash",
-    nextHash: "next-hash",
-    previousBytes: 12,
-    nextBytes: 24,
-    previousMetadata: {
-      dev: "10",
-      ino: "11",
-      mode: 0o600,
-      nlink: 1,
-      uid: 501,
-      gid: 20,
-    },
-    changedPathCount: 1,
-    hasMetaBefore: true,
-    hasMetaAfter: true,
-    gatewayModeBefore: "local",
-    gatewayModeAfter: "local",
-    suspicious: [],
-    now: "2026-04-07T08:00:00.000Z",
-  });
-}
-
 function createRenameAuditRecord(home: string) {
   return finalizeConfigWriteAuditRecord({
-    base: createAuditRecordBase(path.join(home, ".openclaw", "openclaw.json")),
+    base: createConfigWriteAuditRecordBase({
+      configPath: path.join(home, ".openclaw", "openclaw.json"),
+      env: {} as NodeJS.ProcessEnv,
+      existsBefore: true,
+      previousHash: "prev-hash",
+      nextHash: "next-hash",
+      previousBytes: 12,
+      nextBytes: 24,
+      previousMetadata: {
+        dev: "10",
+        ino: "11",
+        mode: 0o600,
+        nlink: 1,
+        uid: 501,
+        gid: 20,
+      },
+      changedPathCount: 1,
+      hasMetaBefore: true,
+      hasMetaAfter: true,
+      gatewayModeBefore: "local",
+      gatewayModeAfter: "local",
+      suspicious: [],
+      now: "2026-04-07T08:00:00.000Z",
+    }),
     result: "rename",
     nextMetadata: {
       dev: "12",
@@ -159,7 +155,30 @@ describe("config io audit helpers", () => {
   });
 
   it("drops next-file metadata and preserves error details for failed writes", () => {
-    const base = createAuditRecordBase("/tmp/openclaw.json");
+    const base = createConfigWriteAuditRecordBase({
+      configPath: "/tmp/openclaw.json",
+      env: {} as NodeJS.ProcessEnv,
+      existsBefore: true,
+      previousHash: "prev-hash",
+      nextHash: "next-hash",
+      previousBytes: 12,
+      nextBytes: 24,
+      previousMetadata: {
+        dev: "10",
+        ino: "11",
+        mode: 0o600,
+        nlink: 1,
+        uid: 501,
+        gid: 20,
+      },
+      changedPathCount: 1,
+      hasMetaBefore: true,
+      hasMetaAfter: true,
+      gatewayModeBefore: "local",
+      gatewayModeAfter: "local",
+      suspicious: [],
+      now: "2026-04-07T08:00:00.000Z",
+    });
     const err = Object.assign(new Error("disk full"), { code: "ENOSPC" });
     const record = finalizeConfigWriteAuditRecord({
       base,

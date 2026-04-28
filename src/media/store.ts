@@ -284,14 +284,6 @@ function buildSavedMediaId(params: {
     : `${params.baseId}${params.ext}`;
 }
 
-function safeOriginalFilenameExtension(originalFilename?: string): string | undefined {
-  if (!originalFilename) {
-    return undefined;
-  }
-  const ext = path.extname(originalFilename).toLowerCase();
-  return /^\.[a-z0-9]{1,16}$/.test(ext) ? ext : undefined;
-}
-
 function buildSavedMediaResult(params: {
   dir: string;
   id: string;
@@ -427,8 +419,7 @@ export async function saveMediaBuffer(
   const uuid = crypto.randomUUID();
   const headerExt = extensionForMime(normalizeOptionalString(contentType?.split(";")[0]));
   const mime = await detectMime({ buffer, headerMime: contentType });
-  const ext =
-    headerExt ?? extensionForMime(mime) ?? safeOriginalFilenameExtension(originalFilename) ?? "";
+  const ext = headerExt ?? extensionForMime(mime) ?? "";
   const id = buildSavedMediaId({ baseId: uuid, ext, originalFilename });
   await writeSavedMediaBuffer({ dir, id, buffer });
   return buildSavedMediaResult({ dir, id, size: buffer.byteLength, contentType: mime });

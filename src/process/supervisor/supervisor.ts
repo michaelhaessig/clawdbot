@@ -13,19 +13,10 @@ import type {
   TerminationReason,
 } from "./types.js";
 
-type SupervisorLogRuntime = typeof import("./supervisor-log.runtime.js");
-
 type ActiveRun = {
   run: ManagedRun;
   scopeKey?: string;
 };
-
-let supervisorLogRuntimePromise: Promise<SupervisorLogRuntime> | undefined;
-
-function loadSupervisorLogRuntime(): Promise<SupervisorLogRuntime> {
-  supervisorLogRuntimePromise ??= import("./supervisor-log.runtime.js");
-  return supervisorLogRuntimePromise;
-}
 
 function clampTimeout(value?: number): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -272,7 +263,7 @@ export function createProcessSupervisor(): ProcessSupervisor {
         exitCode: null,
         exitSignal: null,
       });
-      const { warnProcessSupervisorSpawnFailure } = await loadSupervisorLogRuntime();
+      const { warnProcessSupervisorSpawnFailure } = await import("./supervisor-log.runtime.js");
       warnProcessSupervisorSpawnFailure(`spawn failed: runId=${runId} reason=${String(err)}`);
       throw err;
     }

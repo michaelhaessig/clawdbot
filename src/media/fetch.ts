@@ -46,7 +46,6 @@ type FetchMediaOptions = {
   readIdleTimeoutMs?: number;
   ssrfPolicy?: SsrFPolicy;
   lookupFn?: LookupFn;
-  dispatcherPolicy?: PinnedDispatcherPolicy;
   dispatcherAttempts?: FetchDispatcherAttempt[];
   shouldRetryFetchError?: (error: unknown) => boolean;
   /**
@@ -114,7 +113,6 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
     readIdleTimeoutMs,
     ssrfPolicy,
     lookupFn,
-    dispatcherPolicy,
     dispatcherAttempts,
     shouldRetryFetchError,
     trustExplicitProxyDns,
@@ -127,7 +125,7 @@ export async function fetchRemoteMedia(options: FetchMediaOptions): Promise<Fetc
   const attempts =
     dispatcherAttempts && dispatcherAttempts.length > 0
       ? dispatcherAttempts
-      : [{ dispatcherPolicy, lookupFn }];
+      : [{ dispatcherPolicy: undefined, lookupFn }];
   const runGuardedFetch = async (attempt: FetchDispatcherAttempt) =>
     await fetchWithSsrFGuard(
       (trustExplicitProxyDns && attempt.dispatcherPolicy?.mode === "explicit-proxy"

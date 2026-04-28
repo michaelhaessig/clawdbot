@@ -66,7 +66,6 @@ export type QaScenarioRuntimeDeps = {
   startAgentRun: QaScenarioRuntimeFunction;
   waitForAgentRun: QaScenarioRuntimeFunction;
   listCronJobs: QaScenarioRuntimeFunction;
-  findManagedDreamingCronJob: QaScenarioRuntimeFunction;
   waitForCronRunCompletion: QaScenarioRuntimeFunction;
   readDoctorMemoryStatus: QaScenarioRuntimeFunction;
   forceMemoryIndex: QaScenarioRuntimeFunction;
@@ -151,7 +150,6 @@ export type QaScenarioRuntimeApi<
   startAgentRun: TDeps["startAgentRun"];
   waitForAgentRun: TDeps["waitForAgentRun"];
   listCronJobs: TDeps["listCronJobs"];
-  findManagedDreamingCronJob: TDeps["findManagedDreamingCronJob"];
   waitForCronRunCompletion: TDeps["waitForCronRunCompletion"];
   readDoctorMemoryStatus: TDeps["readDoctorMemoryStatus"];
   forceMemoryIndex: TDeps["forceMemoryIndex"];
@@ -251,7 +249,6 @@ export function createQaScenarioRuntimeApi<
     startAgentRun: params.deps.startAgentRun,
     waitForAgentRun: params.deps.waitForAgentRun,
     listCronJobs: params.deps.listCronJobs,
-    findManagedDreamingCronJob: params.deps.findManagedDreamingCronJob,
     waitForCronRunCompletion: params.deps.waitForCronRunCompletion,
     readDoctorMemoryStatus: params.deps.readDoctorMemoryStatus,
     forceMemoryIndex: params.deps.forceMemoryIndex,

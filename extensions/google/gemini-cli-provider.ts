@@ -4,7 +4,6 @@ import type {
   ProviderFetchUsageSnapshotContext,
 } from "openclaw/plugin-sdk/plugin-entry";
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth-result";
-import type { ProviderPlugin } from "openclaw/plugin-sdk/provider-model-shared";
 import { buildProviderToolCompatFamilyHooks } from "openclaw/plugin-sdk/provider-tools";
 import { fetchGeminiUsage } from "openclaw/plugin-sdk/provider-usage";
 import { formatGoogleOauthApiKey, parseGoogleUsageToken } from "./oauth-token-shared.js";
@@ -13,7 +12,7 @@ import { isModernGoogleModel, resolveGoogleGeminiForwardCompatModel } from "./pr
 
 const PROVIDER_ID = "google-gemini-cli";
 const PROVIDER_LABEL = "Gemini CLI OAuth";
-const DEFAULT_MODEL = "google/gemini-3.1-pro-preview";
+const DEFAULT_MODEL = "google-gemini-cli/gemini-3.1-pro-preview";
 const ENV_VARS = [
   "OPENCLAW_GEMINI_OAUTH_CLIENT_ID",
   "OPENCLAW_GEMINI_OAUTH_CLIENT_SECRET",
@@ -30,8 +29,8 @@ async function fetchGeminiCliUsage(ctx: ProviderFetchUsageSnapshotContext) {
   return await fetchGeminiUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn, PROVIDER_ID);
 }
 
-export function buildGoogleGeminiCliProvider(): ProviderPlugin {
-  return {
+export function registerGoogleGeminiCliProvider(api: OpenClawPluginApi) {
+  api.registerProvider({
     id: PROVIDER_ID,
     label: PROVIDER_LABEL,
     docsPath: "/providers/models",
@@ -82,16 +81,6 @@ export function buildGoogleGeminiCliProvider(): ProviderPlugin {
               refresh: result.refresh,
               expires: result.expires,
               email: result.email,
-              configPatch: {
-                agents: {
-                  defaults: {
-                    agentRuntime: { id: PROVIDER_ID },
-                    models: {
-                      [DEFAULT_MODEL]: {},
-                    },
-                  },
-                },
-              },
               ...(result.projectId ? { credentialExtra: { projectId: result.projectId } } : {}),
               ...(result.projectId
                 ? {
@@ -139,9 +128,5 @@ export function buildGoogleGeminiCliProvider(): ProviderPlugin {
       };
     },
     fetchUsageSnapshot: async (ctx) => await fetchGeminiCliUsage(ctx),
-  };
-}
-
-export function registerGoogleGeminiCliProvider(api: OpenClawPluginApi) {
-  api.registerProvider(buildGoogleGeminiCliProvider());
+  });
 }

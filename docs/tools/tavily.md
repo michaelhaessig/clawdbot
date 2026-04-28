@@ -8,6 +8,8 @@ read_when:
 title: "Tavily"
 ---
 
+# Tavily
+
 OpenClaw can use **Tavily** in two ways:
 
 - as the `web_search` provider

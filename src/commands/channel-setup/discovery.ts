@@ -5,13 +5,9 @@ import { isChannelVisibleInSetup } from "../../channels/plugins/exposure.js";
 import { normalizeChannelMeta } from "../../channels/plugins/meta-normalization.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import type { ChannelMeta } from "../../channels/plugins/types.public.js";
-import { isStaticallyChannelConfigured } from "../../config/channel-configured-shared.js";
 import { applyPluginAutoEnable } from "../../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import {
-  listPluginContributionIds,
-  loadPluginRegistrySnapshot,
-} from "../../plugins/plugin-registry.js";
+import { loadPluginManifestRegistry } from "../../plugins/manifest-registry.js";
 import type { ChannelChoice } from "../onboard-types.js";
 import {
   listSetupDiscoveryChannelPluginCatalogEntries,
@@ -51,19 +47,12 @@ export function listManifestInstalledChannelIds(params: {
     env: params.env ?? process.env,
   }).config;
   const workspaceDir = resolveWorkspaceDir(resolvedConfig, params.workspaceDir);
-  const index = loadPluginRegistrySnapshot({
-    config: resolvedConfig,
-    workspaceDir,
-    env: params.env ?? process.env,
-  });
   return new Set(
-    listPluginContributionIds({
-      index,
-      contribution: "channels",
+    loadPluginManifestRegistry({
       config: resolvedConfig,
       workspaceDir,
       env: params.env ?? process.env,
-    }).map((channelId) => channelId as ChannelChoice),
+    }).plugins.flatMap((plugin) => plugin.channels as ChannelChoice[]),
   );
 }
 
@@ -108,24 +97,27 @@ export function resolveChannelSetupEntries(params: {
         manifestInstalledIds.has(entry.id as ChannelChoice) &&
         shouldShowChannelInSetup(entry.meta),
     )
-    .map((entry) =>
-      Object.assign({}, entry, {
-        meta: normalizeChannelMeta({ id: entry.id as ChannelChoice, meta: entry.meta }),
+    .map((entry) => ({
+      ...entry,
+      meta: normalizeChannelMeta({
+        id: entry.id as ChannelChoice,
+        meta: entry.meta,
       }),
-    );
+    }));
   const installableCatalogEntries = installableCatalogEntriesSource
     .filter(
       (entry) =>
         !installedPluginIds.has(entry.id) &&
         !manifestInstalledIds.has(entry.id as ChannelChoice) &&
-        !isStaticallyChannelConfigured(params.cfg, entry.id, params.env ?? process.env) &&
         shouldShowChannelInSetup(entry.meta),
     )
-    .map((entry) =>
-      Object.assign({}, entry, {
-        meta: normalizeChannelMeta({ id: entry.id as ChannelChoice, meta: entry.meta }),
+    .map((entry) => ({
+      ...entry,
+      meta: normalizeChannelMeta({
+        id: entry.id as ChannelChoice,
+        meta: entry.meta,
       }),
-    );
+    }));
 
   const metaById = new Map<string, ChannelMeta>();
   for (const meta of listChatChannels()) {

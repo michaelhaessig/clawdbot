@@ -1,16 +1,9 @@
 import * as net from "node:net";
 import { Agent, EnvHttpProxyAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { isWSL2Sync } from "../wsl.js";
-import { hasEnvHttpProxyAgentConfigured, resolveEnvHttpProxyAgentOptions } from "./proxy-env.js";
+import { hasEnvHttpProxyConfigured } from "./proxy-env.js";
 
 export const DEFAULT_UNDICI_STREAM_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * Module-level bridge so `resolveDispatcherTimeoutMs` in fetch-guard.ts
- * can read the global dispatcher timeout without relying on Undici's
- * non-public `.options` field.
- */
-export let _globalUndiciStreamTimeoutMs: number | undefined;
 
 const AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT_MS = 300;
 
@@ -89,7 +82,7 @@ function resolveCurrentDispatcherKind(): DispatcherKind | null {
 }
 
 export function ensureGlobalUndiciEnvProxyDispatcher(): void {
-  const shouldUseEnvProxy = hasEnvHttpProxyAgentConfigured();
+  const shouldUseEnvProxy = hasEnvHttpProxyConfigured("https");
   if (!shouldUseEnvProxy) {
     return;
   }
@@ -108,7 +101,7 @@ export function ensureGlobalUndiciEnvProxyDispatcher(): void {
     return;
   }
   try {
-    setGlobalDispatcher(new EnvHttpProxyAgent(resolveEnvHttpProxyAgentOptions()));
+    setGlobalDispatcher(new EnvHttpProxyAgent());
     lastAppliedProxyBootstrap = true;
   } catch {
     // Best-effort bootstrap only.
@@ -117,11 +110,10 @@ export function ensureGlobalUndiciEnvProxyDispatcher(): void {
 
 export function ensureGlobalUndiciStreamTimeouts(opts?: { timeoutMs?: number }): void {
   const timeoutMsRaw = opts?.timeoutMs ?? DEFAULT_UNDICI_STREAM_TIMEOUT_MS;
+  const timeoutMs = Math.max(1, Math.floor(timeoutMsRaw));
   if (!Number.isFinite(timeoutMsRaw)) {
     return;
   }
-  const timeoutMs = Math.max(DEFAULT_UNDICI_STREAM_TIMEOUT_MS, Math.floor(timeoutMsRaw));
-  _globalUndiciStreamTimeoutMs = timeoutMs;
   const kind = resolveCurrentDispatcherKind();
   if (kind === null) {
     return;
@@ -137,7 +129,6 @@ export function ensureGlobalUndiciStreamTimeouts(opts?: { timeoutMs?: number }):
   try {
     if (kind === "env-proxy") {
       const proxyOptions = {
-        ...resolveEnvHttpProxyAgentOptions(),
         bodyTimeout: timeoutMs,
         headersTimeout: timeoutMs,
         ...(connect ? { connect } : {}),
@@ -161,5 +152,4 @@ export function ensureGlobalUndiciStreamTimeouts(opts?: { timeoutMs?: number }):
 export function resetGlobalUndiciStreamTimeoutsForTests(): void {
   lastAppliedTimeoutKey = null;
   lastAppliedProxyBootstrap = false;
-  _globalUndiciStreamTimeoutMs = undefined;
 }

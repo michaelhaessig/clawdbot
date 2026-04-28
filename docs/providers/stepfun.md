@@ -6,6 +6,8 @@ read_when:
 title: "StepFun"
 ---
 
+# StepFun
+
 OpenClaw includes a bundled StepFun provider plugin with two provider ids:
 
 - `stepfun` for the standard endpoint
@@ -24,7 +26,7 @@ Standard and Step Plan are **separate providers** with different endpoints and m
 
 Auth env var: `STEPFUN_API_KEY`
 
-## Built-in catalog
+## Built-in catalogs
 
 Standard (`stepfun`):
 
@@ -126,7 +128,7 @@ Choose your provider surface and follow the setup steps.
   </Tab>
 </Tabs>
 
-## Advanced configuration
+## Advanced
 
 <AccordionGroup>
   <Accordion title="Full config: Standard provider">
@@ -213,7 +215,7 @@ For the broader provider overview, see [Model providers](/concepts/model-provide
 ## Related
 
 <CardGroup cols={2}>
-  <Card title="Model selection" href="/concepts/model-providers" icon="layers">
+  <Card title="Model providers" href="/concepts/model-providers" icon="layers">
     Overview of all providers, model refs, and failover behavior.
   </Card>
   <Card title="Configuration reference" href="/gateway/configuration-reference" icon="gear">

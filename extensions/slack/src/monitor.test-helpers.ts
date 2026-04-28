@@ -1,7 +1,6 @@
 import { Mock, vi } from "vitest";
 
 type SlackHandler = (args: unknown) => Promise<void>;
-type SlackMiddleware = (args: { next: () => Promise<void> } & Record<string, unknown>) => unknown;
 type SlackProviderMonitor = (params: {
   botToken: string;
   appToken: string;
@@ -255,34 +254,8 @@ vi.mock("@slack/bolt", () => {
   const { handlers, client: slackClient } = ensureSlackTestRuntime();
   class App {
     client = slackClient;
-    receiver: unknown;
-    middlewares: SlackMiddleware[] = [];
-
-    constructor(args?: { receiver?: unknown }) {
-      this.receiver = args?.receiver;
-    }
-    use(middleware: SlackMiddleware) {
-      this.middlewares.push(middleware);
-    }
     event(name: string, handler: SlackHandler) {
-      handlers.set(name, async (args: unknown) => {
-        const eventArgs =
-          args && typeof args === "object" && !Array.isArray(args)
-            ? (args as Record<string, unknown>)
-            : {};
-        const run = async (index: number): Promise<void> => {
-          const middleware = this.middlewares[index];
-          if (!middleware) {
-            await handler(args);
-            return;
-          }
-          await middleware({
-            ...eventArgs,
-            next: () => run(index + 1),
-          });
-        };
-        await run(0);
-      });
+      handlers.set(name, handler);
     }
     command() {
       /* no-op */
@@ -293,17 +266,5 @@ vi.mock("@slack/bolt", () => {
   class HTTPReceiver {
     requestListener = vi.fn();
   }
-  class SocketModeReceiver {
-    client = {
-      ...slackClient,
-      on: vi.fn(),
-      off: vi.fn(),
-    };
-  }
-  return {
-    App,
-    HTTPReceiver,
-    SocketModeReceiver,
-    default: { App, HTTPReceiver, SocketModeReceiver },
-  };
+  return { App, HTTPReceiver, default: { App, HTTPReceiver } };
 });

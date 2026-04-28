@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { EMPTY_DISCORD_TEST_CONFIG } from "../test-support/config.js";
 import {
   __testing as threadBindingsTesting,
   createThreadBindingManager,
@@ -24,7 +23,6 @@ describe("thread binding manager state", () => {
     const viaJiti = await loadThreadBindingsViaAlternateLoader();
 
     createThreadBindingManager({
-      cfg: EMPTY_DISCORD_TEST_CONFIG,
       accountId: "work",
       persist: false,
       enableSweeper: false,

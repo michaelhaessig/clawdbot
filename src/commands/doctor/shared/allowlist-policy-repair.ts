@@ -118,9 +118,6 @@ export async function maybeRepairAllowlistPolicyAllowFrom(cfg: OpenClawConfig): 
     if (!channelConfig || typeof channelConfig !== "object") {
       continue;
     }
-    if (channelConfig.enabled === false) {
-      continue;
-    }
     await recoverAllowFromForAccount({
       channelName,
       account: channelConfig,
@@ -133,9 +130,6 @@ export async function maybeRepairAllowlistPolicyAllowFrom(cfg: OpenClawConfig): 
     }
     for (const [accountId, accountConfig] of Object.entries(accounts)) {
       if (!accountConfig || typeof accountConfig !== "object") {
-        continue;
-      }
-      if ((accountConfig as { enabled?: unknown }).enabled === false) {
         continue;
       }
       await recoverAllowFromForAccount({

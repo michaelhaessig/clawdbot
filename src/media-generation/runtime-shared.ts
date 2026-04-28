@@ -1,7 +1,6 @@
 import { listProfilesForProvider } from "../agents/auth-profiles.js";
 import { ensureAuthProfileStore } from "../agents/auth-profiles.js";
 import { DEFAULT_PROVIDER } from "../agents/defaults.js";
-import { describeFailoverError, isFailoverError } from "../agents/failover-error.js";
 import { resolveEnvApiKey } from "../agents/model-auth-env.js";
 import type { FallbackAttempt } from "../agents/model-fallback.types.js";
 import {
@@ -10,7 +9,6 @@ import {
 } from "../config/model-input.js";
 import type { AgentModelConfig } from "../config/types.agents-shared.js";
 import type { OpenClawConfig } from "../config/types.js";
-import { formatErrorMessage } from "../infra/errors.js";
 import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import type {
@@ -28,23 +26,6 @@ export type {
   MediaNormalizationEntry,
   MediaNormalizationValue,
 } from "./normalization.types.js";
-
-export function recordCapabilityCandidateFailure(params: {
-  attempts: FallbackAttempt[];
-  provider: string;
-  model: string;
-  error: unknown;
-}): void {
-  const described = isFailoverError(params.error) ? describeFailoverError(params.error) : undefined;
-  params.attempts.push({
-    provider: params.provider,
-    model: params.model,
-    error: described?.message ?? formatErrorMessage(params.error),
-    reason: described?.reason,
-    status: described?.status,
-    code: described?.code,
-  });
-}
 
 export function hasMediaNormalizationEntry<TValue extends MediaNormalizationValue>(
   entry: MediaNormalizationEntry<TValue> | undefined,
@@ -178,11 +159,6 @@ export function resolveCapabilityModelCandidates(params: {
     candidates.push(parsed);
   };
 
-  const override = params.parseModelRef(params.modelOverride);
-  if (override) {
-    return [override];
-  }
-
   add(params.modelOverride);
   add(resolveAgentModelPrimaryValue(params.modelConfig));
   for (const fallback of resolveAgentModelFallbackValues(params.modelConfig)) {
@@ -226,15 +202,12 @@ function compareScores(
   return next.tertiary.localeCompare(best.tertiary) < 0;
 }
 
-function parsePositiveDimensionPair(
-  raw: string | null | undefined,
-  pattern: RegExp,
-): { width: number; height: number } | null {
+function parseAspectRatioValue(raw?: string | null): ParsedAspectRatio | null {
   const trimmed = normalizeOptionalString(raw);
   if (!trimmed) {
     return null;
   }
-  const match = pattern.exec(trimmed);
+  const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(trimmed);
   if (!match) {
     return null;
   }
@@ -243,31 +216,32 @@ function parsePositiveDimensionPair(
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return null;
   }
-  return { width, height };
-}
-
-function parseAspectRatioValue(raw?: string | null): ParsedAspectRatio | null {
-  const pair = parsePositiveDimensionPair(raw, /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/);
-  if (!pair) {
-    return null;
-  }
   return {
-    width: pair.width,
-    height: pair.height,
-    value: pair.width / pair.height,
+    width,
+    height,
+    value: width / height,
   };
 }
 
 function parseSizeValue(raw?: string | null): ParsedSize | null {
-  const pair = parsePositiveDimensionPair(raw, /^(\d+)\s*x\s*(\d+)$/i);
-  if (!pair) {
+  const trimmed = normalizeOptionalString(raw);
+  if (!trimmed) {
+    return null;
+  }
+  const match = /^(\d+)\s*x\s*(\d+)$/i.exec(trimmed);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return null;
   }
   return {
-    width: pair.width,
-    height: pair.height,
-    aspectRatio: pair.width / pair.height,
-    area: pair.width * pair.height,
+    width,
+    height,
+    aspectRatio: width / height,
+    area: width * height,
   };
 }
 

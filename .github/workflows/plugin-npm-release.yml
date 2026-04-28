@@ -63,6 +63,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
           install-bun: "false"
+          use-sticky-disk: "false"
 
       - name: Resolve checked-out ref
         id: ref
@@ -160,6 +161,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
           install-bun: "false"
+          use-sticky-disk: "false"
           install-deps: "false"
 
       - name: Preview publish command
@@ -194,6 +196,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
           install-bun: "false"
+          use-sticky-disk: "false"
           install-deps: "false"
 
       - name: Ensure version is not already published

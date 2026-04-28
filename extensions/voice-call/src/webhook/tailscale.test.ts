@@ -40,19 +40,6 @@ function createProc(params?: { code?: number; stdout?: string }) {
   return proc;
 }
 
-function createErrorProc() {
-  const proc = new EventEmitter() as EventEmitter & {
-    stdout: EventEmitter;
-    kill: ReturnType<typeof vi.fn>;
-  };
-  proc.stdout = new EventEmitter();
-  proc.kill = vi.fn();
-  setTimeout(() => {
-    proc.emit("error", Object.assign(new Error("spawn tailscale ENOENT"), { code: "ENOENT" }));
-  }, 0);
-  return proc;
-}
-
 describe("voice-call tailscale helpers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -93,12 +80,6 @@ describe("voice-call tailscale helpers", () => {
     await expect(getTailscaleSelfInfo()).resolves.toBeNull();
 
     spawnMock.mockReturnValueOnce(createProc({ stdout: "{not-json" }));
-    await expect(getTailscaleSelfInfo()).resolves.toBeNull();
-  });
-
-  it("treats missing tailscale binary as unavailable instead of leaking spawn errors", async () => {
-    spawnMock.mockReturnValueOnce(createErrorProc());
-
     await expect(getTailscaleSelfInfo()).resolves.toBeNull();
   });
 

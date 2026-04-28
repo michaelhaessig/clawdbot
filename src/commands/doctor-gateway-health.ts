@@ -14,10 +14,6 @@ export type GatewayMemoryProbe = {
   error?: string;
 };
 
-function isGatewayCallTimeout(message: string): boolean {
-  return /^gateway timeout after \d+ms(?:\n|$)/.test(message);
-}
-
 export async function checkGatewayHealth(params: {
   runtime: RuntimeEnv;
   cfg: OpenClawConfig;
@@ -78,7 +74,6 @@ export async function probeGatewayMemoryStatus(params: {
   try {
     const payload = await callGateway<DoctorMemoryStatusPayload>({
       method: "doctor.memory.status",
-      params: { probe: false },
       timeoutMs,
       config: params.cfg,
     });
@@ -89,13 +84,6 @@ export async function probeGatewayMemoryStatus(params: {
     };
   } catch (err) {
     const message = formatErrorMessage(err);
-    if (isGatewayCallTimeout(message)) {
-      return {
-        checked: false,
-        ready: false,
-        error: `gateway memory probe timed out: ${message}`,
-      };
-    }
     return {
       checked: true,
       ready: false,

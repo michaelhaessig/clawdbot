@@ -34,18 +34,14 @@ export function createSecretsHandlers(params: {
     diagnostics: string[];
     inactiveRefPaths: string[];
   }>;
-  log?: {
-    warn?: (message: string) => void;
-  };
 }): GatewayRequestHandlers {
   return {
     "secrets.reload": async ({ respond }) => {
       try {
         const result = await params.reloadSecrets();
         respond(true, { ok: true, warningCount: result.warningCount });
-      } catch {
-        params.log?.warn?.("secrets.reload failed");
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "secrets.reload failed"));
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
       }
     },
     "secrets.resolve": async ({ params: requestParams, respond }) => {
@@ -100,9 +96,8 @@ export function createSecretsHandlers(params: {
           throw new Error("secrets.resolve returned invalid payload.");
         }
         respond(true, payload);
-      } catch {
-        params.log?.warn?.("secrets.resolve failed");
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "secrets.resolve failed"));
+      } catch (err) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
       }
     },
   };

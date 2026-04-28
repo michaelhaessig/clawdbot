@@ -1,6 +1,6 @@
 import { type Bot, GrammyError, InputFile } from "grammy";
-import type { ReplyToMode } from "openclaw/plugin-sdk/config-types";
-import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-types";
+import type { ReplyToMode } from "openclaw/plugin-sdk/config-runtime";
+import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { fireAndForgetHook } from "openclaw/plugin-sdk/hook-runtime";
 import { createInternalHookEvent, triggerInternalHook } from "openclaw/plugin-sdk/hook-runtime";
 import {
@@ -9,19 +9,13 @@ import {
   toPluginMessageContext,
   toPluginMessageSentEvent,
 } from "openclaw/plugin-sdk/hook-runtime";
-import type { ReplyPayloadDelivery } from "openclaw/plugin-sdk/interactive-runtime";
 import { buildOutboundMediaLoadOptions } from "openclaw/plugin-sdk/media-runtime";
 import { isGifMedia, kindFromMime } from "openclaw/plugin-sdk/media-runtime";
-import {
-  createOutboundPayloadPlan,
-  projectOutboundPayloadPlanForDelivery,
-} from "openclaw/plugin-sdk/outbound-runtime";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
-import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
-import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
 import type { TelegramInlineButtons } from "../button-types.js";
@@ -40,7 +34,6 @@ import {
   sendTelegramWithThreadFallback,
 } from "./delivery.send.js";
 import { resolveTelegramReplyId, type TelegramThreadSpec } from "./helpers.js";
-import type { TelegramNativeQuoteCandidateByMessageId } from "./native-quote.js";
 import {
   markReplyApplied,
   resolveReplyToForSend,
@@ -48,11 +41,10 @@ import {
   type DeliveryProgress as ReplyThreadDeliveryProgress,
 } from "./reply-threading.js";
 
-const VOICE_FORBIDDEN_MARKER = "VOICE_MESSAGES_FORBIDDEN";
+const VOICE_FORBIDDEN_RE = /VOICE_MESSAGES_FORBIDDEN/;
 const CAPTION_TOO_LONG_RE = /caption is too long/i;
 const GrammyErrorCtor: typeof GrammyError | undefined =
   typeof GrammyError === "function" ? GrammyError : undefined;
-const silentReplyLogger = createSubsystemLogger("telegram/silent-reply");
 
 type DeliveryProgress = ReplyThreadDeliveryProgress & {
   deliveredCount: number;
@@ -61,13 +53,6 @@ type DeliveryProgress = ReplyThreadDeliveryProgress & {
 type TelegramReplyChannelData = {
   buttons?: TelegramInlineButtons;
   pin?: boolean;
-};
-
-type TelegramReplyQuoteForSend = {
-  messageId?: number;
-  text?: string;
-  position?: number;
-  entities?: unknown[];
 };
 
 type ChunkTextFn = (markdown: string) => ReturnType<typeof markdownToTelegramChunks>;
@@ -113,46 +98,6 @@ function filterEmptyTelegramTextChunks<T extends { text: string }>(chunks: reado
   return chunks.filter((chunk) => chunk.text.trim().length > 0);
 }
 
-function resolveReplyQuoteForSend(params: {
-  replyToId?: number;
-  replyQuoteByMessageId?: TelegramNativeQuoteCandidateByMessageId;
-  replyQuoteMessageId?: number;
-  replyQuoteText?: string;
-  replyQuotePosition?: number;
-  replyQuoteEntities?: unknown[];
-}): TelegramReplyQuoteForSend {
-  if (params.replyToId != null) {
-    const mapped = params.replyQuoteByMessageId?.[String(params.replyToId)];
-    if (mapped?.text) {
-      const quote: TelegramReplyQuoteForSend = {
-        messageId: params.replyToId,
-        text: mapped.text,
-      };
-      if (typeof mapped.position === "number") {
-        quote.position = mapped.position;
-      }
-      if (mapped.entities) {
-        quote.entities = mapped.entities;
-      }
-      return quote;
-    }
-  }
-  const quote: TelegramReplyQuoteForSend = {};
-  if (params.replyQuoteMessageId != null) {
-    quote.messageId = params.replyQuoteMessageId;
-  }
-  if (params.replyQuoteText != null) {
-    quote.text = params.replyQuoteText;
-  }
-  if (params.replyQuotePosition != null) {
-    quote.position = params.replyQuotePosition;
-  }
-  if (params.replyQuoteEntities != null) {
-    quote.entities = params.replyQuoteEntities;
-  }
-  return quote;
-}
-
 async function deliverTextReply(params: {
   bot: Bot;
   chatId: string;
@@ -161,10 +106,7 @@ async function deliverTextReply(params: {
   chunkText: ChunkTextFn;
   replyText: string;
   replyMarkup?: ReturnType<typeof buildInlineKeyboard>;
-  replyQuoteMessageId?: number;
   replyQuoteText?: string;
-  replyQuotePosition?: number;
-  replyQuoteEntities?: unknown[];
   linkPreview?: boolean;
   silent?: boolean;
   replyToId?: number;
@@ -189,10 +131,7 @@ async function deliverTextReply(params: {
         params.runtime,
         {
           replyToMessageId,
-          replyQuoteMessageId: params.replyQuoteMessageId,
           replyQuoteText,
-          replyQuotePosition: params.replyQuotePosition,
-          replyQuoteEntities: params.replyQuoteEntities,
           thread: params.thread,
           textMode: "html",
           plainText: chunk.text,
@@ -247,9 +186,9 @@ async function sendPendingFollowUpText(params: {
 
 function isVoiceMessagesForbidden(err: unknown): boolean {
   if (GrammyErrorCtor && err instanceof GrammyErrorCtor) {
-    return err.description.includes(VOICE_FORBIDDEN_MARKER);
+    return VOICE_FORBIDDEN_RE.test(err.description);
   }
-  return formatErrorMessage(err).includes(VOICE_FORBIDDEN_MARKER);
+  return VOICE_FORBIDDEN_RE.test(formatErrorMessage(err));
 }
 
 function isCaptionTooLong(err: unknown): boolean {
@@ -266,9 +205,6 @@ async function sendTelegramVoiceFallbackText(opts: {
   text: string;
   chunkText: (markdown: string) => ReturnType<typeof markdownToTelegramChunks>;
   replyToId?: number;
-  replyQuoteMessageId?: number;
-  replyQuotePosition?: number;
-  replyQuoteEntities?: unknown[];
   thread?: TelegramThreadSpec | null;
   linkPreview?: boolean;
   silent?: boolean;
@@ -282,13 +218,9 @@ async function sendTelegramVoiceFallbackText(opts: {
     const chunk = chunks[i];
     // Only apply reply reference, quote text, and buttons to the first chunk.
     const replyToForChunk = !appliedReplyTo ? opts.replyToId : undefined;
-    const applyQuoteForChunk = !appliedReplyTo;
     const messageId = await sendTelegramText(opts.bot, opts.chatId, chunk.html, opts.runtime, {
       replyToMessageId: replyToForChunk,
-      replyQuoteMessageId: applyQuoteForChunk ? opts.replyQuoteMessageId : undefined,
-      replyQuoteText: applyQuoteForChunk ? opts.replyQuoteText : undefined,
-      replyQuotePosition: applyQuoteForChunk ? opts.replyQuotePosition : undefined,
-      replyQuoteEntities: applyQuoteForChunk ? opts.replyQuoteEntities : undefined,
+      replyQuoteText: !appliedReplyTo ? opts.replyQuoteText : undefined,
       thread: opts.thread,
       textMode: "html",
       plainText: chunk.text,
@@ -320,10 +252,7 @@ async function deliverMediaReply(params: {
   onVoiceRecording?: () => Promise<void> | void;
   linkPreview?: boolean;
   silent?: boolean;
-  replyQuoteMessageId?: number;
   replyQuoteText?: string;
-  replyQuotePosition?: number;
-  replyQuoteEntities?: unknown[];
   replyMarkup?: ReturnType<typeof buildInlineKeyboard>;
   replyToId?: number;
   replyToMode: ReplyToMode;
@@ -367,10 +296,6 @@ async function deliverMediaReply(params: {
       ...(shouldAttachButtonsToMedia ? { reply_markup: params.replyMarkup } : {}),
       ...buildTelegramSendParams({
         replyToMessageId,
-        replyQuoteMessageId: params.replyQuoteMessageId,
-        replyQuoteText: params.replyQuoteText,
-        replyQuotePosition: params.replyQuotePosition,
-        replyQuoteEntities: params.replyQuoteEntities,
         thread: params.thread,
         silent: params.silent,
       }),
@@ -464,9 +389,6 @@ async function deliverMediaReply(params: {
               text: fallbackText,
               chunkText: params.chunkText,
               replyToId: voiceFallbackReplyTo,
-              replyQuoteMessageId: params.replyQuoteMessageId,
-              replyQuotePosition: params.replyQuotePosition,
-              replyQuoteEntities: params.replyQuoteEntities,
               thread: params.thread,
               linkPreview: params.linkPreview,
               silent: params.silent,
@@ -559,20 +481,18 @@ async function deliverMediaReply(params: {
 }
 
 async function maybePinFirstDeliveredMessage(params: {
-  pin: ReplyPayloadDelivery["pin"];
+  shouldPin: boolean;
   bot: Bot;
   chatId: string;
   runtime: RuntimeEnv;
   firstDeliveredMessageId?: number;
 }): Promise<void> {
-  const shouldPin = params.pin === true || (typeof params.pin === "object" && params.pin.enabled);
-  if (!shouldPin || typeof params.firstDeliveredMessageId !== "number") {
+  if (!params.shouldPin || typeof params.firstDeliveredMessageId !== "number") {
     return;
   }
-  const notify = typeof params.pin === "object" && params.pin.notify === true;
   try {
     await params.bot.api.pinChatMessage(params.chatId, params.firstDeliveredMessageId, {
-      disable_notification: !notify,
+      disable_notification: true,
     });
   } catch (err) {
     logVerbose(
@@ -661,11 +581,9 @@ export function emitTelegramMessageSentHooks(params: EmitMessageSentHookParams):
 
 export async function deliverReplies(params: {
   replies: ReplyPayload[];
-  cfg?: import("openclaw/plugin-sdk/config-types").OpenClawConfig;
   chatId: string;
   accountId?: string;
   sessionKeyForInternalHooks?: string;
-  policySessionKey?: string;
   mirrorIsGroup?: boolean;
   mirrorGroupId?: string;
   token: string;
@@ -683,16 +601,8 @@ export async function deliverReplies(params: {
   linkPreview?: boolean;
   /** When true, messages are sent with disable_notification. */
   silent?: boolean;
-  /** Message id that the optional quote text belongs to. */
-  replyQuoteMessageId?: number;
   /** Optional quote text for Telegram reply_parameters. */
   replyQuoteText?: string;
-  /** UTF-16 position of the selected quote in the original Telegram message. */
-  replyQuotePosition?: number;
-  /** Telegram entities that belong to the selected quote text. */
-  replyQuoteEntities?: unknown[];
-  /** Native Telegram quote candidates keyed by message id. */
-  replyQuoteByMessageId?: TelegramNativeQuoteCandidateByMessageId;
   /** Override media loader (tests). */
   mediaLoader?: typeof loadWebMedia;
 }): Promise<{ delivered: boolean }> {
@@ -710,34 +620,7 @@ export async function deliverReplies(params: {
     chunkMode: params.chunkMode ?? "length",
     tableMode: params.tableMode,
   });
-  const candidateReplies: ReplyPayload[] = [];
-  for (const reply of params.replies) {
-    if (!reply || typeof reply !== "object") {
-      params.runtime.error?.(danger("reply missing text/media"));
-      continue;
-    }
-    candidateReplies.push(reply);
-  }
-  const normalizedReplies = projectOutboundPayloadPlanForDelivery(
-    createOutboundPayloadPlan(candidateReplies, {
-      cfg: params.cfg,
-      sessionKey: params.policySessionKey ?? params.sessionKeyForInternalHooks,
-      surface: "telegram",
-    }),
-  );
-  const originalExactSilentCount = candidateReplies.filter(
-    (reply) => typeof reply.text === "string" && reply.text.trim().toUpperCase() === "NO_REPLY",
-  ).length;
-  if (originalExactSilentCount > 0) {
-    silentReplyLogger.debug("telegram delivery normalized NO_REPLY candidates", {
-      hasSessionKey: Boolean(params.sessionKeyForInternalHooks),
-      hasChatId: params.chatId.length > 0,
-      originalCount: candidateReplies.length,
-      normalizedCount: normalizedReplies.length,
-      originalExactSilentCount,
-    });
-  }
-  for (const originalReply of normalizedReplies) {
+  for (const originalReply of params.replies) {
     let reply = originalReply;
     const mediaList = reply?.mediaUrls?.length
       ? reply.mediaUrls
@@ -755,23 +638,11 @@ export async function deliverReplies(params: {
     }
 
     const rawContent = reply.text || "";
-    const replyToId =
-      params.replyToMode === "off" ? undefined : resolveTelegramReplyId(reply.replyToId);
-    const replyQuote = resolveReplyQuoteForSend({
-      replyToId,
-      replyQuoteByMessageId: params.replyQuoteByMessageId,
-      replyQuoteMessageId: params.replyQuoteMessageId,
-      replyQuoteText: params.replyQuoteText,
-      replyQuotePosition: params.replyQuotePosition,
-      replyQuoteEntities: params.replyQuoteEntities,
-    });
     if (hasMessageSendingHooks) {
       const hookResult = await hookRunner?.runMessageSending(
         {
           to: params.chatId,
           content: rawContent,
-          replyToId,
-          threadId: params.thread?.id,
           metadata: {
             channel: "telegram",
             mediaUrls: mediaList,
@@ -796,7 +667,10 @@ export async function deliverReplies(params: {
 
     try {
       const deliveredCountBeforeReply = progress.deliveredCount;
+      const replyToId =
+        params.replyToMode === "off" ? undefined : resolveTelegramReplyId(reply.replyToId);
       const telegramData = reply.channelData?.telegram as TelegramReplyChannelData | undefined;
+      const shouldPinFirstMessage = telegramData?.pin === true;
       const replyMarkup = buildInlineKeyboard(telegramData?.buttons);
       let firstDeliveredMessageId: number | undefined;
       if (mediaList.length === 0) {
@@ -808,10 +682,7 @@ export async function deliverReplies(params: {
           chunkText,
           replyText: reply.text || "",
           replyMarkup,
-          replyQuoteMessageId: replyQuote.messageId,
-          replyQuoteText: replyQuote.text,
-          replyQuotePosition: replyQuote.position,
-          replyQuoteEntities: replyQuote.entities,
+          replyQuoteText: params.replyQuoteText,
           linkPreview: params.linkPreview,
           silent: params.silent,
           replyToId,
@@ -833,10 +704,7 @@ export async function deliverReplies(params: {
           onVoiceRecording: params.onVoiceRecording,
           linkPreview: params.linkPreview,
           silent: params.silent,
-          replyQuoteMessageId: replyQuote.messageId,
-          replyQuoteText: replyQuote.text,
-          replyQuotePosition: replyQuote.position,
-          replyQuoteEntities: replyQuote.entities,
+          replyQuoteText: params.replyQuoteText,
           replyMarkup,
           replyToId,
           replyToMode: params.replyToMode,
@@ -844,7 +712,7 @@ export async function deliverReplies(params: {
         });
       }
       await maybePinFirstDeliveredMessage({
-        pin: reply.delivery?.pin,
+        shouldPin: shouldPinFirstMessage,
         bot: params.bot,
         chatId: params.chatId,
         runtime: params.runtime,

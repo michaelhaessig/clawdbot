@@ -58,7 +58,7 @@ export type MessageReceivedHookContext = {
   content: string;
   /** Unix timestamp when the message was received */
   timestamp?: number;
-  /** Channel identifier (for example "chat" or "support-chat") */
+  /** Channel identifier (e.g., "telegram", "whatsapp") */
   channelId: string;
   /** Provider account ID for multi-account setups */
   accountId?: string;
@@ -85,7 +85,7 @@ export type MessageSentHookContext = {
   success: boolean;
   /** Error message if sending failed */
   error?: string;
-  /** Channel identifier (for example "chat" or "support-chat") */
+  /** Channel identifier (e.g., "telegram", "whatsapp") */
   channelId: string;
   /** Provider account ID for multi-account setups */
   accountId?: string;
@@ -116,7 +116,7 @@ type MessageEnrichedBodyHookContext = {
   bodyForAgent?: string;
   /** Unix timestamp when the message was received */
   timestamp?: number;
-  /** Channel identifier (for example "chat" or "support-chat") */
+  /** Channel identifier (e.g., "telegram", "whatsapp") */
   channelId: string;
   /** Conversation/chat ID */
   conversationId?: string;

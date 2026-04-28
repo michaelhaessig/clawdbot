@@ -3,7 +3,6 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { AuthProfileStore } from "./types.js";
 
 vi.mock("../cli-credentials.js", () => ({
-  readClaudeCliCredentialsCached: () => null,
   readCodexCliCredentialsCached: () => null,
   readMiniMaxCliCredentialsCached: () => null,
   resetCliCredentialCachesForTest: () => undefined,
@@ -117,10 +116,6 @@ afterAll(() => {
   vi.doUnmock("../../plugins/provider-runtime.runtime.js");
 });
 
-function createUsableOAuthExpiry(): number {
-  return Date.now() + 30 * 60 * 1000;
-}
-
 describe("resolveApiKeyForProfile config compatibility", () => {
   it("accepts token credentials when config mode is oauth", async () => {
     const profileId = "anthropic:token";
@@ -188,7 +183,7 @@ describe("resolveApiKeyForProfile config compatibility", () => {
           provider: "anthropic",
           access: "access-123",
           refresh: "refresh-123",
-          expires: createUsableOAuthExpiry(),
+          expires: Date.now() + 60_000,
         },
       },
     };

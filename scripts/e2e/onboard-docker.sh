@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$ROOT_DIR/scripts/lib/docker-e2e-image.sh"
-IMAGE_NAME="$(docker_e2e_resolve_image "openclaw-onboard-e2e" OPENCLAW_ONBOARD_E2E_IMAGE)"
+source "$ROOT_DIR/scripts/lib/docker-e2e-logs.sh"
+IMAGE_NAME="openclaw-onboard-e2e"
 
-docker_e2e_build_or_reuse "$IMAGE_NAME" onboard
+echo "Building Docker image..."
+run_logged onboard-build docker build -t "$IMAGE_NAME" -f "$ROOT_DIR/scripts/e2e/Dockerfile" "$ROOT_DIR"
 
 echo "Running onboarding E2E..."
 docker run --rm -t "$IMAGE_NAME" bash -lc '

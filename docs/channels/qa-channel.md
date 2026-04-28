@@ -1,22 +1,35 @@
 ---
+title: "QA Channel"
 summary: "Synthetic Slack-class channel plugin for deterministic OpenClaw QA scenarios"
-title: "QA channel"
 read_when:
   - You are wiring the synthetic QA transport into a local or CI test run
   - You need the bundled qa-channel config surface
   - You are iterating on end-to-end QA automation
 ---
 
-`qa-channel` is a bundled synthetic message transport for automated OpenClaw QA. It is not a production channel — it exists to exercise the same channel plugin boundary used by real transports while keeping state deterministic and fully inspectable.
+# QA Channel
 
-## What it does
+`qa-channel` is a bundled synthetic message transport for automated OpenClaw QA.
+
+It is not a production channel. It exists to exercise the same channel plugin
+boundary used by real transports while keeping state deterministic and fully
+inspectable.
+
+## What it does today
 
 - Slack-class target grammar:
   - `dm:<user>`
   - `channel:<room>`
   - `thread:<room>/<thread>`
-- HTTP-backed synthetic bus for inbound message injection, outbound transcript capture, thread creation, reactions, edits, deletes, and search/read actions.
-- Host-side self-check runner that writes a Markdown report to `.artifacts/qa-e2e/`.
+- HTTP-backed synthetic bus for:
+  - inbound message injection
+  - outbound transcript capture
+  - thread creation
+  - reactions
+  - edits
+  - deletes
+  - search and read actions
+- Bundled host-side self-check runner that writes a Markdown report
 
 ## Config
 
@@ -34,53 +47,62 @@ read_when:
 }
 ```
 
-Account keys:
+Supported account keys:
 
-- `enabled` — master toggle for this account.
-- `name` — optional display label.
-- `baseUrl` — synthetic bus URL.
-- `botUserId` — Matrix-style bot user id used in target grammar.
-- `botDisplayName` — display name for outbound messages.
-- `pollTimeoutMs` — long-poll wait window. Integer between 100 and 30000.
-- `allowFrom` — sender allowlist (user ids or `"*"`).
-- `defaultTo` — fallback target when none is supplied.
-- `actions.messages` / `actions.reactions` / `actions.search` / `actions.threads` — per-action tool gating.
+- `baseUrl`
+- `botUserId`
+- `botDisplayName`
+- `pollTimeoutMs`
+- `allowFrom`
+- `defaultTo`
+- `actions.messages`
+- `actions.reactions`
+- `actions.search`
+- `actions.threads`
 
-Multi-account keys at the top level:
+## Runner
 
-- `accounts` — record of named per-account overrides keyed by account id.
-- `defaultAccount` — preferred account id when multiple are configured.
-
-## Runners
-
-Host-side self-check (writes a Markdown report under `.artifacts/qa-e2e/`):
+Current vertical slice:
 
 ```bash
 pnpm qa:e2e
 ```
 
-This routes through `qa-lab`, starts the in-repo QA bus, boots the bundled `qa-channel` runtime slice, and runs a deterministic self-check.
+This now routes through the bundled `qa-lab` extension. It starts the in-repo
+QA bus, boots the bundled `qa-channel` runtime slice, runs a deterministic
+self-check, and writes a Markdown report under `.artifacts/qa-e2e/`.
 
-Full repo-backed scenario suite:
-
-```bash
-pnpm openclaw qa suite
-```
-
-Runs scenarios in parallel against the QA gateway lane. See [QA overview](/concepts/qa-e2e-automation) for scenarios, profiles, and provider modes.
-
-Docker-backed QA site (gateway + QA Lab debugger UI in one stack):
+Private debugger UI:
 
 ```bash
 pnpm qa:lab:up
 ```
 
-Builds the QA site, starts the Docker-backed gateway + QA Lab stack, and prints the QA Lab URL. From there you can pick scenarios, choose the model lane, launch individual runs, and watch results live. The QA Lab debugger is separate from the shipped Control UI bundle.
+That one command builds the QA site, starts the Docker-backed gateway + QA Lab
+stack, and prints the QA Lab URL. From that site you can pick scenarios, choose
+the model lane, launch individual runs, and watch results live.
 
-## Related
+Full repo-backed QA suite:
 
-- [QA overview](/concepts/qa-e2e-automation) — overall stack, transport adapters, scenario authoring
-- [Matrix QA](/concepts/qa-matrix) — example live-transport runner that drives a real channel
-- [Pairing](/channels/pairing)
-- [Groups](/channels/groups)
-- [Channels overview](/channels)
+```bash
+pnpm openclaw qa suite
+```
+
+That launches the private QA debugger at a local URL, separate from the
+shipped Control UI bundle.
+
+## Scope
+
+Current scope is intentionally narrow:
+
+- bus + plugin transport
+- threaded routing grammar
+- channel-owned message actions
+- Markdown reporting
+- Docker-backed QA site with run controls
+
+Follow-up work will add:
+
+- provider/model matrix execution
+- richer scenario discovery
+- OpenClaw-native orchestration later

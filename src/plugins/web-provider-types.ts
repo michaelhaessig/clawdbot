@@ -1,4 +1,3 @@
-import type { TSchema } from "typebox";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type {
@@ -13,13 +12,13 @@ export type WebFetchProviderId = string;
 
 export type WebSearchProviderToolDefinition = {
   description: string;
-  parameters: TSchema;
+  parameters: Record<string, unknown>;
   execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
 export type WebFetchProviderToolDefinition = {
   description: string;
-  parameters: TSchema;
+  parameters: Record<string, unknown>;
   execute: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 

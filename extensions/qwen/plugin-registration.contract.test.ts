@@ -2,7 +2,7 @@ import { describePluginRegistrationContract } from "../../test/helpers/plugins/p
 
 describePluginRegistrationContract({
   pluginId: "qwen",
-  providerIds: ["qwen", "qwencloud", "modelstudio", "dashscope"],
+  providerIds: ["qwen"],
   mediaUnderstandingProviderIds: ["qwen"],
   videoGenerationProviderIds: ["qwen"],
   requireDescribeImages: true,

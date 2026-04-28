@@ -1,11 +1,10 @@
+import { Type } from "@sinclair/typebox";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import { OPENAI_COMPATIBLE_REPLAY_HOOKS } from "openclaw/plugin-sdk/provider-model-shared";
 import { defaultToolStreamExtraParams } from "openclaw/plugin-sdk/provider-stream-shared";
 import { jsonResult, readProviderEnvValue } from "openclaw/plugin-sdk/provider-web-search";
-import { Type } from "typebox";
 import {
   applyXaiModelCompat,
-  buildXaiImageGenerationProvider,
   normalizeXaiModelId,
   resolveXaiTransport,
   resolveXaiModelCompatPatch,
@@ -14,12 +13,9 @@ import {
 import { applyXaiConfig, XAI_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildXaiProvider } from "./provider-catalog.js";
 import { isModernXaiModel, resolveXaiForwardCompatModel } from "./provider-models.js";
-import { buildXaiRealtimeTranscriptionProvider } from "./realtime-transcription-provider.js";
-import { buildXaiSpeechProvider } from "./speech-provider.js";
 import { resolveFallbackXaiAuth } from "./src/tool-auth-shared.js";
 import { resolveEffectiveXSearchConfig } from "./src/x-search-config.js";
 import { wrapXaiProviderStream } from "./stream.js";
-import { buildXaiMediaUnderstandingProvider } from "./stt.js";
 import { buildXaiVideoGenerationProvider } from "./video-generation-provider.js";
 import { createXaiWebSearchProvider } from "./web-search.js";
 import {
@@ -28,22 +24,6 @@ import {
 } from "./x-search-tool-shared.js";
 
 const PROVIDER_ID = "xai";
-type CodeExecutionModule = typeof import("./code-execution.js");
-type XSearchModule = typeof import("./x-search.js");
-
-let codeExecutionModulePromise: Promise<CodeExecutionModule> | undefined;
-let xSearchModulePromise: Promise<XSearchModule> | undefined;
-
-function loadCodeExecutionModule(): Promise<CodeExecutionModule> {
-  codeExecutionModulePromise ??= import("./code-execution.js");
-  return codeExecutionModulePromise;
-}
-
-function loadXSearchModule(): Promise<XSearchModule> {
-  xSearchModulePromise ??= import("./x-search.js");
-  return xSearchModulePromise;
-}
-
 function hasResolvableXaiApiKey(config: unknown): boolean {
   return Boolean(
     resolveFallbackXaiAuth(config as never)?.apiKey || readProviderEnvValue(["XAI_API_KEY"]),
@@ -109,7 +89,7 @@ function createLazyCodeExecutionTool(ctx: {
       }),
     }),
     execute: async (toolCallId: string, args: Record<string, unknown>) => {
-      const { createCodeExecutionTool } = await loadCodeExecutionModule();
+      const { createCodeExecutionTool } = await import("./code-execution.js");
       const tool = createCodeExecutionTool({
         config: ctx.config as never,
         runtimeConfig: (ctx.runtimeConfig as never) ?? null,
@@ -137,7 +117,7 @@ function createLazyXSearchTool(ctx: {
   }
 
   return createXSearchToolDefinition(async (toolCallId: string, args: Record<string, unknown>) => {
-    const { createXSearchTool } = await loadXSearchModule();
+    const { createXSearchTool } = await import("./x-search.js");
     const tool = createXSearchTool({
       config: ctx.config as never,
       runtimeConfig: (ctx.runtimeConfig as never) ?? null,
@@ -201,16 +181,11 @@ export default defineSingleProviderPluginEntry({
       shouldContributeXaiCompat({ modelId, model }) ? resolveXaiModelCompatPatch() : undefined,
     normalizeModelId: ({ modelId }) => normalizeXaiModelId(modelId),
     resolveDynamicModel: (ctx) => resolveXaiForwardCompatModel({ providerId: PROVIDER_ID, ctx }),
-    resolveThinkingProfile: () => ({ levels: [{ id: "off" }], defaultLevel: "off" }),
     isModernModelRef: ({ modelId }) => isModernXaiModel(modelId),
   },
   register(api) {
     api.registerWebSearchProvider(createXaiWebSearchProvider());
-    api.registerMediaUnderstandingProvider(buildXaiMediaUnderstandingProvider());
     api.registerVideoGenerationProvider(buildXaiVideoGenerationProvider());
-    api.registerImageGenerationProvider(buildXaiImageGenerationProvider());
-    api.registerSpeechProvider(buildXaiSpeechProvider());
-    api.registerRealtimeTranscriptionProvider(buildXaiRealtimeTranscriptionProvider());
     api.registerTool((ctx) => createLazyCodeExecutionTool(ctx), { name: "code_execution" });
     api.registerTool((ctx) => createLazyXSearchTool(ctx), { name: "x_search" });
   },

@@ -3,8 +3,10 @@ summary: "Usage tracking surfaces and credential requirements"
 read_when:
   - You are wiring provider usage/quota surfaces
   - You need to explain usage tracking behavior or auth requirements
-title: "Usage tracking"
+title: "Usage Tracking"
 ---
+
+# Usage tracking
 
 ## What it is
 
@@ -55,9 +57,3 @@ Usage is hidden when no usable provider usage auth can be resolved. Providers
 can supply plugin-specific usage auth logic; otherwise OpenClaw falls back to
 matching OAuth/API-key credentials from auth profiles, environment variables,
 or config.
-
-## Related
-
-- [Token use and costs](/reference/token-use)
-- [API usage and costs](/reference/api-usage-costs)
-- [Prompt caching](/reference/prompt-caching)

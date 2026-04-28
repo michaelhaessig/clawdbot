@@ -4,9 +4,11 @@ read_when:
   - Understanding what happens on the first agent run
   - Explaining where bootstrapping files live
   - Debugging onboarding identity setup
-title: "Agent bootstrapping"
+title: "Agent Bootstrapping"
 sidebarTitle: "Bootstrapping"
 ---
+
+# Agent Bootstrapping
 
 Bootstrapping is the **first‑run** ritual that prepares an agent workspace and
 collects identity details. It happens after onboarding, when the agent starts
@@ -21,10 +23,6 @@ On the first agent run, OpenClaw bootstraps the workspace (default
 - Runs a short Q&A ritual (one question at a time).
 - Writes identity + preferences to `IDENTITY.md`, `USER.md`, `SOUL.md`.
 - Removes `BOOTSTRAP.md` when finished so it only runs once.
-
-## Skipping bootstrapping
-
-To skip this for a pre-seeded workspace, run `openclaw onboard --skip-bootstrap`.
 
 ## Where it runs
 

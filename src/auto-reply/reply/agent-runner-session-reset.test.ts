@@ -7,10 +7,44 @@ import {
   resetReplyRunSession,
   setAgentRunnerSessionResetTestDeps,
 } from "./agent-runner-session-reset.js";
-import { createTestFollowupRun, writeTestSessionStore } from "./agent-runner.test-fixtures.js";
+import type { FollowupRun } from "./queue.js";
 
 const refreshQueuedFollowupSessionMock = vi.fn();
 const errorMock = vi.fn();
+
+function createFollowupRun(): FollowupRun {
+  return {
+    prompt: "hello",
+    summaryLine: "hello",
+    enqueuedAt: Date.now(),
+    run: {
+      sessionId: "session",
+      sessionKey: "main",
+      messageProvider: "whatsapp",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp",
+      config: {},
+      skillsSnapshot: {},
+      provider: "anthropic",
+      model: "claude",
+      thinkLevel: "low",
+      verboseLevel: "off",
+      elevatedLevel: "off",
+      bashElevated: { enabled: false, allowed: false, defaultLevel: "off" },
+      timeoutMs: 1_000,
+      blockReplyBreak: "message_end",
+    },
+  } as unknown as FollowupRun;
+}
+
+async function writeSessionStore(
+  storePath: string,
+  sessionKey: string,
+  entry: SessionEntry,
+): Promise<void> {
+  await fs.mkdir(path.dirname(storePath), { recursive: true });
+  await fs.writeFile(storePath, JSON.stringify({ [sessionKey]: entry }, null, 2), "utf8");
+}
 
 describe("resetReplyRunSession", () => {
   let rootDir = "";
@@ -53,8 +87,8 @@ describe("resetReplyRunSession", () => {
       },
     };
     const sessionStore = { main: sessionEntry };
-    const followupRun = createTestFollowupRun();
-    await writeTestSessionStore(storePath, "main", sessionEntry);
+    const followupRun = createFollowupRun();
+    await writeSessionStore(storePath, "main", sessionEntry);
 
     let activeSessionEntry: SessionEntry | undefined = sessionEntry;
     let isNewSession = false;
@@ -113,7 +147,7 @@ describe("resetReplyRunSession", () => {
       sessionFile: oldTranscriptPath,
     };
     const sessionStore = { main: sessionEntry };
-    await writeTestSessionStore(storePath, "main", sessionEntry);
+    await writeSessionStore(storePath, "main", sessionEntry);
 
     await resetReplyRunSession({
       options: {
@@ -126,7 +160,7 @@ describe("resetReplyRunSession", () => {
       activeSessionEntry: sessionEntry,
       activeSessionStore: sessionStore,
       storePath,
-      followupRun: createTestFollowupRun(),
+      followupRun: createFollowupRun(),
       onActiveSessionEntry: () => {},
       onNewSession: () => {},
     });

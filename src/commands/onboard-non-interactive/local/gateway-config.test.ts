@@ -33,29 +33,6 @@ const SAMPLE_SECRET_REF = {
   id: "OPENCLAW_GATEWAY_TOKEN_REF",
 };
 
-function createTokenConfig(token: unknown): OpenClawConfig {
-  return {
-    gateway: { auth: { mode: "token", token } },
-  } as unknown as OpenClawConfig;
-}
-
-function applyGatewayConfig({
-  nextConfig = {} as OpenClawConfig,
-  opts = baseOpts,
-  runtime = createRuntime(),
-}: {
-  nextConfig?: OpenClawConfig;
-  opts?: OnboardOptions;
-  runtime?: ReturnType<typeof createRuntime>;
-} = {}) {
-  return applyNonInteractiveGatewayConfig({
-    nextConfig,
-    opts,
-    runtime: runtime as never,
-    defaultPort: 18789,
-  });
-}
-
 describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   const originalEnvToken = process.env.OPENCLAW_GATEWAY_TOKEN;
   const originalRefValue = process.env[SAMPLE_SECRET_REF.id];
@@ -82,9 +59,16 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   // --- Plaintext preservation (the original regression) ---
 
   it("preserves existing plaintext gateway.auth.token when no flag or env override is provided", () => {
-    const nextConfig = createTokenConfig("existing-user-token");
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: "existing-user-token" } },
+    } as OpenClawConfig;
 
-    const result = applyGatewayConfig({ nextConfig });
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toBe("existing-user-token");
     expect(randomToken).not.toHaveBeenCalled();
@@ -94,20 +78,31 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
     // A stale shell/launchd OPENCLAW_GATEWAY_TOKEN must not rotate a
     // persisted token — that would break already-paired clients.
     process.env.OPENCLAW_GATEWAY_TOKEN = "stale-env-token";
-    const nextConfig = createTokenConfig("existing-user-token");
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: "existing-user-token" } },
+    } as OpenClawConfig;
 
-    const result = applyGatewayConfig({ nextConfig });
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toBe("existing-user-token");
     expect(randomToken).not.toHaveBeenCalled();
   });
 
   it("prefers --gateway-token flag over existing plaintext token", () => {
-    const nextConfig = createTokenConfig("existing-user-token");
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: "existing-user-token" } },
+    } as OpenClawConfig;
 
-    const result = applyGatewayConfig({
+    const result = applyNonInteractiveGatewayConfig({
       nextConfig,
       opts: { gatewayToken: "flag-token" } as OnboardOptions,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
     });
 
     expect(result?.nextConfig.gateway?.auth?.token).toBe("flag-token");
@@ -117,14 +112,24 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   it("uses OPENCLAW_GATEWAY_TOKEN to fill an empty config on first-run", () => {
     process.env.OPENCLAW_GATEWAY_TOKEN = "env-token";
 
-    const result = applyGatewayConfig();
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig: {} as OpenClawConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toBe("env-token");
     expect(randomToken).not.toHaveBeenCalled();
   });
 
   it("generates a random token only when flag, env, and existing config are all empty", () => {
-    const result = applyGatewayConfig();
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig: {} as OpenClawConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(randomToken).toHaveBeenCalledOnce();
     expect(result?.nextConfig.gateway?.auth?.token).toBe("generated-random-token");
@@ -133,9 +138,16 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   // --- SecretRef preservation ---
 
   it("preserves an existing SecretRef when no flag or env override is provided", () => {
-    const nextConfig = createTokenConfig(SAMPLE_SECRET_REF);
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: SAMPLE_SECRET_REF } },
+    } as unknown as OpenClawConfig;
 
-    const result = applyGatewayConfig({ nextConfig });
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toEqual(SAMPLE_SECRET_REF);
     expect(randomToken).not.toHaveBeenCalled();
@@ -144,9 +156,16 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   it("preserves an existing SecretRef even when ambient OPENCLAW_GATEWAY_TOKEN is set", () => {
     // A stale ambient env must not declassify a configured SecretRef.
     process.env.OPENCLAW_GATEWAY_TOKEN = "stale-env-token";
-    const nextConfig = createTokenConfig(SAMPLE_SECRET_REF);
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: SAMPLE_SECRET_REF } },
+    } as unknown as OpenClawConfig;
 
-    const result = applyGatewayConfig({ nextConfig });
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toEqual(SAMPLE_SECRET_REF);
     expect(randomToken).not.toHaveBeenCalled();
@@ -154,20 +173,31 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
 
   it("leaves env-source SecretRef resolution to the health probe path", () => {
     process.env[SAMPLE_SECRET_REF.id] = "resolved-secret-value";
-    const nextConfig = createTokenConfig(SAMPLE_SECRET_REF);
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: SAMPLE_SECRET_REF } },
+    } as unknown as OpenClawConfig;
 
-    const result = applyGatewayConfig({ nextConfig });
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig,
+      opts: baseOpts,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
+    });
 
     expect(result?.nextConfig.gateway?.auth?.token).toEqual(SAMPLE_SECRET_REF);
     expect(randomToken).not.toHaveBeenCalled();
   });
 
   it("overrides an existing SecretRef when --gateway-token flag is provided", () => {
-    const nextConfig = createTokenConfig(SAMPLE_SECRET_REF);
+    const nextConfig = {
+      gateway: { auth: { mode: "token", token: SAMPLE_SECRET_REF } },
+    } as unknown as OpenClawConfig;
 
-    const result = applyGatewayConfig({
+    const result = applyNonInteractiveGatewayConfig({
       nextConfig,
       opts: { gatewayToken: "flag-token" } as OnboardOptions,
+      runtime: createRuntime() as never,
+      defaultPort: 18789,
     });
 
     expect(result?.nextConfig.gateway?.auth?.token).toBe("flag-token");
@@ -178,11 +208,15 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
     const newRefId = "OPENCLAW_GATEWAY_TOKEN_NEW_REF";
     process.env[newRefId] = "resolved-new-ref-value";
     try {
-      const nextConfig = createTokenConfig(SAMPLE_SECRET_REF);
+      const nextConfig = {
+        gateway: { auth: { mode: "token", token: SAMPLE_SECRET_REF } },
+      } as unknown as OpenClawConfig;
 
-      const result = applyGatewayConfig({
+      const result = applyNonInteractiveGatewayConfig({
         nextConfig,
         opts: { gatewayTokenRefEnv: newRefId } as OnboardOptions,
+        runtime: createRuntime() as never,
+        defaultPort: 18789,
       });
 
       const newToken = result?.nextConfig.gateway?.auth?.token;
@@ -197,9 +231,11 @@ describe("applyNonInteractiveGatewayConfig token resolution chain", () => {
   it("fails when --gateway-token-ref-env points to a missing env var", () => {
     const runtime = createRuntime();
 
-    const result = applyGatewayConfig({
+    const result = applyNonInteractiveGatewayConfig({
+      nextConfig: {} as OpenClawConfig,
       opts: { gatewayTokenRefEnv: "MISSING_GATEWAY_TOKEN_ENV" } as OnboardOptions,
-      runtime,
+      runtime: runtime as never,
+      defaultPort: 18789,
     });
 
     expect(result).toBeNull();

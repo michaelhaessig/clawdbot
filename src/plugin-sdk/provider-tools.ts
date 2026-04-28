@@ -1,4 +1,3 @@
-import type { TSchema } from "typebox";
 import {
   cleanSchemaForGemini,
   GEMINI_UNSUPPORTED_SCHEMA_KEYWORDS,
@@ -139,7 +138,7 @@ export function normalizeGeminiToolSchemas(
     }
     return {
       ...tool,
-      parameters: cleanSchemaForGemini(tool.parameters),
+      parameters: cleanSchemaForGemini(tool.parameters as Record<string, unknown>),
     };
   });
 }
@@ -183,10 +182,8 @@ export function normalizeOpenAIToolSchemas(
   });
 }
 
-function normalizeOpenAIStrictCompatSchema(schema: unknown): TSchema {
-  return normalizeOpenAIStrictCompatSchemaRecursive(schema, {
-    promoteEmptyObject: true,
-  }) as TSchema;
+function normalizeOpenAIStrictCompatSchema(schema: unknown): unknown {
+  return normalizeOpenAIStrictCompatSchemaRecursive(schema, { promoteEmptyObject: true });
 }
 
 function shouldApplyOpenAIToolCompat(ctx: ProviderNormalizeToolSchemasContext): boolean {

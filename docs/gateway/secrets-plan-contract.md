@@ -4,8 +4,10 @@ read_when:
   - Generating or reviewing `openclaw secrets apply` plans
   - Debugging `Invalid plan target path` errors
   - Understanding target type and path validation behavior
-title: "Secrets apply plan contract"
+title: "Secrets Apply Plan Contract"
 ---
+
+# Secrets apply plan contract
 
 This page defines the strict contract enforced by `openclaw secrets apply`.
 

@@ -5,6 +5,7 @@ import {
   getBundleHashInputPaths,
   getBundleHashRepoInputPaths,
   getLocalRolldownCliCandidates,
+  getResolvedBundleDependencyPackageJsonPaths,
   isBundleHashInputPath,
 } from "../../scripts/bundle-a2ui.mjs";
 
@@ -51,7 +52,7 @@ describe("scripts/bundle-a2ui.mjs", () => {
     ]);
   });
 
-  it("keeps unrelated repo dependency churn out of bundle hash inputs", () => {
+  it("keeps repo-root package churn out of bundle hash inputs", () => {
     const repoRoot = path.resolve("repo-root");
     const inputPaths = getBundleHashRepoInputPaths(repoRoot);
 
@@ -60,15 +61,25 @@ describe("scripts/bundle-a2ui.mjs", () => {
     expect(inputPaths).not.toContain(path.join(repoRoot, "pnpm-lock.yaml"));
   });
 
-  it("keeps local node_modules state out of bundle hash inputs", () => {
+  it("tracks only the resolved bundle dependency manifests from node_modules", () => {
     const repoRoot = process.cwd();
-    const inputPaths = getBundleHashInputPaths(repoRoot);
-
-    expect(inputPaths).not.toContain(path.join(repoRoot, "package.json"));
-    expect(inputPaths).not.toContain(path.join(repoRoot, "pnpm-lock.yaml"));
-    expect(inputPaths).not.toContain(path.join(repoRoot, "node_modules", "lit", "package.json"));
-    expect(inputPaths).not.toContain(
-      path.join(repoRoot, "ui", "node_modules", "lit", "package.json"),
+    const dependencyPaths = getResolvedBundleDependencyPackageJsonPaths(repoRoot);
+    const relativeDependencyPaths = dependencyPaths.map((dependencyPath) =>
+      path.relative(repoRoot, dependencyPath).replaceAll(path.sep, "/"),
     );
+
+    expect(
+      relativeDependencyPaths.map((relativePath) => relativePath.replace(/^ui\//u, "")),
+    ).toEqual([
+      path.posix.join("node_modules", "lit", "package.json"),
+      path.posix.join("node_modules", "@lit/context", "package.json"),
+      path.posix.join("node_modules", "@lit-labs/signals", "package.json"),
+      path.posix.join("node_modules", "signal-utils", "package.json"),
+    ]);
+    expect(
+      relativeDependencyPaths.every((relativePath) => /^(ui\/)?node_modules\//u.test(relativePath)),
+    ).toBe(true);
+    expect(getBundleHashInputPaths(repoRoot)).not.toContain(path.join(repoRoot, "package.json"));
+    expect(getBundleHashInputPaths(repoRoot)).not.toContain(path.join(repoRoot, "pnpm-lock.yaml"));
   });
 });

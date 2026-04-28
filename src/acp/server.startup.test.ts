@@ -21,7 +21,6 @@ const mockState = vi.hoisted(() => ({
   gatewayAuth: [] as GatewayClientAuth[],
   agentSideConnectionCtor: vi.fn(),
   agentStart: vi.fn(),
-  routeLogsToStderr: vi.fn(),
   resolveGatewayClientBootstrap: vi.fn<ResolveGatewayClientBootstrap>(async (_params) => ({
     url: "ws://127.0.0.1:18789",
     urlSource: "local loopback",
@@ -67,18 +66,14 @@ vi.mock("@agentclientprotocol/sdk", () => ({
   ndJsonStream: vi.fn(() => ({ type: "mock-stream" })),
 }));
 
-vi.mock("../config/config.js", () => {
-  const loadConfig = () => ({
+vi.mock("../config/config.js", () => ({
+  loadConfig: () => ({
     gateway: {
       mode: "local",
     },
-  });
-  return {
-    getRuntimeConfig: loadConfig,
-    loadConfig,
-    resolveGatewayPort: vi.fn(() => 18_789),
-  };
-});
+  }),
+  resolveGatewayPort: vi.fn(() => 18_789),
+}));
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: vi.fn(),
@@ -107,10 +102,6 @@ vi.mock("../gateway/client.js", () => ({
 
 vi.mock("../infra/is-main.js", () => ({
   isMainModule: () => false,
-}));
-
-vi.mock("../logging/console.js", () => ({
-  routeLogsToStderr: () => mockState.routeLogsToStderr(),
 }));
 
 vi.mock("./translator.js", () => ({
@@ -175,7 +166,6 @@ describe("serveAcpGateway startup", () => {
     mockState.gatewayAuth.length = 0;
     mockState.agentSideConnectionCtor.mockReset();
     mockState.agentStart.mockReset();
-    mockState.routeLogsToStderr.mockReset();
     mockState.resolveGatewayClientBootstrap.mockReset();
     mockState.resolveGatewayClientBootstrap.mockResolvedValue({
       url: "ws://127.0.0.1:18789",
@@ -195,26 +185,6 @@ describe("serveAcpGateway startup", () => {
       await Promise.resolve();
 
       expect(mockState.agentSideConnectionCtor).not.toHaveBeenCalled();
-      await emitHelloAndWaitForAgentSideConnection();
-      await stopServeWithSigint(signalHandlers, servePromise);
-    } finally {
-      onceSpy.mockRestore();
-    }
-  });
-
-  it("routes logs to stderr before loading gateway config", async () => {
-    const { signalHandlers, onceSpy } = captureProcessSignalHandlers();
-
-    try {
-      const servePromise = serveAcpGateway({});
-      await Promise.resolve();
-
-      expect(mockState.routeLogsToStderr).toHaveBeenCalledTimes(1);
-      expect(mockState.routeLogsToStderr.mock.invocationCallOrder[0]).toBeLessThan(
-        mockState.resolveGatewayClientBootstrap.mock.invocationCallOrder[0] ??
-          Number.MAX_SAFE_INTEGER,
-      );
-
       await emitHelloAndWaitForAgentSideConnection();
       await stopServeWithSigint(signalHandlers, servePromise);
     } finally {

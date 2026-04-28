@@ -3,8 +3,10 @@ summary: "Run agent turns from the CLI and optionally deliver replies to channel
 read_when:
   - You want to trigger agent runs from scripts or the command line
   - You need to deliver agent replies to a chat channel programmatically
-title: "Agent send"
+title: "Agent Send"
 ---
+
+# Agent Send
 
 `openclaw agent` runs a single agent turn from the command line without needing
 an inbound chat message. Use it for scripted workflows, testing, and
@@ -63,7 +65,7 @@ programmatic delivery.
 | `--reply-to \<target\>`       | Delivery target override                                    |
 | `--reply-channel \<name\>`    | Delivery channel override                                   |
 | `--reply-account \<id\>`      | Delivery account id override                                |
-| `--thinking \<level\>`        | Set thinking level for the selected model profile           |
+| `--thinking \<level\>`        | Set thinking level (off, minimal, low, medium, high, xhigh) |
 | `--verbose \<on\|full\|off\>` | Set verbose level                                           |
 | `--timeout \<seconds\>`       | Override agent timeout                                      |
 | `--json`                      | Output structured JSON                                      |

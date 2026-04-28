@@ -10,15 +10,15 @@ import {
   resolveComparableTargetForLoadedChannel,
 } from "./target-parsing.js";
 
-function parseThreadedTargetForTest(raw: string): {
+function parseTelegramTargetForTest(raw: string): {
   to: string;
   threadId?: number;
   chatType?: "direct" | "group";
 } {
   const trimmed = raw
     .trim()
-    .replace(/^threaded:/i, "")
-    .replace(/^mock:/i, "");
+    .replace(/^telegram:/i, "")
+    .replace(/^tg:/i, "");
   const prefixedTopic = /^group:([^:]+):topic:(\d+)$/i.exec(trimmed);
   if (prefixedTopic) {
     return {
@@ -45,14 +45,14 @@ function setMinimalTargetParsingRegistry(): void {
   setActivePluginRegistry(
     createTestRegistry([
       {
-        pluginId: "mock-threaded",
+        pluginId: "telegram",
         plugin: {
-          id: "mock-threaded",
+          id: "telegram",
           meta: {
-            id: "mock-threaded",
-            label: "Mock Threaded",
-            selectionLabel: "Mock Threaded",
-            docsPath: "/channels/mock-threaded",
+            id: "telegram",
+            label: "Telegram",
+            selectionLabel: "Telegram",
+            docsPath: "/channels/telegram",
             blurb: "test stub",
           },
           capabilities: { chatTypes: ["direct", "group"] },
@@ -61,7 +61,7 @@ function setMinimalTargetParsingRegistry(): void {
             resolveAccount: () => ({}),
           },
           messaging: {
-            parseExplicitTarget: ({ raw }: { raw: string }) => parseThreadedTargetForTest(raw),
+            parseExplicitTarget: ({ raw }: { raw: string }) => parseTelegramTargetForTest(raw),
           },
         },
         source: "test",
@@ -100,17 +100,15 @@ describe("parseExplicitTargetForChannel", () => {
     setMinimalTargetParsingRegistry();
   });
 
-  it("parses threaded targets via the registered channel plugin contract", () => {
-    expect(
-      parseExplicitTargetForChannel("mock-threaded", "threaded:group:room-a:topic:77"),
-    ).toEqual({
-      to: "room-a",
+  it("parses Telegram targets via the registered channel plugin contract", () => {
+    expect(parseExplicitTargetForChannel("telegram", "telegram:group:-100123:topic:77")).toEqual({
+      to: "-100123",
       threadId: 77,
       chatType: "group",
     });
-    expect(parseExplicitTargetForChannel("mock-threaded", "room-a")).toEqual({
-      to: "room-a",
-      chatType: undefined,
+    expect(parseExplicitTargetForChannel("telegram", "-100123")).toEqual({
+      to: "-100123",
+      chatType: "group",
     });
   });
 
@@ -128,23 +126,23 @@ describe("parseExplicitTargetForChannel", () => {
   it("builds comparable targets from plugin-owned grammar", () => {
     expect(
       resolveComparableTargetForChannel({
-        channel: "mock-threaded",
-        rawTarget: "threaded:group:room-a:topic:77",
+        channel: "telegram",
+        rawTarget: "telegram:group:-100123:topic:77",
       }),
     ).toEqual({
-      rawTo: "threaded:group:room-a:topic:77",
-      to: "room-a",
+      rawTo: "telegram:group:-100123:topic:77",
+      to: "-100123",
       threadId: 77,
       chatType: "group",
     });
     expect(
       resolveComparableTargetForLoadedChannel({
-        channel: "mock-threaded",
-        rawTarget: "threaded:group:room-a:topic:77",
+        channel: "telegram",
+        rawTarget: "telegram:group:-100123:topic:77",
       }),
     ).toEqual({
-      rawTo: "threaded:group:room-a:topic:77",
-      to: "room-a",
+      rawTo: "telegram:group:-100123:topic:77",
+      to: "-100123",
       threadId: 77,
       chatType: "group",
     });
@@ -152,12 +150,12 @@ describe("parseExplicitTargetForChannel", () => {
 
   it("matches comparable targets when only the plugin grammar differs", () => {
     const topicTarget = resolveComparableTargetForChannel({
-      channel: "mock-threaded",
-      rawTarget: "threaded:room-a:topic:77",
+      channel: "telegram",
+      rawTarget: "telegram:-100123:topic:77",
     });
     const bareTarget = resolveComparableTargetForChannel({
-      channel: "mock-threaded",
-      rawTarget: "room-a",
+      channel: "telegram",
+      rawTarget: "-100123",
     });
 
     expect(

@@ -2,8 +2,10 @@
 summary: "Hubs that link to every OpenClaw doc"
 read_when:
   - You want a complete map of the documentation
-title: "Docs hubs"
+title: "Docs Hubs"
 ---
+
+# Docs hubs
 
 <Note>
 If you are new to OpenClaw, start with [Getting Started](/start/getting-started).
@@ -160,11 +162,10 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [macOS skills](/platforms/mac/skills)
 - [macOS Peekaboo](/platforms/mac/peekaboo)
 
-## Plugins
+## Extensions + plugins
 
 - [Plugins overview](/tools/plugin)
 - [Building plugins](/plugins/building-plugins)
-- [Plugin hooks](/plugins/hooks)
 - [Plugin manifest](/plugins/manifest)
 - [Agent tools](/plugins/building-plugins#registering-agent-tools)
 - [Plugin bundles](/plugins/bundles)
@@ -196,7 +197,3 @@ Use these hubs to discover every page, including deep dives and reference docs t
 - [Testing](/reference/test)
 - [Release policy](/reference/RELEASING)
 - [Device models](/reference/device-models)
-
-## Related
-
-- [Getting started](/start/getting-started)

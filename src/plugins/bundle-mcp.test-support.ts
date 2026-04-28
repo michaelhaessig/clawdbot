@@ -18,7 +18,9 @@ export function createBundleMcpTempHarness() {
       clearPluginDiscoveryCache();
       clearPluginManifestRegistryCache();
       await Promise.all(
-        tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
+        tempDirs
+          .splice(0, tempDirs.length)
+          .map((dir) => fs.rm(dir, { recursive: true, force: true })),
       );
     },
   };

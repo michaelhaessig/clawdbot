@@ -8,15 +8,11 @@ vi.mock("../infra/outbound/deliver-runtime.js", () => ({
   deliverOutboundPayloads: (...args: unknown[]) => mockDeliverOutboundPayloads(...args),
 }));
 
-vi.mock("../utils/message-channel.js", () => ({
-  isDeliverableMessageChannel: (channel: string) => channel === "voicechat",
-}));
-
 import { DEFAULT_ECHO_TRANSCRIPT_FORMAT, sendTranscriptEcho } from "./echo-transcript.js";
 
 function createCtx(overrides?: Partial<MsgContext>): MsgContext {
   return {
-    Provider: "voicechat",
+    Provider: "whatsapp",
     From: "+10000000001",
     AccountId: "acc1",
     ...overrides,
@@ -26,7 +22,7 @@ function createCtx(overrides?: Partial<MsgContext>): MsgContext {
 describe("sendTranscriptEcho", () => {
   beforeEach(() => {
     mockDeliverOutboundPayloads.mockReset();
-    mockDeliverOutboundPayloads.mockResolvedValue([{ channel: "voicechat", messageId: "echo-1" }]);
+    mockDeliverOutboundPayloads.mockResolvedValue([{ channel: "whatsapp", messageId: "echo-1" }]);
   });
 
   it("sends the default formatted transcript to the resolved origin", async () => {
@@ -39,7 +35,7 @@ describe("sendTranscriptEcho", () => {
     expect(mockDeliverOutboundPayloads).toHaveBeenCalledOnce();
     expect(mockDeliverOutboundPayloads).toHaveBeenCalledWith({
       cfg: {},
-      channel: "voicechat",
+      channel: "whatsapp",
       to: "+10000000001",
       accountId: "acc1",
       threadId: undefined,

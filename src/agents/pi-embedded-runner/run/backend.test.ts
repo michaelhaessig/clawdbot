@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import { resolveEmbeddedAgentHarnessFallback, resolveEmbeddedAgentRuntime } from "../runtime.js";
 
 describe("resolveEmbeddedAgentRuntime", () => {
-  it("uses PI mode by default", () => {
-    expect(resolveEmbeddedAgentRuntime({})).toBe("pi");
+  it("uses auto mode by default", () => {
+    expect(resolveEmbeddedAgentRuntime({})).toBe("auto");
   });
 
   it("accepts the PI kill switch", () => {
     expect(resolveEmbeddedAgentRuntime({ OPENCLAW_AGENT_RUNTIME: "pi" })).toBe("pi");
   });
 
-  it("canonicalizes legacy Codex app-server runtime ids", () => {
+  it("preserves plugin harness ids without core-owned aliases", () => {
     expect(resolveEmbeddedAgentRuntime({ OPENCLAW_AGENT_RUNTIME: "codex" })).toBe("codex");
     expect(resolveEmbeddedAgentRuntime({ OPENCLAW_AGENT_RUNTIME: "codex-app-server" })).toBe(
-      "codex",
+      "codex-app-server",
     );
   });
 

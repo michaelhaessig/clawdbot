@@ -31,20 +31,6 @@ function createCountingIterable<T>(values: T[]) {
   };
 }
 
-function createSuccessfulDocxDescendantCreateMock() {
-  return vi.fn(
-    async (params?: DocxDescendantCreateParams): Promise<DocxDescendantCreateResponse> => ({
-      code: 0,
-      data: {
-        children: (params?.data?.children_id ?? []).map((id) => ({
-          block_id: id,
-          block_type: 2,
-        })),
-      },
-    }),
-  );
-}
-
 describe("insertBlocksInBatches", () => {
   it("builds the source block map once for large flat trees", async () => {
     const blockCount = BATCH_SIZE + 200;
@@ -53,7 +39,17 @@ describe("insertBlocksInBatches", () => {
       block_type: 2,
     }));
     const counting = createCountingIterable(blocks);
-    const createMock = createSuccessfulDocxDescendantCreateMock();
+    const createMock = vi.fn(
+      async (params?: DocxDescendantCreateParams): Promise<DocxDescendantCreateResponse> => ({
+        code: 0,
+        data: {
+          children: (params?.data?.children_id ?? []).map((id) => ({
+            block_id: id,
+            block_type: 2,
+          })),
+        },
+      }),
+    );
     const client = createDocxDescendantClient((params) => createMock(params));
 
     const result = await insertBlocksInBatches(
@@ -71,7 +67,17 @@ describe("insertBlocksInBatches", () => {
   });
 
   it("keeps nested descendants grouped with their root blocks", async () => {
-    const createMock = createSuccessfulDocxDescendantCreateMock();
+    const createMock = vi.fn(
+      async (params?: DocxDescendantCreateParams): Promise<DocxDescendantCreateResponse> => ({
+        code: 0,
+        data: {
+          children: (params?.data?.children_id ?? []).map((id) => ({
+            block_id: id,
+            block_type: 2,
+          })),
+        },
+      }),
+    );
     const client = createDocxDescendantClient((params) => createMock(params));
     const blocks: FeishuDocxBlock[] = [
       { block_id: "root_a", block_type: 1, children: ["child_a"] },

@@ -190,9 +190,3 @@ scripts/k8s/
     ├── pvc.yaml                # 10Gi persistent storage
     └── service.yaml            # ClusterIP on 18789
 ```
-
-## Related
-
-- [Docker](/install/docker)
-- [Docker VM runtime](/install/docker-vm-runtime)
-- [Install overview](/install)

@@ -130,9 +130,7 @@ vi.mock("./send.js", () => ({
   sendSingleTextMessageMatrix: sendModuleMocks.sendSingleTextMessageMatrix,
 }));
 const runtimeStub = {
-  config: {
-    current: () => loadConfigMock(),
-  },
+  config: { loadConfig: () => loadConfigMock() },
   channel: {
     text: {
       resolveTextChunkLimit: (cfg: unknown, channel: unknown, accountId?: unknown) =>
@@ -184,7 +182,6 @@ describe("createMatrixDraftStream", () => {
       .mockReset()
       .mockImplementation((text: string) => (text ? [text] : []));
     convertMarkdownTablesMock.mockReset().mockImplementation((text: string) => text);
-    sendModuleMocks.editMessageMatrix.mockClear();
   });
 
   afterEach(() => {
@@ -504,24 +501,6 @@ describe("createMatrixDraftStream", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining("preview exceeded single-event limit"),
     );
-  });
-
-  it("discardPending cancels pending updates without creating another preview event", async () => {
-    const stream = createMatrixDraftStream({
-      roomId: "!room:test",
-      client,
-      cfg: {} as import("../types.js").CoreConfig,
-    });
-
-    stream.update("First draft");
-    await stream.flush();
-    stream.update("Pending draft");
-    await stream.discardPending();
-    await stream.flush();
-
-    expect(sendMessageMock).toHaveBeenCalledTimes(1);
-    expect(sendModuleMocks.editMessageMatrix).not.toHaveBeenCalled();
-    expect(stream.eventId()).toBe("$evt1");
   });
 
   it("uses converted Matrix text when checking the single-event preview limit", async () => {

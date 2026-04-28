@@ -6,32 +6,18 @@ type AsyncUnknownMock = Mock<(...args: unknown[]) => Promise<unknown>>;
 
 export const readConfigFileSnapshotForWrite: AsyncUnknownMock = vi.fn();
 export const writeConfigFile: AsyncUnknownMock = vi.fn();
-export const replaceConfigFile: AsyncUnknownMock = vi.fn(async (params: unknown) => {
-  const record = params as { nextConfig?: unknown; writeOptions?: unknown };
-  await writeConfigFile(record.nextConfig, record.writeOptions);
-});
 export const loadCronStore: AsyncUnknownMock = vi.fn();
 export const resolveCronStorePath: UnknownMock = vi.fn();
 export const saveCronStore: AsyncUnknownMock = vi.fn();
 
-vi.mock("openclaw/plugin-sdk/config-mutation", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-mutation")>(
-    "openclaw/plugin-sdk/config-mutation",
+vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
+    "openclaw/plugin-sdk/config-runtime",
   );
   return {
     ...actual,
     readConfigFileSnapshotForWrite,
-    replaceConfigFile,
     writeConfigFile,
-  };
-});
-
-vi.mock("openclaw/plugin-sdk/cron-store-runtime", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/cron-store-runtime")>(
-    "openclaw/plugin-sdk/cron-store-runtime",
-  );
-  return {
-    ...actual,
     loadCronStore,
     resolveCronStorePath,
     saveCronStore,
@@ -50,7 +36,6 @@ export function installMaybePersistResolvedTelegramTargetTests(params?: {
 
     beforeEach(() => {
       readConfigFileSnapshotForWrite.mockReset();
-      replaceConfigFile.mockClear();
       writeConfigFile.mockReset();
       loadCronStore.mockReset();
       resolveCronStorePath.mockReset();

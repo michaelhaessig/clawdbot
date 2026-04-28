@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { readConfigFileSnapshot, recoverConfigFromJsonRootSuffix } from "../config/io.js";
+import { readConfigFileSnapshot } from "../config/io.js";
 import { formatConfigIssueLines } from "../config/issue-format.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { note } from "../terminal/note.js";
@@ -59,7 +59,6 @@ export async function runDoctorConfigPreflight(
   options: {
     migrateState?: boolean;
     migrateLegacyConfig?: boolean;
-    repairPrefixedConfig?: boolean;
     invalidConfigNote?: string | false;
   } = {},
 ): Promise<DoctorConfigPreflightResult> {
@@ -81,16 +80,7 @@ export async function runDoctorConfigPreflight(
     }
   }
 
-  let snapshot = await readConfigFileSnapshot();
-  if (
-    options.repairPrefixedConfig === true &&
-    snapshot.exists &&
-    !snapshot.valid &&
-    (await recoverConfigFromJsonRootSuffix(snapshot))
-  ) {
-    note("Removed non-JSON prefix from openclaw.json; original saved as .clobbered.*.", "Config");
-    snapshot = await readConfigFileSnapshot();
-  }
+  const snapshot = await readConfigFileSnapshot();
   const invalidConfigNote =
     options.invalidConfigNote ?? "Config invalid; doctor will run with best-effort config.";
   if (

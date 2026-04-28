@@ -29,14 +29,6 @@ export type SubsystemLogger = {
   child: (name: string) => SubsystemLogger;
 };
 
-function normalizeSubsystemLabel(subsystem?: string | null): string {
-  if (typeof subsystem !== "string") {
-    return "unknown";
-  }
-  const normalized = subsystem.trim();
-  return normalized.length > 0 ? normalized : "unknown";
-}
-
 function shouldLogToConsole(level: LogLevel, settings: { level: LogLevel }): boolean {
   if (level === "silent") {
     return false;
@@ -162,7 +154,7 @@ export function stripRedundantSubsystemPrefixForConsole(
     return message;
   }
 
-  // Common duplication when a message manually includes the subsystem tag.
+  // Common duplication: "[discord] discord: ..." (when a message manually includes the subsystem tag).
   if (message.startsWith("[")) {
     const closeIdx = message.indexOf("]");
     if (closeIdx > 1) {
@@ -267,8 +259,8 @@ function writeConsoleLine(level: LogLevel, line: string) {
 
 function shouldSuppressProbeConsoleLine(params: {
   level: LogLevel;
-  subsystem?: string | null;
-  message?: string | null;
+  subsystem: string;
+  message: string;
   meta?: Record<string, unknown>;
 }): boolean {
   if (isVerbose()) {
@@ -277,13 +269,11 @@ function shouldSuppressProbeConsoleLine(params: {
   if (params.level === "error" || params.level === "fatal") {
     return false;
   }
-  const subsystem = normalizeSubsystemLabel(params.subsystem);
-  const message = typeof params.message === "string" ? params.message : "";
   const isProbeSuppressedSubsystem =
-    subsystem === "agent/embedded" ||
-    subsystem.startsWith("agent/embedded/") ||
-    subsystem === "model-fallback" ||
-    subsystem.startsWith("model-fallback/");
+    params.subsystem === "agent/embedded" ||
+    params.subsystem.startsWith("agent/embedded/") ||
+    params.subsystem === "model-fallback" ||
+    params.subsystem.startsWith("model-fallback/");
   if (!isProbeSuppressedSubsystem) {
     return false;
   }
@@ -296,7 +286,7 @@ function shouldSuppressProbeConsoleLine(params: {
   if (runLikeId?.startsWith("probe-")) {
     return true;
   }
-  return /(sessionId|runId)=probe-/.test(message);
+  return /(sessionId|runId)=probe-/.test(params.message);
 }
 
 function logToFile(
@@ -323,13 +313,13 @@ function logToFile(
 }
 
 export function createSubsystemLogger(subsystem: string): SubsystemLogger {
-  const resolvedSubsystem = normalizeSubsystemLabel(subsystem);
+  let fileLogger: TsLogger<LogObj> | null = null;
 
   const emitLog = (level: LogLevel, message: string, meta?: Record<string, unknown>) => {
     const consoleSettings = getConsoleSettings();
     const consoleEnabled =
       shouldLogToConsole(level, { level: consoleSettings.level }) &&
-      shouldLogSubsystemToConsole(resolvedSubsystem);
+      shouldLogSubsystemToConsole(subsystem);
     const fileEnabled = isFileLogLevelEnabled(level);
     if (!consoleEnabled && !fileEnabled) {
       return;
@@ -346,7 +336,10 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
       fileMeta = Object.keys(rest).length > 0 ? rest : undefined;
     }
     if (fileEnabled) {
-      logToFile(getChildLogger({ subsystem: resolvedSubsystem }), level, message, fileMeta);
+      if (!fileLogger) {
+        fileLogger = getChildLogger({ subsystem });
+      }
+      logToFile(fileLogger, level, message, fileMeta);
     }
     if (!consoleEnabled) {
       return;
@@ -355,7 +348,7 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
     if (
       shouldSuppressProbeConsoleLine({
         level,
-        subsystem: resolvedSubsystem,
+        subsystem,
         message: consoleMessage,
         meta: fileMeta,
       })
@@ -366,7 +359,7 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
       level,
       formatConsoleLine({
         level,
-        subsystem: resolvedSubsystem,
+        subsystem,
         message: consoleSettings.style === "json" ? message : consoleMessage,
         style: consoleSettings.style,
         meta: fileMeta,
@@ -375,11 +368,11 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
   };
 
   const logger: SubsystemLogger = {
-    subsystem: resolvedSubsystem,
+    subsystem,
     isEnabled(level, target = "any") {
       const isConsoleEnabled =
         shouldLogToConsole(level, { level: getConsoleSettings().level }) &&
-        shouldLogSubsystemToConsole(resolvedSubsystem);
+        shouldLogSubsystemToConsole(subsystem);
       const isFileEnabled = isFileLogLevelEnabled(level);
       if (target === "console") {
         return isConsoleEnabled;
@@ -409,26 +402,23 @@ export function createSubsystemLogger(subsystem: string): SubsystemLogger {
     },
     raw(message) {
       if (isFileLogLevelEnabled("info")) {
-        logToFile(getChildLogger({ subsystem: resolvedSubsystem }), "info", message, { raw: true });
+        if (!fileLogger) {
+          fileLogger = getChildLogger({ subsystem });
+        }
+        logToFile(fileLogger, "info", message, { raw: true });
       }
       if (
         shouldLogToConsole("info", { level: getConsoleSettings().level }) &&
-        shouldLogSubsystemToConsole(resolvedSubsystem)
+        shouldLogSubsystemToConsole(subsystem)
       ) {
-        if (
-          shouldSuppressProbeConsoleLine({
-            level: "info",
-            subsystem: resolvedSubsystem,
-            message,
-          })
-        ) {
+        if (shouldSuppressProbeConsoleLine({ level: "info", subsystem, message })) {
           return;
         }
         writeConsoleLine("info", message);
       }
     },
     child(name) {
-      return createSubsystemLogger(`${resolvedSubsystem}/${name}`);
+      return createSubsystemLogger(`${subsystem}/${name}`);
     },
   };
   return logger;

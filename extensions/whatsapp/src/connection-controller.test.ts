@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getRegisteredWhatsAppConnectionController } from "./connection-controller-registry.js";
 import { WhatsAppConnectionController } from "./connection-controller.js";
-import { createWaSocket, waitForWaConnection } from "./session.js";
+import {
+  createWaSocket,
+  waitForCredsSaveQueueWithTimeout,
+  waitForWaConnection,
+} from "./session.js";
 
 vi.mock("./session.js", async () => {
   const actual = await vi.importActual<typeof import("./session.js")>("./session.js");
   return {
     ...actual,
     createWaSocket: vi.fn(),
+    waitForCredsSaveQueueWithTimeout: vi.fn(async () => {}),
     waitForWaConnection: vi.fn(),
   };
 });
 
 const createWaSocketMock = vi.mocked(createWaSocket);
+const waitForCredsSaveQueueWithTimeoutMock = vi.mocked(waitForCredsSaveQueueWithTimeout);
 const waitForWaConnectionMock = vi.mocked(waitForWaConnection);
 
 function createListenerStub(messageId = "ok") {
@@ -75,22 +81,24 @@ describe("WhatsAppConnectionController", () => {
     expect(controller.getActiveListener()).toBeNull();
   });
 
-  it("lets createWaSocket own the auth barrier before opening a socket", async () => {
+  it("flushes pending creds saves before opening a socket", async () => {
     const callOrder: string[] = [];
+    waitForCredsSaveQueueWithTimeoutMock.mockImplementationOnce(async () => {
+      callOrder.push("wait");
+    });
     createWaSocketMock.mockImplementationOnce(async () => {
       callOrder.push("create");
       return { ws: { close: vi.fn() } } as never;
     });
-    waitForWaConnectionMock.mockImplementationOnce(async () => {
-      callOrder.push("wait-for-connection");
-    });
+    waitForWaConnectionMock.mockResolvedValueOnce(undefined);
 
     await controller.openConnection({
       connectionId: "conn-flush-first",
       createListener: async () => createListenerStub() as never,
     });
 
-    expect(callOrder).toEqual(["create", "wait-for-connection"]);
+    expect(waitForCredsSaveQueueWithTimeoutMock).toHaveBeenCalledWith("/tmp/wa-auth");
+    expect(callOrder).toEqual(["wait", "create"]);
   });
 
   it("keeps the previous registered controller until a replacement listener is ready", async () => {

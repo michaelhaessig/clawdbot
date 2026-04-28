@@ -1,5 +1,4 @@
 import {
-  DEFAULT_UNDICI_STREAM_TIMEOUT_MS,
   ensureGlobalUndiciEnvProxyDispatcher,
   ensureGlobalUndiciStreamTimeouts,
 } from "../../../infra/net/undici-global-dispatcher.js";
@@ -8,7 +7,5 @@ export function configureEmbeddedAttemptHttpRuntime(params: { timeoutMs: number 
   // Proxy bootstrap must happen before timeout tuning so the timeouts wrap the
   // active EnvHttpProxyAgent instead of being replaced by a bare proxy dispatcher.
   ensureGlobalUndiciEnvProxyDispatcher();
-  ensureGlobalUndiciStreamTimeouts({
-    timeoutMs: Math.max(params.timeoutMs, DEFAULT_UNDICI_STREAM_TIMEOUT_MS),
-  });
+  ensureGlobalUndiciStreamTimeouts({ timeoutMs: params.timeoutMs });
 }

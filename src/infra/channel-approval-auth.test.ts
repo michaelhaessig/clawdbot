@@ -24,7 +24,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "workspace",
+        channel: "slack",
         senderId: "U123",
         kind: "exec",
       }),
@@ -49,7 +49,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "guildchat",
+        channel: "discord",
         accountId: "work",
         senderId: "123",
         kind: "exec",
@@ -59,7 +59,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "guildchat",
+        channel: "discord",
         accountId: "work",
         senderId: "123",
         kind: "plugin",
@@ -104,7 +104,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "workspace",
+        channel: "slack",
         accountId: "work",
         senderId: "U123",
         kind: "exec",
@@ -121,7 +121,7 @@ describe("resolveApprovalCommandAuthorization", () => {
   it("keeps empty approver fallback implicit without bypassing channel sender auth", () => {
     getChannelPluginMock.mockReturnValue({
       approvalCapability: createResolvedApproverActionAuthAdapter({
-        channelLabel: "QuietChat",
+        channelLabel: "Signal",
         resolveApprovers: () => [],
       }),
     });
@@ -129,7 +129,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "quietchat",
+        channel: "signal",
         accountId: "work",
         senderId: "uuid:attacker",
         kind: "exec",
@@ -140,7 +140,7 @@ describe("resolveApprovalCommandAuthorization", () => {
   it("keeps configured approvers explicit when sender matches", () => {
     getChannelPluginMock.mockReturnValue({
       approvalCapability: createResolvedApproverActionAuthAdapter({
-        channelLabel: "QuietChat",
+        channelLabel: "Signal",
         resolveApprovers: () => ["uuid:owner"],
       }),
     });
@@ -148,7 +148,7 @@ describe("resolveApprovalCommandAuthorization", () => {
     expect(
       resolveApprovalCommandAuthorization({
         cfg: {} as never,
-        channel: "quietchat",
+        channel: "signal",
         accountId: "work",
         senderId: "uuid:owner",
         kind: "exec",

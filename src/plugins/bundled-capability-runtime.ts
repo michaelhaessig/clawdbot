@@ -69,8 +69,8 @@ function applyVitestCapabilityAliasOverrides(params: {
   }
 
   const {
-    "openclaw/plugin-sdk": _ignoredLegacyRootAlias,
-    "@openclaw/plugin-sdk": _ignoredScopedRootAlias,
+    ["openclaw/plugin-sdk"]: _ignoredLegacyRootAlias,
+    ["@openclaw/plugin-sdk"]: _ignoredScopedRootAlias,
     ...scopedAliasMap
   } = params.aliasMap;
   return {
@@ -80,13 +80,6 @@ function applyVitestCapabilityAliasOverrides(params: {
     // bundle that also drags Matrix/WhatsApp code into these tests.
     ...buildVitestCapabilityShimAliasMap(),
   };
-}
-
-function shouldApplyVitestCapabilityAliasOverrides(params: {
-  pluginSdkResolution?: PluginSdkResolutionPreference;
-  env?: PluginLoadOptions["env"];
-}): boolean {
-  return Boolean(params.env?.VITEST && params.pluginSdkResolution === "dist");
 }
 
 export function buildBundledCapabilityRuntimeConfig(
@@ -158,13 +151,11 @@ function createCapabilityPluginRecord(params: {
     musicGenerationProviderIds: [],
     webFetchProviderIds: [],
     webSearchProviderIds: [],
-    migrationProviderIds: [],
     memoryEmbeddingProviderIds: [],
     agentHarnessIds: [],
     gatewayMethods: [],
     cliCommands: [],
     services: [],
-    gatewayDiscoveryServiceIds: [],
     commands: [],
     httpRoutes: 0,
     hookCount: 0,
@@ -202,28 +193,22 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
   const getJiti = (modulePath: string) => {
     const tryNative =
       shouldPreferNativeJiti(modulePath) && !(env?.VITEST && params.pluginSdkResolution === "dist");
-    const aliasMap = shouldApplyVitestCapabilityAliasOverrides({
+    const aliasMap = applyVitestCapabilityAliasOverrides({
+      aliasMap: buildPluginLoaderAliasMap(
+        modulePath,
+        process.argv[1],
+        import.meta.url,
+        params.pluginSdkResolution,
+      ),
       pluginSdkResolution: params.pluginSdkResolution,
       env,
-    })
-      ? applyVitestCapabilityAliasOverrides({
-          aliasMap: buildPluginLoaderAliasMap(
-            modulePath,
-            process.argv[1],
-            import.meta.url,
-            params.pluginSdkResolution,
-          ),
-          pluginSdkResolution: params.pluginSdkResolution,
-          env,
-        })
-      : undefined;
+    });
     return getCachedPluginJitiLoader({
       cache: jitiLoaders,
       modulePath,
       importerUrl: import.meta.url,
       jitiFilename: import.meta.url,
-      ...(aliasMap ? { aliasMap } : {}),
-      pluginSdkResolution: params.pluginSdkResolution,
+      aliasMap,
       tryNative,
     });
   };
@@ -336,7 +321,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       );
       record.webFetchProviderIds.push(...captured.webFetchProviders.map((entry) => entry.id));
       record.webSearchProviderIds.push(...captured.webSearchProviders.map((entry) => entry.id));
-      record.migrationProviderIds.push(...captured.migrationProviders.map((entry) => entry.id));
       record.memoryEmbeddingProviderIds.push(
         ...captured.memoryEmbeddingProviders.map((entry) => entry.id),
       );
@@ -444,15 +428,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       );
       registry.webSearchProviders.push(
         ...captured.webSearchProviders.map((provider) => ({
-          pluginId: record.id,
-          pluginName: record.name,
-          provider,
-          source: record.source,
-          rootDir: record.rootDir,
-        })),
-      );
-      registry.migrationProviders.push(
-        ...captured.migrationProviders.map((provider) => ({
           pluginId: record.id,
           pluginName: record.name,
           provider,

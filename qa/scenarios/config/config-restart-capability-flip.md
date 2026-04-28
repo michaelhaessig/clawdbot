@@ -4,11 +4,6 @@
 id: config-restart-capability-flip
 title: Config restart capability flip
 surface: config
-coverage:
-  primary:
-    - config.restart-apply
-  secondary:
-    - plugins.capabilities
 objective: Verify a restart-triggering config change flips capability inventory and the same session successfully uses the newly restored tool after wake-up.
 successCriteria:
   - Capability is absent before the restart-triggering patch.
@@ -50,9 +45,6 @@ steps:
       - set: originalToolsDeny
         value:
           expr: "originalTools ? (Object.prototype.hasOwnProperty.call(originalTools, 'deny') ? structuredClone(originalTools.deny) : undefined) : undefined"
-      - set: originalImageGenerationModelPrimary
-        value:
-          expr: "original.config.agents?.defaults?.imageGenerationModel?.primary ?? null"
       - set: denied
         value:
           expr: "Array.isArray(originalToolsDeny) ? originalToolsDeny.map((entry) => String(entry)) : []"
@@ -115,8 +107,7 @@ steps:
                     agents:
                       defaults:
                         imageGenerationModel:
-                          primary:
-                            ref: originalImageGenerationModelPrimary
+                          primary: openai/gpt-image-1
                   sessionKey:
                     ref: sessionKey
                   note:
@@ -140,10 +131,6 @@ steps:
             - set: imageStartedAtMs
               value:
                 expr: "Date.now()"
-            - set: mediaPath
-              value: ""
-            - set: imageReplyText
-              value: ""
             - call: runAgentPrompt
               args:
                 - ref: env
@@ -153,47 +140,17 @@ steps:
                     expr: config.imagePrompt
                   timeoutMs:
                     expr: liveTurnTimeoutMs(env, 45000)
-            - try:
-                actions:
-                  - call: resolveGeneratedImagePath
-                    saveAs: mediaPath
-                    args:
-                      - env:
-                          ref: env
-                        promptSnippet:
-                          expr: config.imagePromptSnippet
-                        startedAtMs:
-                          ref: imageStartedAtMs
-                        timeoutMs:
-                          expr: liveTurnTimeoutMs(env, 15000)
-                catch:
-                  - set: mediaPath
-                    value: ""
-            - if:
-                expr: "!mediaPath"
-                then:
-                  - call: waitForOutboundMessage
-                    saveAs: imageReply
-                    args:
-                      - ref: state
-                      - lambda:
-                          params: [candidate]
-                          expr: "candidate.conversation.id === 'qa-operator' && (String(candidate.text ?? '').includes('MEDIA:') || /media failed|image generation failed/i.test(String(candidate.text ?? '')))"
-                      - expr: liveTurnTimeoutMs(env, 45000)
-                  - set: imageReplyText
-                    value:
-                      expr: "String(imageReply.text ?? '')"
-                else:
-                  - set: imageReplyText
-                    value:
-                      expr: "`MEDIA:${mediaPath}`"
-            - set: imageReplyLower
-              value:
-                expr: "imageReplyText.toLowerCase()"
-            - assert:
-                expr: "Boolean(mediaPath) || (!env.mock && /media failed|image generation failed/.test(imageReplyLower))"
-                message:
-                  expr: "`expected restored ${config.deniedTool} to either produce media or, in live mode only, surface a provider-side image failure; got ${imageReplyText}`"
+            - call: resolveGeneratedImagePath
+              saveAs: mediaPath
+              args:
+                - env:
+                    ref: env
+                  promptSnippet:
+                    expr: config.imagePromptSnippet
+                  startedAtMs:
+                    ref: imageStartedAtMs
+                  timeoutMs:
+                    expr: liveTurnTimeoutMs(env, 45000)
             # Tool-call assertion (criterion 2 of the parity completion
             # gate in #64227): the restored `image_generate` capability
             # must have actually fired as a real tool call. Without this
@@ -224,5 +181,5 @@ steps:
               args:
                 - ref: env
                 - 60000
-    detailsExpr: "`${wakeMarker}\\n${config.deniedTool}=${String(afterTools.has(config.deniedTool))}\\n${mediaPath ? `MEDIA:${mediaPath}` : imageReplyText}`"
+    detailsExpr: "`${wakeMarker}\\n${config.deniedTool}=${String(afterTools.has(config.deniedTool))}\\nMEDIA:${mediaPath}`"
 ```

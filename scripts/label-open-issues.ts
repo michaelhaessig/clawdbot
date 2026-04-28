@@ -459,7 +459,7 @@ function* fetchOpenLabelItemBatches(params: {
       if (results.length >= WORK_BATCH_SIZE) {
         yield {
           batchIndex,
-          items: results.splice(0),
+          items: results.splice(0, results.length),
           totalCount,
           fetchedCount,
         };

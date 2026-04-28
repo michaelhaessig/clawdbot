@@ -565,7 +565,7 @@ describe("exec approval forwarder", () => {
     },
     {
       command: "echo `uname`\necho done",
-      expectedText: "```\necho `uname`\\u{A}echo done\n```",
+      expectedText: "```\necho `uname`\necho done\n```",
     },
     {
       command: "echo ```danger```",

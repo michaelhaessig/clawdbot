@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { AgentContextInjection } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -147,11 +146,8 @@ export function makeBootstrapWarn(params: {
 
 function sanitizeBootstrapFiles(
   files: WorkspaceBootstrapFile[],
-  workspaceDir: string,
   warn?: (message: string) => void,
 ): WorkspaceBootstrapFile[] {
-  const workspaceRoot = path.resolve(workspaceDir);
-  const seenPaths = new Set<string>();
   const sanitized: WorkspaceBootstrapFile[] = [];
   for (const file of files) {
     const pathValue = normalizeOptionalString(file.path) ?? "";
@@ -161,15 +157,7 @@ function sanitizeBootstrapFiles(
       );
       continue;
     }
-    const resolvedPath = path.isAbsolute(pathValue)
-      ? path.resolve(pathValue)
-      : path.resolve(workspaceRoot, pathValue);
-    const dedupeKey = path.normalize(path.relative(workspaceRoot, resolvedPath));
-    if (seenPaths.has(dedupeKey)) {
-      continue;
-    }
-    seenPaths.add(dedupeKey);
-    sanitized.push({ ...file, path: resolvedPath });
+    sanitized.push({ ...file, path: pathValue });
   }
   return sanitized;
 }
@@ -260,7 +248,6 @@ export async function resolveBootstrapFilesForRun(params: {
   });
   return sanitizeBootstrapFiles(
     filterHeartbeatBootstrapFile(updated, excludeHeartbeatBootstrapFile),
-    params.workspaceDir,
     params.warn,
   );
 }

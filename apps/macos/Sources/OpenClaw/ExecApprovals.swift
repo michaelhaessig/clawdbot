@@ -616,18 +616,6 @@ enum ExecApprovalsStore {
         let trimmedResolved = entry.lastResolvedPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let normalizedResolved = trimmedResolved.isEmpty ? nil : trimmedResolved
 
-        if !ExecApprovalHelpers.patternHasPathSelector(trimmedPattern),
-           !trimmedResolved.isEmpty,
-           case let .valid(migratedPattern) = ExecApprovalHelpers.validateAllowlistPattern(trimmedResolved)
-        {
-            return ExecAllowlistEntry(
-                id: entry.id,
-                pattern: migratedPattern,
-                lastUsedAt: entry.lastUsedAt,
-                lastUsedCommand: entry.lastUsedCommand,
-                lastResolvedPath: normalizedResolved)
-        }
-
         switch ExecApprovalHelpers.validateAllowlistPattern(trimmedPattern) {
         case let .valid(pattern):
             return ExecAllowlistEntry(
@@ -736,21 +724,17 @@ enum ExecApprovalHelpers {
     static func validateAllowlistPattern(_ pattern: String?) -> ExecAllowlistPatternValidation {
         let trimmed = pattern?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else { return .invalid(.empty) }
+        guard self.containsPathComponent(trimmed) else { return .invalid(.missingPathComponent) }
         return .valid(trimmed)
     }
 
-    static func isValidAllowlistPattern(_ pattern: String?) -> Bool {
+    static func isPathPattern(_ pattern: String?) -> Bool {
         switch self.validateAllowlistPattern(pattern) {
         case .valid:
             true
         case .invalid:
             false
         }
-    }
-
-    static func isPathPattern(_ pattern: String?) -> Bool {
-        let trimmed = pattern?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return self.patternHasPathSelector(trimmed)
     }
 
     static func parseDecision(_ raw: String?) -> ExecApprovalDecision? {
@@ -775,7 +759,7 @@ enum ExecApprovalHelpers {
         return pattern.isEmpty ? nil : pattern
     }
 
-    static func patternHasPathSelector(_ pattern: String) -> Bool {
+    private static func containsPathComponent(_ pattern: String) -> Bool {
         pattern.contains("/") || pattern.contains("~") || pattern.contains("\\")
     }
 }

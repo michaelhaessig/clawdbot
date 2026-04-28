@@ -55,13 +55,10 @@ export async function resetReplyRunSession(params: {
   }
   const prevSessionId = params.options.cleanupTranscripts ? prevEntry.sessionId : undefined;
   const nextSessionId = deps.generateSecureUuid();
-  const now = Date.now();
   const nextEntry: SessionEntry = {
     ...prevEntry,
     sessionId: nextSessionId,
-    updatedAt: now,
-    sessionStartedAt: now,
-    lastInteractionAt: now,
+    updatedAt: Date.now(),
     systemSent: false,
     abortedLastRun: false,
     modelProvider: undefined,

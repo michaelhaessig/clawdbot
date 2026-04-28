@@ -66,13 +66,13 @@ export async function handleDiscordAction(
   const isActionEnabled = createDiscordActionGate({ cfg, accountId });
 
   if (messagingActions.has(action)) {
-    return await handleDiscordMessagingAction(action, params, isActionEnabled, cfg, options);
+    return await handleDiscordMessagingAction(action, params, isActionEnabled, options, cfg);
   }
   if (guildActions.has(action)) {
     return await handleDiscordGuildAction(action, params, isActionEnabled, cfg, options);
   }
   if (moderationActions.has(action)) {
-    return await handleDiscordModerationAction(action, params, isActionEnabled, cfg);
+    return await handleDiscordModerationAction(action, params, isActionEnabled);
   }
   if (presenceActions.has(action)) {
     return await handleDiscordPresenceAction(action, params, isActionEnabled);

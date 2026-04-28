@@ -1,6 +1,5 @@
 import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore } from "../config/sessions/store-load.js";
-import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeOptionalAccountId } from "../routing/account-id.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
@@ -9,26 +8,21 @@ import { normalizeMessageChannel } from "../utils/message-channel.js";
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 import type { PluginApprovalRequest } from "./plugin-approvals.js";
 
-export type ApprovalRequestLike = ExecApprovalRequest | PluginApprovalRequest;
+type ApprovalRequestLike = ExecApprovalRequest | PluginApprovalRequest;
 
 type ApprovalRequestSessionBinding = {
   channel?: string;
   accountId?: string;
 };
 
-export type PersistedApprovalRequestSessionEntry = {
-  sessionKey: string;
-  entry: SessionEntry;
-};
-
 function normalizeOptionalChannel(value?: string | null): string | undefined {
   return normalizeMessageChannel(value);
 }
 
-export function resolvePersistedApprovalRequestSessionEntry(params: {
+function resolvePersistedApprovalRequestSessionBinding(params: {
   cfg: OpenClawConfig;
   request: ApprovalRequestLike;
-}): PersistedApprovalRequestSessionEntry | null {
+}): ApprovalRequestSessionBinding | null {
   const sessionKey = normalizeOptionalString(params.request.request.sessionKey);
   if (!sessionKey) {
     return null;
@@ -41,18 +35,6 @@ export function resolvePersistedApprovalRequestSessionEntry(params: {
   if (!entry) {
     return null;
   }
-  return { sessionKey, entry };
-}
-
-function resolvePersistedApprovalRequestSessionBinding(params: {
-  cfg: OpenClawConfig;
-  request: ApprovalRequestLike;
-}): ApprovalRequestSessionBinding | null {
-  const persisted = resolvePersistedApprovalRequestSessionEntry(params);
-  if (!persisted) {
-    return null;
-  }
-  const { entry } = persisted;
   const channel = normalizeOptionalChannel(entry.origin?.provider ?? entry.lastChannel);
   const accountId = normalizeOptionalAccountId(entry.origin?.accountId ?? entry.lastAccountId);
   return channel || accountId ? { channel, accountId } : null;

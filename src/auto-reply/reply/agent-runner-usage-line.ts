@@ -1,9 +1,4 @@
-import {
-  estimateUsageCost,
-  formatTokenCount,
-  formatUsd,
-  type ModelCostConfig,
-} from "../../utils/usage-format.js";
+import { estimateUsageCost, formatTokenCount, formatUsd } from "../../utils/usage-format.js";
 import type { ReplyPayload } from "../types.js";
 
 export const formatResponseUsageLine = (params: {
@@ -14,7 +9,12 @@ export const formatResponseUsageLine = (params: {
     cacheWrite?: number;
   };
   showCost: boolean;
-  costConfig?: ModelCostConfig;
+  costConfig?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
 }): string | null => {
   const usage = params.usage;
   if (!usage) {

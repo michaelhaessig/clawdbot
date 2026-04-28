@@ -1,11 +1,10 @@
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { TSchema } from "typebox";
+import type { TSchema } from "@sinclair/typebox";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import type { MarkdownTableMode } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { GatewayClientMode, GatewayClientName } from "../../gateway/protocol/client-info.js";
-import type { MessagePresentation } from "../../interactive/payload.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import type { PollInput } from "../../polls.js";
 import type { ChatType } from "../chat-type.js";
@@ -60,12 +59,6 @@ export type ChannelMessageActionDiscoveryContext = {
  */
 export type ChannelMessageToolSchemaContribution = {
   properties: Record<string, TSchema>;
-  /**
-   * Actions whose validation depends on this schema fragment. Cross-channel
-   * discovery can hide only these actions when the fragment is current-channel
-   * scoped. Omit to keep the legacy conservative behavior.
-   */
-  actions?: readonly ChannelMessageActionName[] | null;
   visibility?: "current-channel" | "all-configured";
 };
 
@@ -92,8 +85,6 @@ export type ChannelSetupInput = {
   token?: string;
   privateKey?: string;
   tokenFile?: string;
-  secret?: string;
-  secretFile?: string;
   botToken?: string;
   appToken?: string;
   signalNumber?: string;
@@ -123,7 +114,6 @@ export type ChannelSetupInput = {
   initialSyncLimit?: number;
   ship?: string;
   url?: string;
-  baseUrl?: string;
   relayUrls?: string;
   code?: string;
   groupChannels?: string[];
@@ -190,7 +180,6 @@ export type ChannelAccountSnapshot = {
   name?: string;
   enabled?: boolean;
   configured?: boolean;
-  statusState?: string;
   linked?: boolean;
   running?: boolean;
   connected?: boolean;
@@ -208,7 +197,6 @@ export type ChannelAccountSnapshot = {
     | null;
   lastMessageAt?: number | null;
   lastEventAt?: number | null;
-  lastTransportActivityAt?: number | null;
   lastError?: string | null;
   healthState?: string;
   lastStartAt?: number | null;
@@ -272,13 +260,6 @@ export type ChannelGroupContext = {
   senderE164?: string | null;
 };
 
-/** TTS voice delivery behavior advertised by a channel plugin. */
-export type ChannelTtsVoiceDeliveryCapabilities = {
-  synthesisTarget: "audio-file" | "voice-note";
-  transcodesAudio?: boolean;
-  audioFileFormats?: readonly string[];
-};
-
 /** Static capability flags advertised by a channel plugin. */
 export type ChannelCapabilities = {
   chatTypes: Array<ChatType | "thread">;
@@ -291,9 +272,6 @@ export type ChannelCapabilities = {
   groupManagement?: boolean;
   threads?: boolean;
   media?: boolean;
-  tts?: {
-    voice?: ChannelTtsVoiceDeliveryCapabilities;
-  };
   nativeCommands?: boolean;
   blockStreaming?: boolean;
 };
@@ -343,12 +321,12 @@ export type ChannelStreamingAdapter = {
 // their side and cast at the boundary.
 export type ChannelStructuredComponents = unknown[];
 
-export type ChannelCrossContextPresentationFactory = (params: {
+export type ChannelCrossContextComponentsFactory = (params: {
   originLabel: string;
   message: string;
   cfg: OpenClawConfig;
   accountId?: string | null;
-}) => MessagePresentation;
+}) => ChannelStructuredComponents;
 
 export type ChannelReplyTransport = {
   replyToId?: string | null;
@@ -404,10 +382,6 @@ export type ChannelThreadingAdapter = {
     to: string;
     toolContext?: ChannelThreadingToolContext;
     replyToId?: string | null;
-  }) => string | undefined;
-  resolveCurrentChannelId?: (params: {
-    to: string;
-    threadId?: string | number | null;
   }) => string | undefined;
   resolveReplyTransport?: (params: {
     cfg: OpenClawConfig;
@@ -540,12 +514,7 @@ export type ChannelMessagingAdapter = {
    * steer peer-vs-group resolution without reimplementing host search flow.
    */
   inferTargetChatType?: (params: { to: string }) => ChatType | undefined;
-  /**
-   * Preserve the session thread/topic id for heartbeat replies when that thread
-   * is part of the destination identity, not a transient reply thread.
-   */
-  preserveHeartbeatThreadIdForGroupRoute?: boolean;
-  buildCrossContextPresentation?: ChannelCrossContextPresentationFactory;
+  buildCrossContextComponents?: ChannelCrossContextComponentsFactory;
   transformReplyPayload?: (params: {
     payload: ReplyPayload;
     cfg: OpenClawConfig;

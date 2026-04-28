@@ -20,14 +20,12 @@ import {
   type WebhookRequestParams,
 } from "./monitor.webhook.test-helpers.js";
 import type { OpenClawConfig, PluginRuntime } from "./runtime-api.js";
-import { createBlueBubblesFetchGuardPassthroughInstaller } from "./test-harness.js";
 import {
   createBlueBubblesMonitorTestRuntime,
   EMPTY_DISPATCH_RESULT,
   resetBlueBubblesMonitorTestState,
   type DispatchReplyParams,
 } from "./test-support/monitor-test-support.js";
-import { _setFetchGuardForTesting } from "./types.js";
 
 const { TEST_WEBHOOK_RATE_LIMIT_MAX_REQUESTS } = vi.hoisted(() => ({
   TEST_WEBHOOK_RATE_LIMIT_MAX_REQUESTS: 3,
@@ -170,13 +168,9 @@ function createMockRuntime(): PluginRuntime {
 
 describe("BlueBubbles webhook monitor", () => {
   let unregister: () => void;
-  const installFetchGuardPassthrough = createBlueBubblesFetchGuardPassthroughInstaller();
 
   beforeEach(() => {
     vi.stubGlobal("fetch", mockFetch);
-    // See monitor.test.ts for rationale — BlueBubblesClient routes every BB
-    // API call through the SSRF guard now. (#34749, #59722)
-    installFetchGuardPassthrough();
     mockFetch.mockReset();
     mockFetch.mockResolvedValue({
       ok: true,
@@ -197,7 +191,6 @@ describe("BlueBubbles webhook monitor", () => {
   afterEach(() => {
     unregister?.();
     vi.unstubAllGlobals();
-    _setFetchGuardForTesting(null);
   });
 
   function setupWebhookTarget(params?: {

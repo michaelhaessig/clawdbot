@@ -12,7 +12,6 @@ import {
   listSessionsFromStore,
   loadCombinedSessionStoreForGateway,
   migrateAndPruneGatewaySessionStoreKey,
-  resolveDeletedAgentIdFromSessionKey,
   resolveGatewaySessionStoreTarget,
 } from "./session-utils.js";
 
@@ -31,24 +30,6 @@ function noSessionFoundResult(key: string): SessionsResolveResult {
   return {
     ok: false,
     error: errorShape(ErrorCodes.INVALID_REQUEST, `No session found: ${key}`),
-  };
-}
-
-/** Rejects sessions whose owning agent no longer exists in config (#65524). */
-function validateSessionAgentExists(
-  cfg: OpenClawConfig,
-  key: string,
-): SessionsResolveResult | null {
-  const deletedAgentId = resolveDeletedAgentIdFromSessionKey(cfg, key);
-  if (deletedAgentId === null) {
-    return null;
-  }
-  return {
-    ok: false,
-    error: errorShape(
-      ErrorCodes.INVALID_REQUEST,
-      `Agent "${deletedAgentId}" no longer exists in configuration`,
-    ),
   };
 }
 
@@ -113,10 +94,6 @@ export async function resolveSessionKeyFromResolveParams(params: {
       ) {
         return noSessionFoundResult(key);
       }
-      const agentCheck = validateSessionAgentExists(cfg, target.canonicalKey);
-      if (agentCheck) {
-        return agentCheck;
-      }
       return { ok: true, key: target.canonicalKey };
     }
     const legacyKey = target.storeKeys.find((candidate) => store[candidate]);
@@ -139,10 +116,6 @@ export async function resolveSessionKeyFromResolveParams(params: {
       })
     ) {
       return noSessionFoundResult(key);
-    }
-    const agentCheckLegacy = validateSessionAgentExists(cfg, target.canonicalKey);
-    if (agentCheckLegacy) {
-      return agentCheckLegacy;
     }
     return { ok: true, key: target.canonicalKey };
   }
@@ -178,10 +151,6 @@ export async function resolveSessionKeyFromResolveParams(params: {
           `Multiple sessions found for sessionId: ${sessionId} (${keys})`,
         ),
       };
-    }
-    const agentCheckSessionId = validateSessionAgentExists(cfg, matches[0].key);
-    if (agentCheckSessionId) {
-      return agentCheckSessionId;
     }
     return { ok: true, key: matches[0].key };
   }
@@ -228,9 +197,5 @@ export async function resolveSessionKeyFromResolveParams(params: {
     };
   }
 
-  const agentCheckLabel = validateSessionAgentExists(cfg, list.sessions[0].key);
-  if (agentCheckLabel) {
-    return agentCheckLabel;
-  }
   return { ok: true, key: list.sessions[0].key };
 }

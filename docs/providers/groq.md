@@ -1,10 +1,12 @@
 ---
-summary: "Groq setup (auth + model selection)"
 title: "Groq"
+summary: "Groq setup (auth + model selection)"
 read_when:
   - You want to use Groq with OpenClaw
   - You need the API key env var or CLI auth choice
 ---
+
+# Groq
 
 [Groq](https://groq.com) provides ultra-fast inference on open-source models
 (Llama, Gemma, Mistral, and more) using custom LPU hardware. OpenClaw connects
@@ -53,7 +55,7 @@ to Groq through its OpenAI-compatible API.
 }
 ```
 
-## Built-in catalog
+## Available models
 
 Groq's model catalog changes frequently. Run `openclaw models list | grep groq`
 to see currently available models, or check
@@ -70,14 +72,6 @@ to see currently available models, or check
 Use `openclaw models list --provider groq` for the most up-to-date list of
 models available on your account.
 </Tip>
-
-## Reasoning models
-
-OpenClaw maps its shared `/think` levels to Groq's model-specific
-`reasoning_effort` values. For `qwen/qwen3-32b`, disabled thinking sends
-`none` and enabled thinking sends `default`. For Groq GPT-OSS reasoning models,
-OpenClaw sends `low`, `medium`, or `high`; disabled thinking omits
-`reasoning_effort` because those models do not support a disabled value.
 
 ## Audio transcription
 

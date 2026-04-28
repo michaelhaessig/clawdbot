@@ -37,20 +37,18 @@ const routeCtxMocks = vi.hoisted(() => {
 
 vi.mock("../config/config.js", async () => {
   const actual = await vi.importActual<typeof import("../config/config.js")>("../config/config.js");
-  const loadConfig = () => ({
-    browser: {
-      enabled: true,
-      evaluateEnabled: false,
-      defaultProfile: "openclaw",
-      profiles: {
-        openclaw: { cdpPort: testPort + 1, color: "#FF4500" },
-      },
-    },
-  });
   return {
     ...actual,
-    getRuntimeConfig: loadConfig,
-    loadConfig,
+    loadConfig: () => ({
+      browser: {
+        enabled: true,
+        evaluateEnabled: false,
+        defaultProfile: "openclaw",
+        profiles: {
+          openclaw: { cdpPort: testPort + 1, color: "#FF4500" },
+        },
+      },
+    }),
     writeConfigFile: vi.fn(async () => {}),
   };
 });

@@ -574,7 +574,10 @@ async function discoverViaAvahi(
     args.push("-d", domain.replace(/\.$/, ""));
   }
   const browse = await run(args, { timeoutMs });
-  return parseAvahiBrowse(browse.stdout).map((beacon) => Object.assign({}, beacon, { domain }));
+  return parseAvahiBrowse(browse.stdout).map((beacon) => ({
+    ...beacon,
+    domain,
+  }));
 }
 
 export async function discoverGatewayBeacons(

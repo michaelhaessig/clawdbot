@@ -1,11 +1,5 @@
 import type { ProviderExternalAuthProfile } from "../../plugins/provider-external-auth.types.js";
 import { resolveExternalAuthProfilesWithPlugins } from "../../plugins/provider-runtime.js";
-import * as externalCliSync from "./external-cli-sync.js";
-import {
-  overlayRuntimeExternalOAuthProfiles,
-  shouldPersistRuntimeExternalOAuthProfile,
-  type RuntimeExternalOAuthProfile,
-} from "./oauth-shared.js";
 import type { AuthProfileStore, OAuthCredential } from "./types.js";
 
 type ExternalAuthProfileMap = Map<string, ProviderExternalAuthProfile>;
@@ -54,14 +48,6 @@ function resolveExternalAuthProfileMap(params: {
   });
 
   const resolved: ExternalAuthProfileMap = new Map();
-  const cliProfiles = externalCliSync.resolveExternalCliAuthProfiles?.(params.store) ?? [];
-  for (const profile of cliProfiles) {
-    resolved.set(profile.profileId, {
-      profileId: profile.profileId,
-      credential: profile.credential,
-      persistence: "runtime-only",
-    });
-  }
   for (const rawProfile of profiles) {
     const profile = normalizeExternalAuthProfile(rawProfile);
     if (!profile) {
@@ -72,17 +58,19 @@ function resolveExternalAuthProfileMap(params: {
   return resolved;
 }
 
-function listRuntimeExternalAuthProfiles(params: {
-  store: AuthProfileStore;
-  agentDir?: string;
-  env?: NodeJS.ProcessEnv;
-}): RuntimeExternalOAuthProfile[] {
-  return Array.from(
-    resolveExternalAuthProfileMap({
-      store: params.store,
-      agentDir: params.agentDir,
-      env: params.env,
-    }).values(),
+function oauthCredentialMatches(a: OAuthCredential, b: OAuthCredential): boolean {
+  return (
+    a.type === b.type &&
+    a.provider === b.provider &&
+    a.access === b.access &&
+    a.refresh === b.refresh &&
+    a.expires === b.expires &&
+    a.clientId === b.clientId &&
+    a.email === b.email &&
+    a.displayName === b.displayName &&
+    a.enterpriseUrl === b.enterpriseUrl &&
+    a.projectId === b.projectId &&
+    a.accountId === b.accountId
   );
 }
 
@@ -90,12 +78,20 @@ export function overlayExternalAuthProfiles(
   store: AuthProfileStore,
   params?: { agentDir?: string; env?: NodeJS.ProcessEnv },
 ): AuthProfileStore {
-  const profiles = listRuntimeExternalAuthProfiles({
+  const profiles = resolveExternalAuthProfileMap({
     store,
     agentDir: params?.agentDir,
     env: params?.env,
   });
-  return overlayRuntimeExternalOAuthProfiles(store, profiles);
+  if (profiles.size === 0) {
+    return store;
+  }
+
+  const next = structuredClone(store);
+  for (const [profileId, profile] of profiles) {
+    next.profiles[profileId] = profile.credential;
+  }
+  return next;
 }
 
 export function shouldPersistExternalAuthProfile(params: {
@@ -105,16 +101,15 @@ export function shouldPersistExternalAuthProfile(params: {
   agentDir?: string;
   env?: NodeJS.ProcessEnv;
 }): boolean {
-  const profiles = listRuntimeExternalAuthProfiles({
+  const external = resolveExternalAuthProfileMap({
     store: params.store,
     agentDir: params.agentDir,
     env: params.env,
-  });
-  return shouldPersistRuntimeExternalOAuthProfile({
-    profileId: params.profileId,
-    credential: params.credential,
-    profiles,
-  });
+  }).get(params.profileId);
+  if (!external || external.persistence === "persisted") {
+    return true;
+  }
+  return !oauthCredentialMatches(external.credential, params.credential);
 }
 
 // Compat aliases while file/function naming catches up.

@@ -1,24 +1,9 @@
 // Manual facade. Keep loader boundary explicit.
-import type { ModelDefinitionConfig, ModelProviderConfig } from "../config/types.js";
+type FacadeModule = typeof import("@openclaw/vercel-ai-gateway/api.js");
 import {
   createLazyFacadeObjectValue,
   loadBundledPluginPublicSurfaceModuleSync,
 } from "./facade-loader.js";
-
-type ModelCost = ModelDefinitionConfig["cost"];
-
-type FacadeModule = {
-  buildVercelAiGatewayProvider: () => Promise<ModelProviderConfig>;
-  discoverVercelAiGatewayModels: () => Promise<ModelDefinitionConfig[]>;
-  getStaticVercelAiGatewayModelCatalog: () => ModelDefinitionConfig[];
-  VERCEL_AI_GATEWAY_BASE_URL: string;
-  VERCEL_AI_GATEWAY_DEFAULT_CONTEXT_WINDOW: number;
-  VERCEL_AI_GATEWAY_DEFAULT_COST: ModelCost;
-  VERCEL_AI_GATEWAY_DEFAULT_MAX_TOKENS: number;
-  VERCEL_AI_GATEWAY_DEFAULT_MODEL_ID: string;
-  VERCEL_AI_GATEWAY_DEFAULT_MODEL_REF: string;
-  VERCEL_AI_GATEWAY_PROVIDER_ID: string;
-};
 
 function loadFacadeModule(): FacadeModule {
   return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({

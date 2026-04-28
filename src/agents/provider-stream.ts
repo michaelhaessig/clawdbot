@@ -26,13 +26,7 @@ export function registerProviderStreamForModel<TApi extends Api>(params: {
         modelId: params.model.id,
         model: params.model,
       },
-    }) ??
-    createTransportAwareStreamFnForModel(params.model, {
-      cfg: params.cfg,
-      agentDir: params.agentDir,
-      workspaceDir: params.workspaceDir,
-      env: params.env,
-    });
+    }) ?? createTransportAwareStreamFnForModel(params.model);
   if (!streamFn) {
     return undefined;
   }

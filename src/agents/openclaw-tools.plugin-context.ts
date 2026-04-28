@@ -28,9 +28,8 @@ export function resolveOpenClawPluginToolInputs(params: {
   options?: OpenClawPluginToolOptions;
   resolvedConfig?: OpenClawConfig;
   runtimeConfig?: OpenClawConfig;
-  getRuntimeConfig?: () => OpenClawConfig | undefined;
 }) {
-  const { options, resolvedConfig, runtimeConfig, getRuntimeConfig } = params;
+  const { options, resolvedConfig, runtimeConfig } = params;
   const sessionAgentId = resolveSessionAgentId({
     sessionKey: options?.agentSessionKey,
     config: resolvedConfig,
@@ -51,7 +50,6 @@ export function resolveOpenClawPluginToolInputs(params: {
     context: {
       config: options?.config,
       runtimeConfig,
-      getRuntimeConfig,
       fsPolicy: options?.fsPolicy,
       workspaceDir,
       agentDir: options?.agentDir,

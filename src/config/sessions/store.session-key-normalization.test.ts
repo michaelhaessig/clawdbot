@@ -118,14 +118,13 @@ describe("session store key normalization", () => {
   });
 
   it("preserves updatedAt when recording inbound metadata for an existing session", async () => {
-    const existingUpdatedAt = Date.now();
     await fs.writeFile(
       storePath,
       JSON.stringify(
         {
           [CANONICAL_KEY]: {
             sessionId: "existing-session",
-            updatedAt: existingUpdatedAt,
+            updatedAt: 1111,
             chatType: "direct",
             channel: "webchat",
             origin: {
@@ -151,7 +150,7 @@ describe("session store key normalization", () => {
 
     const store = loadSessionStore(storePath, { skipCache: true });
     expect(store[CANONICAL_KEY]?.sessionId).toBe("existing-session");
-    expect(store[CANONICAL_KEY]?.updatedAt).toBe(existingUpdatedAt);
+    expect(store[CANONICAL_KEY]?.updatedAt).toBe(1111);
     expect(store[CANONICAL_KEY]?.origin?.provider).toBe("webchat");
   });
 });

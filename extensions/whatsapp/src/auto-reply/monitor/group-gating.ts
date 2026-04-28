@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { loadConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
   getPrimaryIdentityId,
   getReplyContext,
@@ -6,12 +6,11 @@ import {
   getSenderIdentity,
   identitiesOverlap,
 } from "../../identity.js";
-import { resolveWhatsAppInboundPolicy } from "../../inbound-policy.js";
 import type { MentionConfig } from "../mentions.js";
 import { buildMentionConfig, debugMention, resolveOwnerList } from "../mentions.js";
 import type { WebInboundMsg } from "../types.js";
 import { stripMentionsForCommand } from "./commands.js";
-import { resolveGroupActivationFor } from "./group-activation.js";
+import { resolveGroupActivationFor, resolveGroupPolicyFor } from "./group-activation.js";
 import {
   hasControlCommand,
   implicitMentionKindWhen,
@@ -31,10 +30,8 @@ export type GroupHistoryEntry = {
 };
 
 type ApplyGroupGatingParams = {
-  cfg: OpenClawConfig;
+  cfg: ReturnType<typeof loadConfig>;
   msg: WebInboundMsg;
-  mentionText?: string;
-  deferMissingMention?: boolean;
   conversationId: string;
   groupHistoryKey: string;
   agentId: string;
@@ -60,7 +57,6 @@ function isOwnerSender(baseMentionConfig: MentionConfig, msg: WebInboundMsg) {
 
 function recordPendingGroupHistoryEntry(params: {
   msg: WebInboundMsg;
-  body?: string;
   groupHistories: Map<string, GroupHistoryEntry[]>;
   groupHistoryKey: string;
   groupHistoryLimit: number;
@@ -79,7 +75,7 @@ function recordPendingGroupHistoryEntry(params: {
     limit: params.groupHistoryLimit,
     entry: {
       sender,
-      body: params.body ?? params.msg.body,
+      body: params.msg.body,
       timestamp: params.msg.timestamp,
       id: params.msg.id,
       senderJid: senderIdentity.jid ?? params.msg.senderJid,
@@ -87,15 +83,10 @@ function recordPendingGroupHistoryEntry(params: {
   });
 }
 
-function skipGroupMessageAndStoreHistory(
-  params: ApplyGroupGatingParams,
-  verboseMessage: string,
-  body?: string,
-) {
+function skipGroupMessageAndStoreHistory(params: ApplyGroupGatingParams, verboseMessage: string) {
   params.logVerbose(verboseMessage);
   recordPendingGroupHistoryEntry({
     msg: params.msg,
-    body,
     groupHistories: params.groupHistories,
     groupHistoryKey: params.groupHistoryKey,
     groupHistoryLimit: params.groupHistoryLimit,
@@ -103,18 +94,11 @@ function skipGroupMessageAndStoreHistory(
   return { shouldProcess: false } as const;
 }
 
-export async function applyGroupGating(params: ApplyGroupGatingParams) {
+export function applyGroupGating(params: ApplyGroupGatingParams) {
   const sender = getSenderIdentity(params.msg);
   const self = getSelfIdentity(params.msg, params.authDir);
-  const inboundPolicy = resolveWhatsAppInboundPolicy({
-    cfg: params.cfg,
-    accountId: params.msg.accountId,
-    selfE164: self.e164 ?? null,
-  });
-  const conversationGroupPolicy = inboundPolicy.resolveConversationGroupPolicy(
-    params.conversationId,
-  );
-  if (conversationGroupPolicy.allowlistEnabled && !conversationGroupPolicy.allowed) {
+  const groupPolicy = resolveGroupPolicyFor(params.cfg, params.conversationId);
+  if (groupPolicy.allowlistEnabled && !groupPolicy.allowed) {
     params.logVerbose(`Skipping group message ${params.conversationId} (not in allowlist)`);
     return { shouldProcess: false };
   }
@@ -126,23 +110,14 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
     sender.name ?? undefined,
   );
 
-  const baseMentionConfig = {
-    ...params.baseMentionConfig,
-    allowFrom: inboundPolicy.configuredAllowFrom,
-  };
-  const mentionConfig = {
-    ...buildMentionConfig(params.cfg, params.agentId),
-    allowFrom: inboundPolicy.configuredAllowFrom,
-  };
-  const mentionMsg =
-    params.mentionText !== undefined ? { ...params.msg, body: params.mentionText } : params.msg;
+  const mentionConfig = buildMentionConfig(params.cfg, params.agentId);
   const commandBody = stripMentionsForCommand(
-    mentionMsg.body,
+    params.msg.body,
     mentionConfig.mentionRegexes,
     self.e164,
   );
   const activationCommand = parseActivationCommand(commandBody);
-  const owner = isOwnerSender(baseMentionConfig, params.msg);
+  const owner = isOwnerSender(params.baseMentionConfig, params.msg);
   const shouldBypassMention = owner && hasControlCommand(commandBody, params.cfg);
 
   if (activationCommand.hasCommand && !owner) {
@@ -152,7 +127,7 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
     );
   }
 
-  const mentionDebug = debugMention(mentionMsg, mentionConfig, params.authDir);
+  const mentionDebug = debugMention(params.msg, mentionConfig, params.authDir);
   params.replyLogger.debug(
     {
       conversationId: params.conversationId,
@@ -162,9 +137,8 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
     "group mention debug",
   );
   const wasMentioned = mentionDebug.wasMentioned;
-  const activation = await resolveGroupActivationFor({
+  const activation = resolveGroupActivationFor({
     cfg: params.cfg,
-    accountId: inboundPolicy.account.accountId,
     agentId: params.agentId,
     sessionKey: params.sessionKey,
     conversationId: params.conversationId,
@@ -200,16 +174,9 @@ export async function applyGroupGating(params: ApplyGroupGatingParams) {
   const effectiveWasMentioned = mentionDecision.effectiveWasMentioned || shouldBypassMention;
   params.msg.wasMentioned = effectiveWasMentioned;
   if (!shouldBypassMention && requireMention && mentionDecision.shouldSkip) {
-    if (params.deferMissingMention === true) {
-      params.logVerbose(
-        `Deferring group mention skip until audio preflight completes in ${params.conversationId}`,
-      );
-      return { shouldProcess: false, needsMentionText: true } as const;
-    }
     return skipGroupMessageAndStoreHistory(
       params,
-      `Group message stored for context (no mention detected) in ${params.conversationId}: ${mentionMsg.body}`,
-      params.mentionText,
+      `Group message stored for context (no mention detected) in ${params.conversationId}: ${params.msg.body}`,
     );
   }
 

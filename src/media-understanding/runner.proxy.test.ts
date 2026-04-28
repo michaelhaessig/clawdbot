@@ -3,15 +3,25 @@ import type { OpenClawConfig } from "../config/types.js";
 import { withAudioFixture, withVideoFixture } from "./runner.test-utils.js";
 import type { AudioTranscriptionRequest, VideoDescriptionRequest } from "./types.js";
 
-vi.mock("../agents/model-auth.js", async () => {
-  const { createAvailableModelAuthMockModule } = await import("./runner.test-mocks.js");
-  return createAvailableModelAuthMockModule();
-});
+const modelAuthMocks = vi.hoisted(() => ({
+  hasAvailableAuthForProvider: vi.fn(() => true),
+  resolveApiKeyForProvider: vi.fn(async () => ({
+    apiKey: "test-key",
+    source: "test",
+    mode: "api-key",
+  })),
+  requireApiKey: vi.fn((auth: { apiKey?: string }) => auth.apiKey ?? "test-key"),
+}));
 
-vi.mock("../plugins/capability-provider-runtime.js", async () => {
-  const { createEmptyCapabilityProviderMockModule } = await import("./runner.test-mocks.js");
-  return createEmptyCapabilityProviderMockModule();
-});
+vi.mock("../agents/model-auth.js", () => ({
+  hasAvailableAuthForProvider: modelAuthMocks.hasAvailableAuthForProvider,
+  resolveApiKeyForProvider: modelAuthMocks.resolveApiKeyForProvider,
+  requireApiKey: modelAuthMocks.requireApiKey,
+}));
+
+vi.mock("../plugins/capability-provider-runtime.js", () => ({
+  resolvePluginCapabilityProviders: () => [],
+}));
 
 const proxyFetchMocks = vi.hoisted(() => {
   const proxyFetch = vi.fn() as unknown as typeof fetch;
@@ -35,28 +45,6 @@ let buildProviderRegistry: typeof import("./runner.js").buildProviderRegistry;
 let clearMediaUnderstandingBinaryCacheForTests: typeof import("./runner.js").clearMediaUnderstandingBinaryCacheForTests;
 let runCapability: typeof import("./runner.js").runCapability;
 
-function createOpenAiAudioCfg(providerOverrides: Record<string, unknown> = {}): OpenClawConfig {
-  return {
-    models: {
-      providers: {
-        openai: {
-          apiKey: "test-key", // pragma: allowlist secret
-          ...providerOverrides,
-          models: [],
-        },
-      },
-    },
-    tools: {
-      media: {
-        audio: {
-          enabled: true,
-          models: [{ provider: "openai", model: "whisper-1" }],
-        },
-      },
-    },
-  } as unknown as OpenClawConfig;
-}
-
 async function runAudioCapabilityWithFetchCapture(params: {
   fixturePrefix: string;
   outputText: string;
@@ -74,9 +62,28 @@ async function runAudioCapabilityWithFetchCapture(params: {
       },
     });
 
+    const cfg = {
+      models: {
+        providers: {
+          openai: {
+            apiKey: "test-key", // pragma: allowlist secret
+            models: [],
+          },
+        },
+      },
+      tools: {
+        media: {
+          audio: {
+            enabled: true,
+            models: [{ provider: "openai", model: "whisper-1" }],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
     const result = await runCapability({
       capability: "audio",
-      cfg: createOpenAiAudioCfg(),
+      cfg,
       ctx,
       attachments: cache,
       media,
@@ -187,13 +194,31 @@ describe("runCapability proxy fetch passthrough", () => {
         },
       });
 
+      const cfg = {
+        models: {
+          providers: {
+            openai: {
+              apiKey: "test-key", // pragma: allowlist secret
+              request: {
+                allowPrivateNetwork: true,
+              },
+              models: [],
+            },
+          },
+        },
+        tools: {
+          media: {
+            audio: {
+              enabled: true,
+              models: [{ provider: "openai", model: "whisper-1" }],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
       const result = await runCapability({
         capability: "audio",
-        cfg: createOpenAiAudioCfg({
-          request: {
-            allowPrivateNetwork: true,
-          },
-        }),
+        cfg,
         ctx,
         attachments: cache,
         media,

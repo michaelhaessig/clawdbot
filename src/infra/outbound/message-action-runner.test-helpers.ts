@@ -9,18 +9,18 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createChannelTestPluginBase } from "../../test-utils/channel-plugins.js";
 import { runMessageAction } from "./message-action-runner.js";
 
-export const workspaceConfig = {
+export const slackConfig = {
   channels: {
-    workspace: {
-      botToken: "workspace-test",
-      appToken: "workspace-app-test",
+    slack: {
+      botToken: "xoxb-test",
+      appToken: "xapp-test",
     },
   },
 } as OpenClawConfig;
 
-export const directChatConfig = {
+export const whatsappConfig = {
   channels: {
-    directchat: {
+    whatsapp: {
       allowFrom: ["*"],
     },
   },
@@ -60,7 +60,7 @@ export const runDrySend = (params: {
 
 type ResolvedTestTarget = { to: string; kind: ChannelDirectoryEntryKind };
 
-export function normalizeWorkspaceTarget(raw: string): string {
+export function normalizeSlackTarget(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) {
     return trimmed;
@@ -82,7 +82,7 @@ export function normalizeWorkspaceTarget(raw: string): string {
 }
 
 export function createConfiguredTestPlugin(params: {
-  id: string;
+  id: "slack" | "telegram" | "whatsapp";
   isConfigured: (cfg: OpenClawConfig) => boolean;
   normalizeTarget: (raw: string) => string | undefined;
   resolveTarget: (input: string) => ResolvedTestTarget | null;
@@ -114,12 +114,12 @@ export function createConfiguredTestPlugin(params: {
   };
 }
 
-export const workspaceTestPlugin = createConfiguredTestPlugin({
-  id: "workspace",
-  isConfigured: (cfg) => Boolean(cfg.channels?.workspace?.botToken?.trim()),
-  normalizeTarget: (raw) => normalizeWorkspaceTarget(raw) || undefined,
+export const slackTestPlugin = createConfiguredTestPlugin({
+  id: "slack",
+  isConfigured: (cfg) => Boolean(cfg.channels?.slack?.botToken?.trim()),
+  normalizeTarget: (raw) => normalizeSlackTarget(raw) || undefined,
   resolveTarget: (input) => {
-    const normalized = normalizeWorkspaceTarget(input);
+    const normalized = normalizeSlackTarget(input);
     if (!normalized) {
       return null;
     }
@@ -131,9 +131,9 @@ export const workspaceTestPlugin = createConfiguredTestPlugin({
   },
 });
 
-export const forumTestPlugin = createConfiguredTestPlugin({
-  id: "forum",
-  isConfigured: (cfg) => Boolean(cfg.channels?.forum?.botToken?.trim()),
+export const telegramTestPlugin = createConfiguredTestPlugin({
+  id: "telegram",
+  isConfigured: (cfg) => Boolean(cfg.channels?.telegram?.botToken?.trim()),
   normalizeTarget: (raw) => raw.trim() || undefined,
   resolveTarget: (input) => {
     const normalized = input.trim();
@@ -141,15 +141,15 @@ export const forumTestPlugin = createConfiguredTestPlugin({
       return null;
     }
     return {
-      to: normalized.replace(/^forum:/i, ""),
+      to: normalized.replace(/^telegram:/i, ""),
       kind: normalized.startsWith("@") ? "user" : "group",
     };
   },
 });
 
-export const directChatTestPlugin = createConfiguredTestPlugin({
-  id: "directchat",
-  isConfigured: (cfg) => Boolean(cfg.channels?.directchat),
+export const whatsappTestPlugin = createConfiguredTestPlugin({
+  id: "whatsapp",
+  isConfigured: (cfg) => Boolean(cfg.channels?.whatsapp),
   normalizeTarget: (raw) => raw.trim() || undefined,
   resolveTarget: (input) => {
     const normalized = input.trim();

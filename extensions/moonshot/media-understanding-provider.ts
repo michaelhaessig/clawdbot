@@ -14,10 +14,9 @@ import {
   postJsonRequest,
   resolveProviderHttpRequestConfig,
 } from "openclaw/plugin-sdk/provider-http";
-import { MOONSHOT_DEFAULT_MODEL_ID } from "./provider-catalog.js";
 
 export const DEFAULT_MOONSHOT_VIDEO_BASE_URL = "https://api.moonshot.ai/v1";
-const DEFAULT_MOONSHOT_VIDEO_MODEL = MOONSHOT_DEFAULT_MODEL_ID;
+const DEFAULT_MOONSHOT_VIDEO_MODEL = "kimi-k2.5";
 const DEFAULT_MOONSHOT_VIDEO_PROMPT = "Describe the video.";
 
 export async function describeMoonshotVideo(
@@ -77,7 +76,7 @@ export async function describeMoonshotVideo(
 export const moonshotMediaUnderstandingProvider: MediaUnderstandingProvider = {
   id: "moonshot",
   capabilities: ["image", "video"],
-  defaultModels: { image: MOONSHOT_DEFAULT_MODEL_ID, video: DEFAULT_MOONSHOT_VIDEO_MODEL },
+  defaultModels: { image: "kimi-k2.5", video: DEFAULT_MOONSHOT_VIDEO_MODEL },
   autoPriority: { video: 20 },
   describeImage: describeImageWithModel,
   describeImages: describeImagesWithModel,

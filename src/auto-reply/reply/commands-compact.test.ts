@@ -1,10 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAgentDir } from "../../agents/agent-scope.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import {
-  resolveAgentDirMock,
-  resolveSessionAgentIdMock,
-} from "./commands-agent-scope.test-support.js";
+import { handleCompactCommand } from "./commands-compact.js";
 import type { HandleCommandsParams } from "./commands-types.js";
+
+const resolveSessionAgentIdMock = vi.hoisted(() => vi.fn(() => "main"));
+
+vi.mock("../../agents/agent-scope.js", async () => {
+  const actual = await vi.importActual<typeof import("../../agents/agent-scope.js")>(
+    "../../agents/agent-scope.js",
+  );
+  return {
+    ...actual,
+    resolveSessionAgentId: resolveSessionAgentIdMock,
+    resolveAgentDir: vi.fn(actual.resolveAgentDir),
+  };
+});
 
 vi.mock("./commands-compact.runtime.js", () => ({
   abortEmbeddedPiRun: vi.fn(),
@@ -22,7 +33,6 @@ vi.mock("./commands-compact.runtime.js", () => ({
 
 const { compactEmbeddedPiSession, incrementCompactionCount, resolveSessionFilePathOptions } =
   await import("./commands-compact.runtime.js");
-const { handleCompactCommand } = await import("./commands-compact.js");
 
 function buildCompactParams(
   commandBodyNormalized: string,
@@ -53,9 +63,6 @@ function buildCompactParams(
 describe("handleCompactCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resolveAgentDirMock.mockImplementation(
-      (_cfg: unknown, agentId: string) => `/tmp/workspace/.openclaw/agents/${agentId}/agent`,
-    );
     resolveSessionAgentIdMock.mockReturnValue("main");
   });
 
@@ -195,7 +202,7 @@ describe("handleCompactCommand", () => {
       compacted: false,
     });
     resolveSessionAgentIdMock.mockReturnValue("target");
-    resolveAgentDirMock.mockReturnValue("/tmp/target-agent");
+    vi.mocked(resolveAgentDir).mockReturnValue("/tmp/target-agent");
 
     await handleCompactCommand(
       {
@@ -219,7 +226,7 @@ describe("handleCompactCommand", () => {
         agentDir: "/tmp/target-agent",
       }),
     );
-    expect(resolveAgentDirMock).toHaveBeenCalledWith(expect.any(Object), "target");
+    expect(vi.mocked(resolveAgentDir)).toHaveBeenCalledWith(expect.any(Object), "target");
   });
 
   it("prefers the target session entry for compaction runtime metadata", async () => {

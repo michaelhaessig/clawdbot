@@ -28,10 +28,10 @@ export type ContainerItem = {
   lastUsedAtMs: number;
 };
 
-export function countRunning(items: readonly { running: boolean }[]): number {
+export function countRunning<T extends { running: boolean }>(items: T[]): number {
   return items.filter((item) => item.running).length;
 }
 
-export function countMismatches(items: readonly { imageMatch: boolean }[]): number {
+export function countMismatches<T extends { imageMatch: boolean }>(items: T[]): number {
   return items.filter((item) => !item.imageMatch).length;
 }

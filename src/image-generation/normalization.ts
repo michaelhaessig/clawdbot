@@ -6,12 +6,9 @@ import {
   type MediaNormalizationEntry,
 } from "../media-generation/runtime-shared.js";
 import type {
-  ImageGenerationBackground,
   ImageGenerationIgnoredOverride,
   ImageGenerationNormalization,
-  ImageGenerationOutputFormat,
   ImageGenerationProvider,
-  ImageGenerationQuality,
   ImageGenerationResolution,
   ImageGenerationSourceImage,
 } from "./types.js";
@@ -20,9 +17,6 @@ export type ResolvedImageGenerationOverrides = {
   size?: string;
   aspectRatio?: string;
   resolution?: ImageGenerationResolution;
-  quality?: ImageGenerationQuality;
-  outputFormat?: ImageGenerationOutputFormat;
-  background?: ImageGenerationBackground;
   ignoredOverrides: ImageGenerationIgnoredOverride[];
   normalization?: ImageGenerationNormalization;
 };
@@ -42,9 +36,6 @@ export function resolveImageGenerationOverrides(params: {
   size?: string;
   aspectRatio?: string;
   resolution?: ImageGenerationResolution;
-  quality?: ImageGenerationQuality;
-  outputFormat?: ImageGenerationOutputFormat;
-  background?: ImageGenerationBackground;
   inputImages?: ImageGenerationSourceImage[];
 }): ResolvedImageGenerationOverrides {
   const hasInputImages = (params.inputImages?.length ?? 0) > 0;
@@ -57,9 +48,6 @@ export function resolveImageGenerationOverrides(params: {
   let size = params.size;
   let aspectRatio = params.aspectRatio;
   let resolution = params.resolution;
-  let quality = params.quality;
-  let outputFormat = params.outputFormat;
-  let background = params.background;
 
   if (size && (geometry?.sizes?.length ?? 0) > 0 && modeCaps.supportsSize) {
     const normalizedSize = resolveClosestSize({
@@ -167,24 +155,6 @@ export function resolveImageGenerationOverrides(params: {
     resolution = undefined;
   }
 
-  const supportedQualities = params.provider.capabilities.output?.qualities;
-  if (quality && !(supportedQualities ?? []).includes(quality)) {
-    ignoredOverrides.push({ key: "quality", value: quality });
-    quality = undefined;
-  }
-
-  const supportedFormats = params.provider.capabilities.output?.formats;
-  if (outputFormat && !(supportedFormats ?? []).includes(outputFormat)) {
-    ignoredOverrides.push({ key: "outputFormat", value: outputFormat });
-    outputFormat = undefined;
-  }
-
-  const supportedBackgrounds = params.provider.capabilities.output?.backgrounds;
-  if (background && !(supportedBackgrounds ?? []).includes(background)) {
-    ignoredOverrides.push({ key: "background", value: background });
-    background = undefined;
-  }
-
   if (
     !normalization.aspectRatio &&
     aspectRatio &&
@@ -228,9 +198,6 @@ export function resolveImageGenerationOverrides(params: {
     size,
     aspectRatio,
     resolution,
-    quality,
-    outputFormat,
-    background,
     ignoredOverrides,
     normalization: finalizeImageNormalization(normalization),
   };

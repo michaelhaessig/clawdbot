@@ -1,6 +1,6 @@
 import { intro, note, outro, spinner } from "@clack/prompts";
 import { stylePromptTitle } from "openclaw/plugin-sdk/cli-runtime";
-import { logConfigUpdated, updateConfig } from "openclaw/plugin-sdk/config-mutation";
+import { logConfigUpdated, updateConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
   applyAuthProfileConfig,
   ensureAuthProfileStore,
@@ -32,11 +32,11 @@ type DeviceTokenResponse =
       error_uri?: string;
     };
 
-function parseJsonResponse(value: unknown): Record<string, unknown> {
+function parseJsonResponse<T>(value: unknown): T {
   if (!value || typeof value !== "object") {
     throw new Error("Unexpected response from GitHub");
   }
-  return value as Record<string, unknown>;
+  return value as T;
 }
 
 async function requestDeviceCode(params: { scope: string }): Promise<DeviceCodeResponse> {
@@ -58,7 +58,7 @@ async function requestDeviceCode(params: { scope: string }): Promise<DeviceCodeR
     throw new Error(`GitHub device code failed: HTTP ${res.status}`);
   }
 
-  const json = parseJsonResponse(await res.json()) as DeviceCodeResponse;
+  const json = parseJsonResponse<DeviceCodeResponse>(await res.json());
   if (!json.device_code || !json.user_code || !json.verification_uri) {
     throw new Error("GitHub device code response missing fields");
   }
@@ -90,7 +90,7 @@ async function pollForAccessToken(params: {
       throw new Error(`GitHub device token failed: HTTP ${res.status}`);
     }
 
-    const json = parseJsonResponse(await res.json()) as DeviceTokenResponse;
+    const json = parseJsonResponse<DeviceTokenResponse>(await res.json());
     if ("access_token" in json && typeof json.access_token === "string") {
       return json.access_token;
     }

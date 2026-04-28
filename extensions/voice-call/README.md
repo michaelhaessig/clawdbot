@@ -74,9 +74,6 @@ Put under `plugins.entries.voice-call.config`:
     defaultMode: "notify", // or "conversation"
   },
 
-  // Optional response agent workspace. Defaults to "main".
-  agentId: "main",
-
   streaming: {
     enabled: true,
     // optional; if omitted, Voice Call picks the first registered

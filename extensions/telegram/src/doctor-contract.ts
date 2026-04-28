@@ -2,12 +2,12 @@ import type {
   ChannelDoctorConfigMutation,
   ChannelDoctorLegacyConfigRule,
 } from "openclaw/plugin-sdk/channel-contract";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
   asObjectRecord,
   hasLegacyAccountStreamingAliases,
   hasLegacyStreamingAliases,
-  normalizeLegacyChannelAliases,
+  normalizeLegacyStreamingAliases,
 } from "openclaw/plugin-sdk/runtime-doctor";
 import { resolveTelegramPreviewStreamMode } from "./preview-streaming.js";
 
@@ -93,17 +93,42 @@ export function normalizeCompatibilityConfig({
     }
   }
 
-  const aliases = normalizeLegacyChannelAliases({
+  const streaming = normalizeLegacyStreamingAliases({
     entry: updated,
     pathPrefix: "channels.telegram",
     changes,
-    resolveStreamingOptions: (entry) => ({
-      includePreviewChunk: true,
-      resolvedMode: resolveTelegramPreviewStreamMode(entry),
-    }),
+    includePreviewChunk: true,
+    resolvedMode: resolveTelegramPreviewStreamMode(updated),
   });
-  updated = aliases.entry;
-  changed = changed || aliases.changed;
+  updated = streaming.entry;
+  changed = changed || streaming.changed;
+
+  const rawAccounts = asObjectRecord(updated.accounts);
+  if (rawAccounts) {
+    let accountsChanged = false;
+    const accounts = { ...rawAccounts };
+    for (const [accountId, rawAccount] of Object.entries(rawAccounts)) {
+      const account = asObjectRecord(rawAccount);
+      if (!account) {
+        continue;
+      }
+      const accountStreaming = normalizeLegacyStreamingAliases({
+        entry: account,
+        pathPrefix: `channels.telegram.accounts.${accountId}`,
+        changes,
+        includePreviewChunk: true,
+        resolvedMode: resolveTelegramPreviewStreamMode(account),
+      });
+      if (accountStreaming.changed) {
+        accounts[accountId] = accountStreaming.entry;
+        accountsChanged = true;
+      }
+    }
+    if (accountsChanged) {
+      updated = { ...updated, accounts };
+      changed = true;
+    }
+  }
 
   if (!changed && changes.length === 0) {
     return { config: cfg, changes: [] };

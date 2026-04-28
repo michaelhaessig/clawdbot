@@ -1,6 +1,5 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPiAiStreamSimpleMock } from "../../../test/helpers/agents/pi-ai-stream-simple-mock.js";
 import { isOpenRouterAnthropicModelRef } from "./anthropic-family-cache-semantics.js";
 import { __testing as extraParamsTesting, applyExtraParamsToAgent } from "./extra-params.js";
 import { resolveCacheRetention } from "./prompt-cache-retention.js";
@@ -37,12 +36,9 @@ vi.mock("./logger.js", () => ({
   },
 }));
 
-vi.mock("@mariozechner/pi-ai", () => createPiAiStreamSimpleMock());
-
 beforeEach(() => {
   extraParamsTesting.setProviderRuntimeDepsForTest({
     prepareProviderExtraParams: () => undefined,
-    resolveProviderExtraParamsForTransport: () => undefined,
     wrapProviderStreamFn: () => undefined,
   });
 });
@@ -284,39 +280,6 @@ describe("cacheRetention default behavior", () => {
         "claude-sonnet-4-6",
       ),
     ).toBe("none");
-  });
-
-  it("passes through explicit cacheRetention for opaque Bedrock app inference profile ARNs", () => {
-    expect(
-      resolveCacheRetention(
-        { cacheRetention: "long" },
-        "amazon-bedrock",
-        "openai-completions",
-        "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/z27qyso459da",
-      ),
-    ).toBe("long");
-  });
-
-  it("passes through explicit 'none' for opaque Bedrock app inference profile ARNs", () => {
-    expect(
-      resolveCacheRetention(
-        { cacheRetention: "none" },
-        "amazon-bedrock",
-        "openai-completions",
-        "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/z27qyso459da",
-      ),
-    ).toBe("none");
-  });
-
-  it("does not default cacheRetention for opaque Bedrock app inference profile ARNs", () => {
-    expect(
-      resolveCacheRetention(
-        undefined,
-        "amazon-bedrock",
-        "openai-completions",
-        "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/z27qyso459da",
-      ),
-    ).toBeUndefined();
   });
 });
 

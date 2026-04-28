@@ -1,15 +1,13 @@
 import { normalizeAccountId } from "openclaw/plugin-sdk/account-id";
 import {
   buildChannelOutboundSessionRoute,
-  buildThreadAwareOutboundSessionRoute,
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/channel-core";
-import { parseThreadSessionSuffix } from "openclaw/plugin-sdk/routing";
 import {
   loadSessionStore,
   resolveSessionStoreEntry,
   resolveStorePath,
-} from "openclaw/plugin-sdk/session-store-runtime";
+} from "openclaw/plugin-sdk/config-runtime";
 import { resolveMatrixAccountConfig } from "./matrix/account-config.js";
 import { resolveDefaultMatrixAccountId } from "./matrix/accounts.js";
 import { resolveMatrixStoredSessionMeta } from "./matrix/session-store-metadata.js";
@@ -40,9 +38,7 @@ function resolveMatrixCurrentDmRoomId(params: {
   currentSessionKey?: string;
   targetUserId: string;
 }): string | undefined {
-  const sessionKey =
-    parseThreadSessionSuffix(params.currentSessionKey).baseSessionKey ??
-    params.currentSessionKey?.trim();
+  const sessionKey = params.currentSessionKey?.trim();
   if (!sessionKey) {
     return undefined;
   }
@@ -104,7 +100,7 @@ export function resolveMatrixOutboundSessionRoute(params: ChannelOutboundSession
   const from = target.kind === "user" ? `matrix:${target.id}` : `matrix:channel:${target.id}`;
   const to = `room:${roomScopedDmId ?? target.id}`;
 
-  const baseRoute = buildChannelOutboundSessionRoute({
+  return buildChannelOutboundSessionRoute({
     cfg: params.cfg,
     agentId: params.agentId,
     channel: "matrix",
@@ -113,14 +109,5 @@ export function resolveMatrixOutboundSessionRoute(params: ChannelOutboundSession
     chatType,
     from,
     to,
-  });
-  return buildThreadAwareOutboundSessionRoute({
-    route: baseRoute,
-    replyToId: params.replyToId,
-    threadId: params.threadId,
-    currentSessionKey: params.currentSessionKey,
-    normalizeThreadId: (threadId) => threadId,
-    canRecoverCurrentThread: ({ route }) =>
-      route.peer.kind !== "direct" || (params.cfg.session?.dmScope ?? "main") !== "main",
   });
 }

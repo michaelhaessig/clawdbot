@@ -579,25 +579,15 @@ const buildUsageInsightStats = (
   const errorRate = aggregates.messages.total
     ? aggregates.messages.errors / aggregates.messages.total
     : 0;
-  let peakErrorDay: UsageInsightStats["peakErrorDay"];
-  for (const day of aggregates.daily) {
-    if (day.messages <= 0 || day.errors <= 0) {
-      continue;
-    }
-    const candidate = {
+  const peakErrorDay = aggregates.daily
+    .filter((day) => day.messages > 0 && day.errors > 0)
+    .map((day) => ({
       date: day.date,
       errors: day.errors,
       messages: day.messages,
       rate: day.errors / day.messages,
-    };
-    if (
-      !peakErrorDay ||
-      candidate.rate > peakErrorDay.rate ||
-      (candidate.rate === peakErrorDay.rate && candidate.errors > peakErrorDay.errors)
-    ) {
-      peakErrorDay = candidate;
-    }
-  }
+    }))
+    .toSorted((a, b) => b.rate - a.rate || b.errors - a.errors)[0];
 
   return {
     durationSumMs,

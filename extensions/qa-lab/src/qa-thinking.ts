@@ -1,12 +1,4 @@
-export type QaThinkingLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "adaptive"
-  | "max";
+export type QaThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
 
 export function normalizeQaThinkingLevel(input: unknown): QaThinkingLevel | undefined {
   const value = typeof input === "string" ? input.trim().toLowerCase() : "";
@@ -31,9 +23,6 @@ export function normalizeQaThinkingLevel(input: unknown): QaThinkingLevel | unde
   }
   if (collapsed === "adaptive" || collapsed === "auto") {
     return "adaptive";
-  }
-  if (collapsed === "max") {
-    return "max";
   }
   return undefined;
 }

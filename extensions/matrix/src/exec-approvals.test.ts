@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getMatrixExecApprovalApprovers,
@@ -118,13 +118,13 @@ function makeForeignChannelApprovalRequest(params: {
 }
 
 describe("matrix exec approvals", () => {
-  it("requires enablement and approvers before enabling the client", () => {
+  it("auto-enables when approvers resolve and disables only when forced off", () => {
     expect(isMatrixExecApprovalClientEnabled({ cfg: buildConfig() })).toBe(false);
     expect(
       isMatrixExecApprovalClientEnabled({
         cfg: buildConfig(undefined, { dm: { allowFrom: ["@owner:example.org"] } }),
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(isMatrixExecApprovalClientEnabled({ cfg: buildConfig({ enabled: true }) })).toBe(false);
     expect(
       isMatrixExecApprovalClientEnabled({

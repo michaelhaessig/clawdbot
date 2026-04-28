@@ -5,9 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import { saveAuthProfileStore } from "./auth-profiles/store.js";
 import { ensurePiAuthJsonFromAuthProfiles } from "./pi-auth-json.js";
 
-vi.mock("./auth-profiles/external-auth.js", () => ({
-  overlayExternalAuthProfiles: <T>(store: T) => store,
-  shouldPersistExternalAuthProfile: () => true,
+vi.mock("../plugins/provider-runtime.js", () => ({
+  resolveExternalAuthProfilesWithPlugins: () => [],
+}));
+
+vi.mock("./auth-profiles/external-cli-sync.js", () => ({
+  readManagedExternalCliCredential: () => null,
+  syncExternalCliCredentials: () => false,
 }));
 
 type AuthProfileStore = Parameters<typeof saveAuthProfileStore>[0];

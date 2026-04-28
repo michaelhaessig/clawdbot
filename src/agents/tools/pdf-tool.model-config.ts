@@ -1,9 +1,9 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
-  providerSupportsNativePdfDocument,
-  resolveAutoMediaKeyProviders,
-  resolveDefaultMediaModel,
-} from "../../media-understanding/defaults.js";
+  bundledProviderSupportsNativePdfDocument,
+  resolveBundledAutoMediaKeyProviders,
+  resolveBundledDefaultMediaModel,
+} from "../../media-understanding/bundled-defaults.js";
 import {
   coerceImageModelConfig,
   type ImageModelConfig,
@@ -12,12 +12,12 @@ import {
 import { hasAuthForProvider, resolveDefaultModelRef } from "./model-config.helpers.js";
 import { coercePdfModelConfig } from "./pdf-tool.helpers.js";
 
-function resolveImageCandidateRefs(params: {
+function resolveBundledImageCandidateRefs(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
   filter?: (providerId: string) => boolean;
 }): string[] {
-  return resolveAutoMediaKeyProviders({ capability: "image", cfg: params.cfg })
+  return resolveBundledAutoMediaKeyProviders("image")
     .filter((providerId) => !params.filter || params.filter(providerId))
     .filter((providerId) => hasAuthForProvider({ provider: providerId, agentDir: params.agentDir }))
     .map((providerId) => {
@@ -26,8 +26,7 @@ function resolveImageCandidateRefs(params: {
           cfg: params.cfg,
           provider: providerId,
         })?.split("/")[1] ??
-        resolveDefaultMediaModel({
-          cfg: params.cfg,
+        resolveBundledDefaultMediaModel({
           providerId,
           capability: "image",
         });
@@ -70,21 +69,17 @@ export function resolvePdfModelConfigForTool(params: {
   });
   const providerDefault =
     providerVision?.split("/")[1] ??
-    resolveDefaultMediaModel({
-      cfg: params.cfg,
+    resolveBundledDefaultMediaModel({
       providerId: primary.provider,
       capability: "image",
     });
-  const primarySupportsNativePdf = providerSupportsNativePdfDocument({
-    cfg: params.cfg,
-    providerId: primary.provider,
-  });
-  const nativePdfCandidates = resolveImageCandidateRefs({
+  const primarySupportsNativePdf = bundledProviderSupportsNativePdfDocument(primary.provider);
+  const nativePdfCandidates = resolveBundledImageCandidateRefs({
     cfg: params.cfg,
     agentDir: params.agentDir,
-    filter: (providerId) => providerSupportsNativePdfDocument({ cfg: params.cfg, providerId }),
+    filter: bundledProviderSupportsNativePdfDocument,
   });
-  const genericImageCandidates = resolveImageCandidateRefs({
+  const genericImageCandidates = resolveBundledImageCandidateRefs({
     cfg: params.cfg,
     agentDir: params.agentDir,
   });

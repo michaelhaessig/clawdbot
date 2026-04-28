@@ -36,7 +36,7 @@ export type XaiCodeExecutionResult = {
 export function resolveXaiCodeExecutionConfig(
   config?: Record<string, unknown>,
 ): XaiCodeExecutionConfig {
-  return coerceXaiToolConfig(config) as XaiCodeExecutionConfig;
+  return coerceXaiToolConfig<XaiCodeExecutionConfig>(config);
 }
 
 export function resolveXaiCodeExecutionModel(config?: Record<string, unknown>): string {

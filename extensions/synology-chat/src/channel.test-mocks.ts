@@ -29,11 +29,6 @@ export const resolveAgentRouteMock: Mock<
     accountId,
   };
 });
-let mockRuntimeConfig: unknown = {};
-
-export function setSynologyRuntimeConfigForTest(cfg: unknown): void {
-  mockRuntimeConfig = cfg;
-}
 
 async function readRequestBodyWithLimitForTest(req: IncomingMessage): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
@@ -86,7 +81,7 @@ vi.mock("./client.js", () => ({
 
 vi.mock("./runtime.js", () => ({
   getSynologyRuntime: vi.fn(() => ({
-    config: { current: vi.fn(() => mockRuntimeConfig) },
+    config: { loadConfig: vi.fn().mockResolvedValue({}) },
     channel: {
       routing: {
         resolveAgentRoute: resolveAgentRouteMock,

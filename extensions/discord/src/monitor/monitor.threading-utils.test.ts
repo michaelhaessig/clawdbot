@@ -2,7 +2,6 @@ import type { Client } from "@buape/carbon";
 import type { GatewayPresenceUpdate } from "discord-api-types/v10";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { beforeEach, describe, expect, it } from "vitest";
-import { EMPTY_DISCORD_TEST_CONFIG } from "../test-support/config.js";
 import type { DiscordChannelConfigResolved } from "./allow-list.js";
 import {
   resolveDiscordMemberAllowed,
@@ -285,35 +284,11 @@ describe("resolveDiscordAutoThreadContext", () => {
         name: "no created thread",
         createdThreadId: undefined,
         expectedNull: true,
-        parentInheritanceEnabled: undefined,
       },
       {
-        name: "created thread without parent inheritance",
+        name: "created thread",
         createdThreadId: "thread",
         expectedNull: false,
-        parentInheritanceEnabled: false,
-        expectedModelParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
-        expectedParentSessionKey: undefined,
-      },
-      {
-        name: "created thread with parent inheritance",
-        createdThreadId: "thread",
-        expectedNull: false,
-        parentInheritanceEnabled: true,
-        expectedModelParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
-        expectedParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
       },
     ] as const;
 
@@ -323,7 +298,6 @@ describe("resolveDiscordAutoThreadContext", () => {
         channel: "discord",
         messageChannelId: "parent",
         createdThreadId: testCase.createdThreadId,
-        parentInheritanceEnabled: testCase.parentInheritanceEnabled,
       });
 
       if (testCase.expectedNull) {
@@ -342,9 +316,12 @@ describe("resolveDiscordAutoThreadContext", () => {
           peer: { kind: "channel", id: "thread" },
         }),
       );
-      expect(context?.ParentSessionKey, testCase.name).toBe(testCase.expectedParentSessionKey);
-      expect(context?.ModelParentSessionKey, testCase.name).toBe(
-        testCase.expectedModelParentSessionKey,
+      expect(context?.ParentSessionKey, testCase.name).toBe(
+        buildAgentSessionKey({
+          agentId: "agent",
+          channel: "discord",
+          peer: { kind: "channel", id: "parent" },
+        }),
       );
     }
   });
@@ -446,7 +423,6 @@ describe("maybeCreateDiscordAutoThread", () => {
       threadChannel: null,
       baseText: "hello",
       combinedBody: "hello",
-      cfg: EMPTY_DISCORD_TEST_CONFIG,
     };
   }
 
@@ -487,7 +463,6 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
     client?: Client;
     channelConfig?: DiscordChannelConfigResolved;
     threadChannel?: { id: string } | null;
-    threadParentInheritanceEnabled?: boolean;
   }) {
     return {
       client:
@@ -504,11 +479,9 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
       threadChannel: overrides?.threadChannel ?? null,
       baseText: "hello",
       combinedBody: "hello",
-      cfg: EMPTY_DISCORD_TEST_CONFIG,
       replyToMode: "all" as const,
       agentId: "agent",
       channel: "discord" as const,
-      threadParentInheritanceEnabled: overrides?.threadParentInheritanceEnabled,
     };
   }
 
@@ -524,35 +497,6 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
           channel: "discord",
           peer: { kind: "channel", id: "thread" },
         }),
-        expectedModelParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
-        expectedParentSessionKey: undefined,
-      },
-      {
-        name: "created thread with parent inheritance",
-        params: {
-          threadParentInheritanceEnabled: true,
-        },
-        expectedDeliverTarget: "channel:thread",
-        expectedReplyReference: undefined,
-        expectedSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "thread" },
-        }),
-        expectedModelParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
-        expectedParentSessionKey: buildAgentSessionKey({
-          agentId: "agent",
-          channel: "discord",
-          peer: { kind: "channel", id: "parent" },
-        }),
       },
       {
         name: "existing thread channel",
@@ -562,7 +506,6 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
         expectedDeliverTarget: "channel:thread",
         expectedReplyReference: "m1",
         expectedSessionKey: null,
-        expectedParentSessionKey: undefined,
       },
       {
         name: "autoThread disabled",
@@ -572,7 +515,6 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
         expectedDeliverTarget: "channel:parent",
         expectedReplyReference: "m1",
         expectedSessionKey: null,
-        expectedParentSessionKey: undefined,
       },
     ] as const;
 
@@ -586,12 +528,6 @@ describe("resolveDiscordAutoThreadReplyPlan", () => {
         expect(plan.autoThreadContext, testCase.name).toBeNull();
       } else {
         expect(plan.autoThreadContext?.SessionKey, testCase.name).toBe(testCase.expectedSessionKey);
-        expect(plan.autoThreadContext?.ParentSessionKey, testCase.name).toBe(
-          testCase.expectedParentSessionKey,
-        );
-        expect(plan.autoThreadContext?.ModelParentSessionKey, testCase.name).toBe(
-          testCase.expectedModelParentSessionKey,
-        );
       }
     }
   });

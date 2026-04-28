@@ -14,11 +14,11 @@ export type DispatchFromConfigParams = {
   ctx: FinalizedMsgContext;
   cfg: OpenClawConfig;
   dispatcher: ReplyDispatcher;
-  replyOptions?: Omit<GetReplyOptions, "onBlockReply">;
+  replyOptions?: Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
   replyResolver?: GetReplyFromConfig;
   fastAbortResolver?: TryFastAbortFromMessage;
   formatAbortReplyTextResolver?: FormatAbortReplyText;
-  /** Optional patch applied to the already loaded config before reply resolution. */
+  /** Optional config override passed to getReplyFromConfig (e.g. per-sender timezone). */
   configOverride?: OpenClawConfig;
 };
 

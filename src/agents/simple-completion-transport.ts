@@ -23,9 +23,9 @@ export function prepareModelForSimpleCompletion<TApi extends Api>(params: {
     return model;
   }
 
-  const transportAwareModel = prepareTransportAwareSimpleModel(model, { cfg });
+  const transportAwareModel = prepareTransportAwareSimpleModel(model);
   if (transportAwareModel !== model) {
-    const streamFn = buildTransportAwareSimpleStreamFn(model, { cfg });
+    const streamFn = buildTransportAwareSimpleStreamFn(model);
     if (streamFn) {
       ensureCustomApiRegistered(transportAwareModel.api, streamFn);
       return transportAwareModel;

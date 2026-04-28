@@ -1,1 +1,1 @@
-export { sendMessageSignal, sendTypingSignal } from "./send.js";
+export { sendMessageSignal } from "./send.js";

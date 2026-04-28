@@ -7,31 +7,15 @@ import {
 import { readBooleanParam } from "openclaw/plugin-sdk/boolean-param";
 import { resolveReactionMessageId } from "openclaw/plugin-sdk/channel-actions";
 import type { ChannelMessageActionContext } from "openclaw/plugin-sdk/channel-contract";
-import {
-  normalizeInteractiveReply,
-  normalizeMessagePresentation,
-} from "openclaw/plugin-sdk/interactive-runtime";
+import { normalizeInteractiveReply } from "openclaw/plugin-sdk/interactive-runtime";
 import { normalizeOptionalStringifiedId } from "openclaw/plugin-sdk/text-runtime";
 import { handleDiscordAction } from "../../action-runtime-api.js";
-import {
-  buildDiscordInteractiveComponents,
-  buildDiscordPresentationComponents,
-} from "../shared-interactive.js";
+import { buildDiscordInteractiveComponents } from "../shared-interactive.js";
 import { resolveDiscordChannelId } from "../targets.js";
 import { tryHandleDiscordMessageActionGuildAdmin } from "./handle-action.guild-admin.js";
+import { readDiscordParentIdParam } from "./runtime.shared.js";
 
 const providerId = "discord";
-
-function readCurrentDiscordTarget(
-  toolContext: Pick<ChannelMessageActionContext, "toolContext">["toolContext"],
-): string | undefined {
-  const provider = toolContext?.currentChannelProvider?.trim().toLowerCase();
-  if (provider && provider !== providerId) {
-    return undefined;
-  }
-  const target = toolContext?.currentChannelId?.trim();
-  return target || undefined;
-}
 
 export async function handleDiscordMessageAction(
   ctx: Pick<
@@ -55,23 +39,16 @@ export async function handleDiscordMessageAction(
     mediaReadFile: ctx.mediaReadFile,
   } as const;
 
-  const readTarget = () => {
-    const target =
-      readStringParam(params, "channelId") ??
-      readStringParam(params, "to") ??
-      readCurrentDiscordTarget(ctx.toolContext);
-    if (!target) {
-      throw new Error("Discord channel target is required (use channel:<id>).");
-    }
-    return target;
-  };
-  const resolveChannelId = () => resolveDiscordChannelId(readTarget());
+  const resolveChannelId = () =>
+    resolveDiscordChannelId(
+      readStringParam(params, "channelId") ?? readStringParam(params, "to", { required: true }),
+    );
 
   if (action === "send") {
     const to = readStringParam(params, "to", { required: true });
     const asVoice = readBooleanParam(params, "asVoice") === true;
     const rawComponents =
-      buildDiscordPresentationComponents(normalizeMessagePresentation(params.presentation)) ??
+      params.components ??
       buildDiscordInteractiveComponents(normalizeInteractiveReply(params.interactive));
     const hasComponents =
       Boolean(rawComponents) &&
@@ -155,7 +132,7 @@ export async function handleDiscordMessageAction(
       {
         action: "react",
         accountId: accountId ?? undefined,
-        channelId: readTarget(),
+        channelId: resolveChannelId(),
         messageId,
         emoji,
         remove,
@@ -172,7 +149,7 @@ export async function handleDiscordMessageAction(
       {
         action: "reactions",
         accountId: accountId ?? undefined,
-        channelId: readTarget(),
+        channelId: resolveChannelId(),
         messageId,
         limit,
       },
@@ -317,6 +294,7 @@ export async function handleDiscordMessageAction(
   const adminResult = await tryHandleDiscordMessageActionGuildAdmin({
     ctx,
     resolveChannelId,
+    readParentIdParam: readDiscordParentIdParam,
   });
   if (adminResult !== undefined) {
     return adminResult;

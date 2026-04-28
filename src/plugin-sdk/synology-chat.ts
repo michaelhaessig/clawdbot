@@ -1,18 +1,6 @@
 // Manual facade. Keep loader boundary explicit.
-import type { SecurityAuditFinding } from "../security/audit.types.js";
+type FacadeModule = typeof import("@openclaw/synology-chat/contract-api.js");
 import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-loader.js";
-
-type FacadeModule = {
-  collectSynologyChatSecurityAuditFindings: (params: {
-    accountId?: string | null;
-    account: {
-      accountId?: string;
-      dangerouslyAllowNameMatching?: boolean;
-    };
-    orderedAccountIds: string[];
-    hasExplicitAccountPath: boolean;
-  }) => SecurityAuditFinding[];
-};
 
 function loadFacadeModule(): FacadeModule {
   return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({

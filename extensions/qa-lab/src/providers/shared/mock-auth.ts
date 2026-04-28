@@ -1,6 +1,7 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { applyAuthProfileConfig } from "openclaw/plugin-sdk/provider-auth-api-key";
-import { resolveQaAgentAuthDir, writeQaAuthProfiles } from "./auth-store.js";
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import { applyAuthProfileConfig, upsertAuthProfile } from "openclaw/plugin-sdk/provider-auth";
 
 /** Providers the mock harness stages placeholder credentials for by default. */
 export const QA_MOCK_AUTH_PROVIDERS = Object.freeze(["openai", "anthropic"] as const);
@@ -41,20 +42,21 @@ export async function stageQaMockAuthProfiles(params: {
   const providers = [...new Set(params.providers ?? QA_MOCK_AUTH_PROVIDERS)];
   let next = params.cfg;
   for (const agentId of agentIds) {
-    await writeQaAuthProfiles({
-      agentDir: resolveQaAgentAuthDir({ stateDir: params.stateDir, agentId }),
-      profiles: Object.fromEntries(
-        providers.map((provider) => [
-          buildQaMockProfileId(provider),
-          {
-            type: "api_key",
-            provider,
-            key: "qa-mock-not-a-real-key",
-            displayName: `QA mock ${provider} credential`,
-          },
-        ]),
-      ),
-    });
+    const agentDir = path.join(params.stateDir, "agents", agentId, "agent");
+    await fs.mkdir(agentDir, { recursive: true });
+    for (const provider of providers) {
+      const profileId = buildQaMockProfileId(provider);
+      upsertAuthProfile({
+        profileId,
+        credential: {
+          type: "api_key",
+          provider,
+          key: "qa-mock-not-a-real-key",
+          displayName: `QA mock ${provider} credential`,
+        },
+        agentDir,
+      });
+    }
   }
   for (const provider of providers) {
     next = applyAuthProfileConfig(next, {

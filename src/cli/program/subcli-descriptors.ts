@@ -69,16 +69,6 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: false,
   },
   {
-    name: "terminal",
-    description: "Open a local terminal UI (alias for tui --local)",
-    hasSubcommands: false,
-  },
-  {
-    name: "chat",
-    description: "Open a local terminal UI (alias for tui --local)",
-    hasSubcommands: false,
-  },
-  {
     name: "cron",
     description: "Manage cron jobs via the Gateway scheduler",
     hasSubcommands: true,
@@ -130,7 +120,7 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
   },
   {
     name: "plugins",
-    description: "Manage OpenClaw plugins",
+    description: "Manage OpenClaw plugins and extensions",
     hasSubcommands: true,
   },
   {

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveMainSessionKey } from "../config/sessions/main-session.js";
+import { resolveMainSessionKey } from "../config/sessions.js";
 import { runHeartbeatOnce } from "./heartbeat-runner.js";
 import {
   seedMainSessionStore,
@@ -57,43 +57,6 @@ describe("Ghost reminder bug (issue #13317)", () => {
     });
 
     return { cfg, sessionKey };
-  };
-
-  const createLastTargetConfig = (params: {
-    tmpDir: string;
-    storePath: string;
-    isolatedSession?: boolean;
-  }): OpenClawConfig => ({
-    agents: {
-      defaults: {
-        workspace: params.tmpDir,
-        heartbeat: {
-          every: "5m",
-          target: "last",
-          ...(params.isolatedSession === true ? { isolatedSession: true } : {}),
-        },
-      },
-    },
-    channels: { telegram: { allowFrom: ["*"] } },
-    session: { store: params.storePath },
-  });
-
-  const writeTelegramSessionStore = async (
-    storePath: string,
-    sessionKey: string,
-    overrides: Record<string, unknown>,
-  ): Promise<void> => {
-    await fs.writeFile(
-      storePath,
-      JSON.stringify({
-        [sessionKey]: {
-          sessionId: "sid",
-          updatedAt: Date.now(),
-          lastChannel: "telegram",
-          ...overrides,
-        },
-      }),
-    );
   };
 
   const expectCronEventPrompt = (
@@ -179,35 +142,6 @@ describe("Ghost reminder bug (issue #13317)", () => {
       },
       { prefix: params.tmpPrefix },
     );
-  };
-
-  const expectUntrustedEventOwnership = async (params: {
-    tmpPrefix: string;
-    reason: "hook:wake" | "interval";
-    isolatedSession?: boolean;
-    forceSenderIsOwnerFalse: boolean;
-  }): Promise<void> => {
-    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
-      tmpPrefix: params.tmpPrefix,
-      replyText: "Handled internally",
-      reason: params.reason,
-      target: "none",
-      isolatedSession: params.isolatedSession,
-      enqueue: (sessionKey) => {
-        enqueueSystemEvent("GitHub issue opened: untrusted webhook content", {
-          sessionKey,
-          trusted: false,
-        });
-      },
-    });
-
-    expect(result.status).toBe("ran");
-    expect(calledCtx?.Provider).toBe("heartbeat");
-    if (params.isolatedSession === true) {
-      expect(calledCtx?.SessionKey).toContain(":heartbeat");
-    }
-    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(params.forceSenderIsOwnerFalse);
-    expect(sendTelegram).not.toHaveBeenCalled();
   };
 
   it("does not use CRON_EVENT_PROMPT when only a HEARTBEAT_OK event is present", async () => {
@@ -347,7 +281,7 @@ describe("Ghost reminder bug (issue #13317)", () => {
       reason: "exec-event",
       target: "none",
       enqueue: (sessionKey) => {
-        enqueueSystemEvent("exec finished: deploy succeeded", { sessionKey, trusted: false });
+        enqueueSystemEvent("exec finished: deploy succeeded", { sessionKey });
       },
     });
 
@@ -356,23 +290,6 @@ describe("Ghost reminder bug (issue #13317)", () => {
     expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
     expect(calledCtx?.Body).toContain("Handle the result internally");
     expect(sendTelegram).not.toHaveBeenCalled();
-  });
-
-  it("includes untrusted exec completion details in user-relay prompts", async () => {
-    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
-      tmpPrefix: "openclaw-exec-untrusted-relay-",
-      replyText: "Deploy succeeded",
-      reason: "exec-event",
-      enqueue: (sessionKey) => {
-        enqueueSystemEvent("exec finished: deploy succeeded", { sessionKey, trusted: false });
-      },
-    });
-
-    expect(result.status).toBe("ran");
-    expect(calledCtx?.Provider).toBe("exec-event");
-    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
-    expect(calledCtx?.Body).toContain("exec finished: deploy succeeded");
-    expect(sendTelegram).toHaveBeenCalled();
   });
 
   it("classifies hook:wake exec completions as exec-event prompts", async () => {
@@ -413,37 +330,87 @@ describe("Ghost reminder bug (issue #13317)", () => {
   });
 
   it("forces owner downgrade for untrusted hook:wake system events", async () => {
-    await expectUntrustedEventOwnership({
+    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-hook-untrusted-",
+      replyText: "Handled internally",
       reason: "hook:wake",
-      forceSenderIsOwnerFalse: true,
+      target: "none",
+      enqueue: (sessionKey) => {
+        enqueueSystemEvent("GitHub issue opened: untrusted webhook content", {
+          sessionKey,
+          trusted: false,
+        });
+      },
     });
+
+    expect(result.status).toBe("ran");
+    expect(calledCtx?.Provider).toBe("heartbeat");
+    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
+    expect(sendTelegram).not.toHaveBeenCalled();
   });
 
   it("forces owner downgrade for untrusted interval events", async () => {
-    await expectUntrustedEventOwnership({
+    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-interval-untrusted-",
+      replyText: "Handled internally",
       reason: "interval",
-      forceSenderIsOwnerFalse: true,
+      target: "none",
+      enqueue: (sessionKey) => {
+        enqueueSystemEvent("GitHub issue opened: untrusted webhook content", {
+          sessionKey,
+          trusted: false,
+        });
+      },
     });
+
+    expect(result.status).toBe("ran");
+    expect(calledCtx?.Provider).toBe("heartbeat");
+    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(true);
+    expect(sendTelegram).not.toHaveBeenCalled();
   });
 
   it("does not force owner downgrade for untrusted hook:wake events with isolated sessions", async () => {
-    await expectUntrustedEventOwnership({
+    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-hook-untrusted-isolated-",
+      replyText: "Handled internally",
       reason: "hook:wake",
+      target: "none",
       isolatedSession: true,
-      forceSenderIsOwnerFalse: false,
+      enqueue: (sessionKey) => {
+        enqueueSystemEvent("GitHub issue opened: untrusted webhook content", {
+          sessionKey,
+          trusted: false,
+        });
+      },
     });
+
+    expect(result.status).toBe("ran");
+    expect(calledCtx?.Provider).toBe("heartbeat");
+    expect(calledCtx?.SessionKey).toContain(":heartbeat");
+    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(false);
+    expect(sendTelegram).not.toHaveBeenCalled();
   });
 
   it("does not force owner downgrade for isolated interval runs with only base-session untrusted events", async () => {
-    await expectUntrustedEventOwnership({
+    const { result, sendTelegram, calledCtx } = await runHeartbeatCase({
       tmpPrefix: "openclaw-interval-untrusted-isolated-",
+      replyText: "Handled internally",
       reason: "interval",
+      target: "none",
       isolatedSession: true,
-      forceSenderIsOwnerFalse: false,
+      enqueue: (sessionKey) => {
+        enqueueSystemEvent("GitHub issue opened: untrusted webhook content", {
+          sessionKey,
+          trusted: false,
+        });
+      },
     });
+
+    expect(result.status).toBe("ran");
+    expect(calledCtx?.Provider).toBe("heartbeat");
+    expect(calledCtx?.SessionKey).toContain(":heartbeat");
+    expect(calledCtx?.ForceSenderIsOwnerFalse).toBe(false);
+    expect(sendTelegram).not.toHaveBeenCalled();
   });
 
   it("routes wake-triggered heartbeat replies using queued system-event delivery context", async () => {
@@ -508,9 +475,32 @@ describe("Ghost reminder bug (issue #13317)", () => {
 
   it("does not reuse stale turn-source routing for isolated wake runs", async () => {
     await withTempHeartbeatSandbox(async ({ tmpDir, storePath, replySpy }) => {
-      const cfg = createLastTargetConfig({ tmpDir, storePath, isolatedSession: true });
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            workspace: tmpDir,
+            heartbeat: {
+              every: "5m",
+              target: "last",
+              isolatedSession: true,
+            },
+          },
+        },
+        channels: { telegram: { allowFrom: ["*"] } },
+        session: { store: storePath },
+      };
       const sessionKey = resolveMainSessionKey(cfg);
-      await writeTelegramSessionStore(storePath, sessionKey, { lastTo: "-100155462274" });
+      await fs.writeFile(
+        storePath,
+        JSON.stringify({
+          [sessionKey]: {
+            sessionId: "sid",
+            updatedAt: Date.now(),
+            lastChannel: "telegram",
+            lastTo: "-100155462274",
+          },
+        }),
+      );
 
       const sendTelegram = vi.fn().mockResolvedValue({
         messageId: "m1",
@@ -619,17 +609,38 @@ describe("Ghost reminder bug (issue #13317)", () => {
 
   it("keeps Telegram topic routing for isolated scheduled heartbeats", async () => {
     await withTempHeartbeatSandbox(async ({ tmpDir, storePath, replySpy }) => {
-      const cfg = createLastTargetConfig({ tmpDir, storePath, isolatedSession: true });
-      const sessionKey = resolveMainSessionKey(cfg);
-      await writeTelegramSessionStore(storePath, sessionKey, {
-        lastTo: "-100155462274",
-        deliveryContext: {
-          channel: "telegram",
-          to: "-100155462274",
-          threadId: 42,
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            workspace: tmpDir,
+            heartbeat: {
+              every: "5m",
+              target: "last",
+              isolatedSession: true,
+            },
+          },
         },
-        chatType: "group",
-      });
+        channels: { telegram: { allowFrom: ["*"] } },
+        session: { store: storePath },
+      };
+      const sessionKey = resolveMainSessionKey(cfg);
+      await fs.writeFile(
+        storePath,
+        JSON.stringify({
+          [sessionKey]: {
+            sessionId: "sid",
+            updatedAt: Date.now(),
+            lastChannel: "telegram",
+            lastTo: "-100155462274",
+            deliveryContext: {
+              channel: "telegram",
+              to: "-100155462274",
+              threadId: 42,
+            },
+            chatType: "group",
+          },
+        }),
+      );
 
       const sendTelegram = vi.fn().mockResolvedValue({
         messageId: "m1",

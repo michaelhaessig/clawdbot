@@ -31,7 +31,6 @@ export type HandleDirectiveOnlyCoreParams = {
 };
 
 export type HandleDirectiveOnlyParams = HandleDirectiveOnlyCoreParams & {
-  ctx?: MsgContext;
   messageProvider?: string;
   currentThinkLevel?: ThinkLevel;
   currentFastMode?: boolean;

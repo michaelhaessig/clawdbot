@@ -1,10 +1,12 @@
 ---
+title: "Auth Credential Semantics"
 summary: "Canonical credential eligibility and resolution semantics for auth profiles"
-title: "Auth credential semantics"
 read_when:
   - Working on auth profile resolution or credential routing
   - Debugging model auth failures or profile order
 ---
+
+# Auth Credential Semantics
 
 This document defines the canonical credential eligibility and resolution semantics used across:
 
@@ -15,7 +17,7 @@ This document defines the canonical credential eligibility and resolution semant
 
 The goal is to keep selection-time and runtime behavior aligned.
 
-## Stable probe reason codes
+## Stable Probe Reason Codes
 
 - `ok`
 - `excluded_by_auth_order`
@@ -25,7 +27,7 @@ The goal is to keep selection-time and runtime behavior aligned.
 - `unresolved_ref`
 - `no_model`
 
-## Token credentials
+## Token Credentials
 
 Token credentials (`type: "token"`) support inline `token` and/or `tokenRef`.
 
@@ -44,7 +46,7 @@ Token credentials (`type: "token"`) support inline `token` and/or `tokenRef`.
 2. For eligible profiles, token material may be resolved from inline value or `tokenRef`.
 3. Unresolvable refs produce `unresolved_ref` in `models status --probe` output.
 
-## Explicit auth order filtering
+## Explicit Auth Order Filtering
 
 - When `auth.order.<provider>` or the auth-store order override is set for a
   provider, `models status --probe` only probes profile ids that remain in the
@@ -54,7 +56,7 @@ Token credentials (`type: "token"`) support inline `token` and/or `tokenRef`.
   `reasonCode: excluded_by_auth_order` and the detail
   `Excluded by auth.order for this provider.`
 
-## Probe target resolution
+## Probe Target Resolution
 
 - Probe targets can come from auth profiles, environment credentials, or
   `models.json`.
@@ -76,8 +78,3 @@ For script compatibility, probe errors keep this first line unchanged:
 `Auth profile credentials are missing or expired.`
 
 Human-friendly detail and stable reason codes may be added on subsequent lines.
-
-## Related
-
-- [Secrets management](/gateway/secrets)
-- [Auth storage](/concepts/oauth)

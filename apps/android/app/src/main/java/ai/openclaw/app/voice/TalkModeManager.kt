@@ -226,15 +226,14 @@ class TalkModeManager(
     // If this is a response we initiated, handle normally below.
     // Otherwise, if ttsOnAllResponses, finish streaming TTS on terminal events.
     val pending = pendingRunId
-    val knownRun = pending == runId || hasRunCompletion(runId)
-    if (!knownRun) {
+    if (pending == null || runId != pending) {
       if (ttsOnAllResponses && state == "final") {
         val text = extractTextFromChatEventMessage(obj["message"])
         if (!text.isNullOrBlank()) {
           playTtsForText(text)
         }
       }
-      return
+      if (pending == null || runId != pending) return
     }
     Log.d(tag, "chat event arrived runId=$runId state=$state pendingRunId=$pendingRunId")
     val terminal =
@@ -540,7 +539,6 @@ class TalkModeManager(
 
   private suspend fun sendChat(message: String, session: GatewaySession): String {
     val runId = UUID.randomUUID().toString()
-    armPendingRun(runId)
     val params =
       buildJsonObject {
         put("sessionKey", JsonPrimitive(mainSessionKey.ifBlank { "main" }))
@@ -549,29 +547,19 @@ class TalkModeManager(
         put("timeoutMs", JsonPrimitive(30_000))
         put("idempotencyKey", JsonPrimitive(runId))
       }
-    try {
-      val res = session.request("chat.send", params.toString())
-      val parsed = parseRunId(res) ?: runId
-      if (parsed != runId) {
-        pendingRunId = parsed
-      }
-      return parsed
-    } catch (err: Throwable) {
-      clearPendingRun(runId)
-      throw err
+    val res = session.request("chat.send", params.toString())
+    val parsed = parseRunId(res) ?: runId
+    if (parsed != runId) {
+      pendingRunId = parsed
     }
+    return parsed
   }
 
   private suspend fun waitForChatFinal(runId: String): Boolean {
-    consumeRunCompletion(runId)?.let { return it }
-    val deferred =
-      if (pendingRunId == runId) {
-        pendingFinal ?: armPendingRun(runId)
-      } else {
-        armPendingRun(runId)
-      }
-
-    consumeRunCompletion(runId)?.let { return it }
+    pendingFinal?.cancel()
+    val deferred = CompletableDeferred<Boolean>()
+    pendingRunId = runId
+    pendingFinal = deferred
 
     val result =
       withContext(Dispatchers.IO) {
@@ -582,25 +570,11 @@ class TalkModeManager(
         }
       }
 
-    if (!result && pendingRunId == runId) {
-      clearPendingRun(runId)
-    }
-    return result
-  }
-
-  private fun armPendingRun(runId: String): CompletableDeferred<Boolean> {
-    pendingFinal?.cancel()
-    val deferred = CompletableDeferred<Boolean>()
-    pendingRunId = runId
-    pendingFinal = deferred
-    return deferred
-  }
-
-  private fun clearPendingRun(runId: String) {
-    if (pendingRunId == runId) {
+    if (!result) {
       pendingFinal = null
       pendingRunId = null
     }
+    return result
   }
 
   private fun cacheRunCompletion(runId: String, isFinal: Boolean) {
@@ -616,12 +590,6 @@ class TalkModeManager(
   private fun consumeRunCompletion(runId: String): Boolean? {
     synchronized(completedRunsLock) {
       return completedRunStates.remove(runId)
-    }
-  }
-
-  private fun hasRunCompletion(runId: String): Boolean {
-    synchronized(completedRunsLock) {
-      return completedRunStates.containsKey(runId)
     }
   }
 

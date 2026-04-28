@@ -8,7 +8,6 @@ const RUNTIME_SIDECAR_ARTIFACTS = new Set([
   "helper-api.js",
   "light-runtime-api.js",
   "runtime-api.js",
-  "runtime-setter-api.js",
   "thread-bindings-runtime.js",
 ]);
 

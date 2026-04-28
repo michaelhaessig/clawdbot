@@ -64,8 +64,6 @@ class NodeRuntime(
   private val json = Json { ignoreUnknownKeys = true }
 
   private val externalAudioCaptureActive = MutableStateFlow(false)
-  private val _voiceCaptureMode = MutableStateFlow(VoiceCaptureMode.Off)
-  val voiceCaptureMode: StateFlow<VoiceCaptureMode> = _voiceCaptureMode.asStateFlow()
 
   private val discovery = GatewayDiscovery(appContext, scope = scope)
   val gateways: StateFlow<List<GatewayEndpoint>> = discovery.gateways
@@ -430,18 +428,6 @@ class NodeRuntime(
     )
   }
 
-  val talkModeEnabled: StateFlow<Boolean>
-    get() = talkMode.isEnabled
-
-  val talkModeListening: StateFlow<Boolean>
-    get() = talkMode.isListening
-
-  val talkModeSpeaking: StateFlow<Boolean>
-    get() = talkMode.isSpeaking
-
-  val talkModeStatusText: StateFlow<String>
-    get() = talkMode.statusText
-
   private fun syncMainSessionKey(agentId: String?) {
     val resolvedKey = resolveNodeMainSessionKey(agentId)
     // Always push the resolved session key into TalkMode, even when the
@@ -613,8 +599,17 @@ class NodeRuntime(
       prefs.loadGatewayToken()
     }
 
-    if (prefs.voiceMicEnabled.value) {
-      setVoiceCaptureMode(VoiceCaptureMode.ManualMic, persistManualMic = false)
+    scope.launch {
+      prefs.talkEnabled.collect { enabled ->
+        // MicCaptureManager handles STT + send to gateway, while the dedicated
+        // reply speaker handles TTS for assistant replies in the voice tab.
+        micCapture.setMicEnabled(enabled)
+        if (enabled) {
+          talkMode.ttsOnAllResponses = false
+          scope.launch { talkMode.ensureChatSubscribed() }
+        }
+        externalAudioCaptureActive.value = enabled
+      }
     }
 
     scope.launch(Dispatchers.Default) {
@@ -648,7 +643,7 @@ class NodeRuntime(
     if (value) {
       reconnectPreferredGatewayOnForeground()
     } else {
-      stopManualVoiceSession()
+      stopActiveVoiceSession()
     }
   }
 
@@ -762,17 +757,21 @@ class NodeRuntime(
 
   fun setVoiceScreenActive(active: Boolean) {
     if (!active) {
-      stopManualVoiceSession()
+      stopActiveVoiceSession()
     }
     // Don't re-enable on active=true; mic toggle drives that
   }
 
   fun setMicEnabled(value: Boolean) {
-    setVoiceCaptureMode(if (value) VoiceCaptureMode.ManualMic else VoiceCaptureMode.Off)
-  }
-
-  fun setTalkModeEnabled(value: Boolean) {
-    setVoiceCaptureMode(if (value) VoiceCaptureMode.TalkMode else VoiceCaptureMode.Off)
+    prefs.setTalkEnabled(value)
+    if (value) {
+      // Tapping mic on interrupts any active TTS (barge-in)
+      stopVoicePlayback()
+      talkMode.ttsOnAllResponses = false
+      scope.launch { talkMode.ensureChatSubscribed() }
+    }
+    micCapture.setMicEnabled(value)
+    externalAudioCaptureActive.value = value
   }
 
   val speakerEnabled: StateFlow<Boolean>
@@ -787,72 +786,11 @@ class NodeRuntime(
     talkMode.setPlaybackEnabled(value)
   }
 
-  private fun setVoiceCaptureMode(
-    mode: VoiceCaptureMode,
-    persistManualMic: Boolean = true,
-  ) {
-    if (mode == VoiceCaptureMode.TalkMode && !hasRecordAudioPermission()) {
-      _voiceCaptureMode.value = VoiceCaptureMode.Off
-      externalAudioCaptureActive.value = false
-      return
-    }
-    if (_voiceCaptureMode.value == mode) return
-    _voiceCaptureMode.value = mode
-    when (mode) {
-      VoiceCaptureMode.Off -> {
-        talkMode.ttsOnAllResponses = false
-        talkMode.setEnabled(false)
-        stopVoicePlayback()
-        micCapture.setMicEnabled(false)
-        if (persistManualMic) {
-          prefs.setVoiceMicEnabled(false)
-        }
-        NodeForegroundService.setVoiceCaptureMode(appContext, VoiceCaptureMode.Off)
-        externalAudioCaptureActive.value = false
-      }
-
-      VoiceCaptureMode.ManualMic -> {
-        talkMode.ttsOnAllResponses = false
-        talkMode.setEnabled(false)
-        NodeForegroundService.setVoiceCaptureMode(appContext, VoiceCaptureMode.ManualMic)
-        if (persistManualMic) {
-          prefs.setVoiceMicEnabled(true)
-        }
-        // Tapping mic on interrupts any active TTS (barge-in).
-        stopVoicePlayback()
-        scope.launch { talkMode.ensureChatSubscribed() }
-        micCapture.setMicEnabled(true)
-        externalAudioCaptureActive.value = true
-      }
-
-      VoiceCaptureMode.TalkMode -> {
-        if (persistManualMic) {
-          prefs.setVoiceMicEnabled(false)
-        }
-        micCapture.setMicEnabled(false)
-        NodeForegroundService.setVoiceCaptureMode(appContext, VoiceCaptureMode.TalkMode)
-        talkMode.ttsOnAllResponses = true
-        talkMode.setPlaybackEnabled(speakerEnabled.value)
-        scope.launch { talkMode.ensureChatSubscribed() }
-        talkMode.setEnabled(true)
-        externalAudioCaptureActive.value = true
-      }
-    }
-  }
-
-  private fun stopManualVoiceSession() {
-    if (_voiceCaptureMode.value != VoiceCaptureMode.ManualMic) return
-    setVoiceCaptureMode(VoiceCaptureMode.Off)
-  }
-
   private fun stopActiveVoiceSession() {
     talkMode.ttsOnAllResponses = false
-    talkMode.setEnabled(false)
     stopVoicePlayback()
     micCapture.setMicEnabled(false)
-    prefs.setVoiceMicEnabled(false)
-    NodeForegroundService.setVoiceCaptureMode(appContext, VoiceCaptureMode.Off)
-    _voiceCaptureMode.value = VoiceCaptureMode.Off
+    prefs.setTalkEnabled(false)
     externalAudioCaptureActive.value = false
   }
 
@@ -1032,7 +970,6 @@ class NodeRuntime(
   }
 
   fun disconnect() {
-    stopActiveVoiceSession()
     connectedEndpoint = null
     activeGatewayAuth = null
     _pendingGatewayTrust.value = null

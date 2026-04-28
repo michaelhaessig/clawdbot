@@ -4,11 +4,10 @@ import {
   shouldAckReaction as shouldAckReactionGate,
 } from "openclaw/plugin-sdk/channel-feedback";
 import { logInboundDrop } from "openclaw/plugin-sdk/channel-inbound";
-import type { TelegramDirectConfig, TelegramGroupConfig } from "openclaw/plugin-sdk/config-types";
+import type { TelegramDirectConfig, TelegramGroupConfig } from "openclaw/plugin-sdk/config-runtime";
 import { deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
-import { normalizeAccountId, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
+import { DEFAULT_ACCOUNT_ID, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import { resolveDefaultTelegramAccountId } from "./accounts.js";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import { firstDefined, normalizeAllowFrom, normalizeDmAllowFromWithStore } from "./bot-access.js";
 import { resolveTelegramInboundBody } from "./bot-message-context.body.js";
@@ -68,7 +67,6 @@ type TelegramStatusReactionController = {
   cancelPending: () => void;
   setError: () => void | Promise<void>;
   setDone: () => void | Promise<void>;
-  restoreInitial: () => void | Promise<void>;
 };
 
 export type TelegramMessageContext = {
@@ -222,7 +220,7 @@ export const buildTelegramMessageContext = async ({
   // Fresh config for bindings lookup; other routing inputs are payload-derived.
   const freshCfg =
     loadFreshConfig?.() ??
-    (runtime?.getRuntimeConfig ?? (await loadTelegramMessageContextRuntime()).getRuntimeConfig)();
+    (runtime?.loadConfig ?? (await loadTelegramMessageContextRuntime()).loadConfig)();
   let { route, configuredBinding, configuredBindingSessionKey } = resolveTelegramConversationRoute({
     cfg: freshCfg,
     accountId: account.accountId,
@@ -235,10 +233,7 @@ export const buildTelegramMessageContext = async ({
   });
   const requiresExplicitAccountBinding = (
     candidate: ReturnType<typeof resolveTelegramConversationRoute>["route"],
-  ): boolean =>
-    normalizeAccountId(candidate.accountId) !==
-      normalizeAccountId(resolveDefaultTelegramAccountId(freshCfg)) &&
-    candidate.matchedBy === "default";
+  ): boolean => candidate.accountId !== DEFAULT_ACCOUNT_ID && candidate.matchedBy === "default";
   const isNamedAccountFallback = requiresExplicitAccountBinding(route);
   // Named-account groups still require an explicit binding; DMs get a
   // per-account fallback session key below to preserve isolation.
@@ -262,7 +257,7 @@ export const buildTelegramMessageContext = async ({
   });
   // Group sender checks are explicit and must not inherit DM pairing-store entries.
   const effectiveGroupAllow = normalizeAllowFrom(groupAllowOverride ?? groupAllowFrom);
-  const hasGroupAllowOverride = groupAllowOverride !== undefined;
+  const hasGroupAllowOverride = typeof groupAllowOverride !== "undefined";
   const senderUsername = msg.from?.username ?? "";
   const baseAccess = evaluateTelegramGroupBaseAccess({
     isGroup,
@@ -578,9 +573,6 @@ export const buildTelegramMessageContext = async ({
     topicConfig,
     stickerCacheHit: bodyResult.stickerCacheHit,
     effectiveWasMentioned: bodyResult.effectiveWasMentioned,
-    ...(bodyResult.audioTranscribedMediaIndex !== undefined
-      ? { audioTranscribedMediaIndex: bodyResult.audioTranscribedMediaIndex }
-      : {}),
     locationData: bodyResult.locationData,
     options,
     dmAllowFrom,

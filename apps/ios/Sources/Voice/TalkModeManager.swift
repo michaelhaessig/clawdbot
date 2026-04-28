@@ -87,7 +87,6 @@ final class TalkModeManager: NSObject {
     private var apiKey: String?
     private var voiceAliases: [String: String] = [:]
     private var interruptOnSpeech: Bool = true
-    private var gatewaySpeechLocaleID: String?
     private var mainSessionKey: String = "main"
     private var fallbackVoiceId: String?
     private var lastPlaybackWasPCM: Bool = false
@@ -501,17 +500,12 @@ final class TalkModeManager: NSObject {
         #endif
 
         self.stopRecognition()
-        let localSpeechLocale = UserDefaults.standard.string(forKey: TalkSpeechLocale.storageKey)
-        let resolvedSpeech = TalkSpeechLocale.makeRecognizer(
-            localSelection: localSpeechLocale,
-            gatewaySelection: self.gatewaySpeechLocaleID)
-        self.speechRecognizer = resolvedSpeech.recognizer
+        self.speechRecognizer = SFSpeechRecognizer()
         guard let recognizer = self.speechRecognizer else {
             throw NSError(domain: "TalkMode", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Speech recognizer unavailable",
             ])
         }
-        GatewayDiagnostics.log("talk speech: locale=\(resolvedSpeech.localeID ?? "default")")
 
         self.recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         self.recognitionRequest?.shouldReportPartialResults = true
@@ -1014,9 +1008,7 @@ final class TalkModeManager: NSObject {
                 self.logger.warning("unknown voice alias \(requestedVoice ?? "?", privacy: .public)")
             }
 
-            let configuredKey = self.apiKey?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty == false ? self.apiKey : nil
+            let configuredKey = self.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? self.apiKey : nil
             #if DEBUG
             let resolvedKey = configuredKey ?? ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]
             #else
@@ -1522,9 +1514,7 @@ final class TalkModeManager: NSObject {
                 "talk output_format unsupported for local playback: \(requestedOutputFormat, privacy: .public)")
         }
 
-        let configuredKey = self.apiKey?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty == false ? self.apiKey : nil
+        let configuredKey = self.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? self.apiKey : nil
         #if DEBUG
         let resolvedKey = configuredKey ?? ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]
         #else
@@ -2033,7 +2023,6 @@ extension TalkModeManager {
             if let interrupt = parsed.interruptOnSpeech {
                 self.interruptOnSpeech = interrupt
             }
-            self.gatewaySpeechLocaleID = parsed.speechLocaleID
             self.silenceWindow = TimeInterval(parsed.silenceTimeoutMs) / 1000
             if parsed.normalizedPayload || parsed.defaultVoiceId != nil || parsed.rawConfigApiKey != nil {
                 GatewayDiagnostics.log(
@@ -2048,7 +2037,6 @@ extension TalkModeManager {
             self.gatewayTalkDefaultModelId = nil
             self.gatewayTalkApiKeyConfigured = false
             self.gatewayTalkConfigLoaded = false
-            self.gatewaySpeechLocaleID = nil
             self.silenceWindow = TimeInterval(Self.defaultSilenceTimeoutMs) / 1000
         }
     }

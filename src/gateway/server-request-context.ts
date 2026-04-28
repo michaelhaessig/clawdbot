@@ -11,7 +11,6 @@ type GatewayRequestContextClient = GatewayClient & {
 export type GatewayRequestContextParams = {
   deps: GatewayRequestContext["deps"];
   runtimeState: Pick<GatewayServerLiveState, "cronState">;
-  getRuntimeConfig: GatewayRequestContext["getRuntimeConfig"];
   execApprovalManager: GatewayRequestContext["execApprovalManager"];
   pluginApprovalManager: GatewayRequestContext["pluginApprovalManager"];
   loadGatewayModelCatalog: GatewayRequestContext["loadGatewayModelCatalog"];
@@ -57,7 +56,6 @@ export type GatewayRequestContextParams = {
   markChannelLoggedOut: GatewayRequestContext["markChannelLoggedOut"];
   wizardRunner: GatewayRequestContext["wizardRunner"];
   broadcastVoiceWakeChanged: GatewayRequestContext["broadcastVoiceWakeChanged"];
-  broadcastVoiceWakeRoutingChanged: GatewayRequestContext["broadcastVoiceWakeRoutingChanged"];
   unavailableGatewayMethods: ReadonlySet<string>;
 };
 
@@ -74,7 +72,6 @@ export function createGatewayRequestContext(
     get cronStorePath() {
       return params.runtimeState.cronState.storePath;
     },
-    getRuntimeConfig: params.getRuntimeConfig,
     execApprovalManager: params.execApprovalManager,
     pluginApprovalManager: params.pluginApprovalManager,
     loadGatewayModelCatalog: params.loadGatewayModelCatalog,
@@ -152,7 +149,6 @@ export function createGatewayRequestContext(
     markChannelLoggedOut: params.markChannelLoggedOut,
     wizardRunner: params.wizardRunner,
     broadcastVoiceWakeChanged: params.broadcastVoiceWakeChanged,
-    broadcastVoiceWakeRoutingChanged: params.broadcastVoiceWakeRoutingChanged,
     unavailableGatewayMethods: params.unavailableGatewayMethods,
   };
 }

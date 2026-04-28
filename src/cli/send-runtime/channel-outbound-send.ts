@@ -1,6 +1,6 @@
 import { loadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.js";
 import type { ChannelId } from "../../channels/plugins/types.public.js";
-import { getRuntimeConfig } from "../../config/config.js";
+import { loadConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
@@ -14,7 +14,6 @@ type RuntimeSendOpts = {
   accountId?: string;
   threadId?: string | number | null;
   messageThreadId?: string | number;
-  threadTs?: string | number;
   replyToId?: string | number | null;
   replyToMessageId?: string | number;
   silent?: boolean;
@@ -24,7 +23,7 @@ type RuntimeSendOpts = {
 };
 
 function resolveRuntimeThreadId(opts: RuntimeSendOpts): string | number | undefined {
-  return opts.messageThreadId ?? opts.threadId ?? opts.threadTs ?? undefined;
+  return opts.messageThreadId ?? opts.threadId ?? undefined;
 }
 
 function resolveRuntimeReplyToId(opts: RuntimeSendOpts): string | undefined {
@@ -42,7 +41,7 @@ export function createChannelOutboundRuntimeSend(params: {
       const threadId = resolveRuntimeThreadId(opts);
       const replyToId = resolveRuntimeReplyToId(opts);
       const buildContext = () => ({
-        cfg: opts.cfg ?? getRuntimeConfig(),
+        cfg: opts.cfg ?? loadConfig(),
         to,
         text,
         mediaUrl: opts.mediaUrl,

@@ -50,10 +50,6 @@ vi.mock("./channel-doctor.js", () => ({
       ];
     },
   ),
-  createChannelDoctorEmptyAllowlistPolicyHooks: vi.fn(() => ({
-    extraWarningsForAccount: () => [],
-    shouldSkipDefaultEmptyGroupAllowlistWarning: () => false,
-  })),
   shouldSkipChannelDoctorDefaultEmptyGroupAllowlistWarning: vi.fn(() => false),
 }));
 
@@ -99,18 +95,10 @@ vi.mock("./channel-plugin-blockers.js", () => ({
 vi.mock("./stale-plugin-config.js", () => ({
   scanStalePluginConfig: (cfg: {
     plugins?: { allow?: string[]; entries?: Record<string, unknown> };
-    channels?: Record<string, unknown>;
   }) => {
     const knownIds = new Set(manifestState.plugins.map((plugin) => plugin.id));
-    const hits = [...(cfg.plugins?.allow ?? []), ...Object.keys(cfg.plugins?.entries ?? {})]
-      .filter((id) => !knownIds.has(id))
-      .map((id) => ({ id, surface: "plugin" }));
-    if (cfg.channels?.["openclaw-weixin"]) {
-      hits.push({ id: "openclaw-weixin", surface: "channel" });
-    }
-    return hits.filter(
-      (hit, index) => hits.findIndex((candidate) => candidate.id === hit.id) === index,
-    );
+    const ids = [...(cfg.plugins?.allow ?? []), ...Object.keys(cfg.plugins?.entries ?? {})];
+    return [...new Set(ids)].filter((id) => !knownIds.has(id)).map((id) => ({ id }));
   },
   isStalePluginAutoRepairBlocked: () =>
     manifestState.diagnostics.some((diagnostic) => diagnostic.level === "error"),
@@ -121,19 +109,16 @@ vi.mock("./stale-plugin-config.js", () => ({
   }: {
     autoRepairBlocked: boolean;
     doctorFixCommand: string;
-    hits: Array<{ id: string; surface: string }>;
+    hits: Array<{ id: string }>;
   }) =>
-    hits.map((hit) => {
-      const prefix =
-        hit.surface === "channel"
-          ? `channels.${hit.id}: dangling channel config.`
-          : `plugins.allow: stale plugin reference "${hit.id}". plugins.entries.${hit.id} is unused.`;
-      return `${prefix} ${
-        autoRepairBlocked
-          ? `Auto-removal is paused; rerun "${doctorFixCommand}".`
-          : `Run "${doctorFixCommand}".`
-      }`;
-    }),
+    hits.map(
+      (hit) =>
+        `plugins.allow: stale plugin reference "${hit.id}". plugins.entries.${hit.id} is unused. ${
+          autoRepairBlocked
+            ? `Auto-removal is paused; rerun "${doctorFixCommand}".`
+            : `Run "${doctorFixCommand}".`
+        }`,
+    ),
 }));
 
 vi.mock("./bundled-plugin-load-paths.js", () => ({
@@ -163,17 +148,6 @@ function channelManifest(id: string, channelId: string): TestManifestRecord {
   return {
     ...manifest(id),
     channels: [channelId],
-  };
-}
-
-function stalePluginConfig(id = "acpx") {
-  return {
-    plugins: {
-      allow: [id],
-      entries: {
-        [id]: { enabled: true },
-      },
-    },
   };
 }
 
@@ -238,7 +212,14 @@ describe("doctor preview warnings", () => {
 
   it("includes stale plugin config warnings", async () => {
     const warnings = await collectDoctorPreviewWarnings({
-      cfg: stalePluginConfig(),
+      cfg: {
+        plugins: {
+          allow: ["acpx"],
+          entries: {
+            acpx: { enabled: true },
+          },
+        },
+      },
       doctorFixCommand: "openclaw doctor --fix",
     });
 
@@ -248,23 +229,6 @@ describe("doctor preview warnings", () => {
     expect(warnings[0]).toContain("plugins.entries.acpx");
     expect(warnings[0]).toContain('Run "openclaw doctor --fix"');
     expect(warnings[0]).not.toContain("Auto-removal is paused");
-  });
-
-  it("includes stale channel config warnings without plugin config", async () => {
-    const warnings = await collectDoctorPreviewWarnings({
-      cfg: {
-        channels: {
-          "openclaw-weixin": {
-            enabled: true,
-          },
-        },
-      },
-      doctorFixCommand: "openclaw doctor --fix",
-    });
-
-    expect(warnings).toEqual([
-      expect.stringContaining("channels.openclaw-weixin: dangling channel config"),
-    ]);
   });
 
   it("includes bundled plugin load path migration warnings", async () => {
@@ -296,7 +260,14 @@ describe("doctor preview warnings", () => {
     ];
 
     const warnings = await collectDoctorPreviewWarnings({
-      cfg: stalePluginConfig(),
+      cfg: {
+        plugins: {
+          allow: ["acpx"],
+          entries: {
+            acpx: { enabled: true },
+          },
+        },
+      },
       doctorFixCommand: "openclaw doctor --fix",
     });
 

@@ -9,13 +9,13 @@ import {
 import { normalizeGroupActivation } from "../auto-reply/group-activation.js";
 import {
   formatThinkingLevels,
-  isThinkingLevelSupported,
+  formatXHighModelHint,
   normalizeElevatedLevel,
   normalizeFastMode,
   normalizeReasoningLevel,
   normalizeThinkLevel,
   normalizeUsageDisplay,
-  resolveSupportedThinkingLevel,
+  supportsXHighThinking,
 } from "../auto-reply/thinking.js";
 import type { SessionEntry } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -434,29 +434,14 @@ export async function applySessionsPatchToStore(params: {
     }
   }
 
-  if (next.thinkingLevel) {
+  if (next.thinkingLevel === "xhigh") {
     const effectiveProvider = next.providerOverride ?? resolvedDefault.provider;
     const effectiveModel = next.modelOverride ?? resolvedDefault.model;
-    const thinkingLevel = normalizeThinkLevel(next.thinkingLevel);
-    if (!thinkingLevel) {
-      delete next.thinkingLevel;
-    } else if (
-      !isThinkingLevelSupported({
-        provider: effectiveProvider,
-        model: effectiveModel,
-        level: thinkingLevel,
-      })
-    ) {
+    if (!supportsXHighThinking(effectiveProvider, effectiveModel)) {
       if ("thinkingLevel" in patch) {
-        return invalid(
-          `thinkingLevel "${thinkingLevel}" is not supported for ${effectiveProvider}/${effectiveModel} (use ${formatThinkingLevels(effectiveProvider, effectiveModel, "|")})`,
-        );
+        return invalid(`thinkingLevel "xhigh" is only supported for ${formatXHighModelHint()}`);
       }
-      next.thinkingLevel = resolveSupportedThinkingLevel({
-        provider: effectiveProvider,
-        model: effectiveModel,
-        level: thinkingLevel,
-      });
+      next.thinkingLevel = "high";
     }
   }
 

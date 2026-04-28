@@ -14,10 +14,7 @@ import {
 
 let tempRoots: string[] = [];
 
-vi.mock("../channels/plugins/bundled.js", async () => {
-  const actual = await vi.importActual<typeof import("../channels/plugins/bundled.js")>(
-    "../channels/plugins/bundled.js",
-  );
+vi.mock("../channels/plugins/bundled.js", () => {
   function fileExists(filePath: string): boolean {
     try {
       return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
@@ -91,21 +88,6 @@ vi.mock("../channels/plugins/bundled.js", async () => {
   }
 
   return {
-    ...actual,
-    listBundledChannelLegacySessionSurfaces: vi.fn(() => [
-      {
-        isLegacyGroupSessionKey: (key: string) => /^group:.+@g\.us$/i.test(key.trim()),
-        canonicalizeLegacySessionKey: ({ key, agentId }: { key: string; agentId: string }) =>
-          /^group:.+@g\.us$/i.test(key.trim())
-            ? `agent:${agentId}:whatsapp:${key.trim().toLowerCase()}`
-            : null,
-      },
-    ]),
-    listBundledChannelLegacyStateMigrationDetectors: vi.fn(() => [
-      ({ oauthDir }: { oauthDir: string }) => detectWhatsAppLegacyStateMigrations({ oauthDir }),
-      ({ cfg, env }: { cfg: OpenClawConfig; env: NodeJS.ProcessEnv }) =>
-        detectTelegramAllowFromMigration({ cfg, env }),
-    ]),
     listBundledChannelSetupPluginsByFeature: vi.fn((feature: string) => {
       if (feature === "legacySessionSurfaces") {
         return [

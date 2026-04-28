@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import officialExternalChannelCatalog from "./lib/official-external-channel-catalog.json" with { type: "json" };
 import { isRecord, trimString } from "./lib/record-shared.mjs";
 import { writeTextFileIfChanged } from "./runtime-postbuild-shared.mjs";
 
@@ -14,14 +13,9 @@ function toCatalogInstall(value, packageName) {
     return null;
   }
   const defaultChoice = trimString(install.defaultChoice);
-  const minHostVersion = trimString(install.minHostVersion);
-  const expectedIntegrity = trimString(install.expectedIntegrity);
   return {
     npmSpec,
     ...(defaultChoice === "npm" || defaultChoice === "local" ? { defaultChoice } : {}),
-    ...(minHostVersion ? { minHostVersion } : {}),
-    ...(expectedIntegrity ? { expectedIntegrity } : {}),
-    ...(install.allowInvalidConfigRecovery === true ? { allowInvalidConfigRecovery: true } : {}),
   };
 }
 
@@ -56,9 +50,7 @@ function buildCatalogEntry(packageJson) {
 export function buildOfficialChannelCatalog(params = {}) {
   const repoRoot = params.cwd ?? params.repoRoot ?? process.cwd();
   const extensionsRoot = path.join(repoRoot, "extensions");
-  const entries = Array.isArray(officialExternalChannelCatalog.entries)
-    ? [...officialExternalChannelCatalog.entries]
-    : [];
+  const entries = [];
   if (!fs.existsSync(extensionsRoot)) {
     return { entries };
   }

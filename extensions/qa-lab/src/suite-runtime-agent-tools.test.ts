@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,11 +49,18 @@ import {
   handleQaAction,
   writeWorkspaceSkill,
 } from "./suite-runtime-agent-tools.js";
-import { createTempDirHarness } from "./temp-dir.test-helper.js";
 
-const { cleanup, makeTempDir } = createTempDirHarness();
+const tempDirs: string[] = [];
 
-afterEach(cleanup);
+async function makeTempDir(prefix: string) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
 
 describe("qa suite runtime agent tools helpers", () => {
   beforeEach(() => {

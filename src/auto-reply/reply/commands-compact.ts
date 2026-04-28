@@ -9,13 +9,6 @@ import {
 import type { CommandHandler } from "./commands-types.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
 
-let compactRuntimePromise: Promise<typeof import("./commands-compact.runtime.js")> | null = null;
-
-function loadCompactRuntime(): Promise<typeof import("./commands-compact.runtime.js")> {
-  compactRuntimePromise ??= import("./commands-compact.runtime.js");
-  return compactRuntimePromise;
-}
-
 function extractCompactInstructions(params: {
   rawBody?: string;
   ctx: import("../templating.js").MsgContext;
@@ -95,7 +88,7 @@ export const handleCompactCommand: CommandHandler = async (params) => {
       reply: { text: "⚙️ Compaction unavailable (missing session id)." },
     };
   }
-  const runtime = await loadCompactRuntime();
+  const runtime = await import("./commands-compact.runtime.js");
   const sessionId = targetSessionEntry.sessionId;
   if (runtime.isEmbeddedPiRunActive(sessionId)) {
     runtime.abortEmbeddedPiRun(sessionId);
@@ -143,8 +136,6 @@ export const handleCompactCommand: CommandHandler = async (params) => {
     skillsSnapshot: targetSessionEntry.skillsSnapshot,
     provider: params.provider,
     model: params.model,
-    agentHarnessId:
-      targetSessionEntry.sessionId === sessionId ? targetSessionEntry.agentHarnessId : undefined,
     thinkLevel: params.resolvedThinkLevel ?? (await params.resolveDefaultThinkingLevel()),
     bashElevated: {
       enabled: false,
@@ -176,8 +167,6 @@ export const handleCompactCommand: CommandHandler = async (params) => {
       storePath: params.storePath,
       // Update token counts after compaction
       tokensAfter: result.result?.tokensAfter,
-      newSessionId: result.result?.sessionId,
-      newSessionFile: result.result?.sessionFile,
     });
   }
   // Use the post-compaction token count for context summary if available

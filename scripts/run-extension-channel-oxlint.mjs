@@ -7,5 +7,4 @@ runExtensionOxlint({
   lockName: "oxlint-extension-channels",
   tempDirPrefix: "openclaw-extension-channel-oxlint-",
   emptyMessage: "No extension channel files found.",
-  allowEmpty: true,
 });

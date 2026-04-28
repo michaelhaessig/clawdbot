@@ -1,3 +1,5 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import {
@@ -5,17 +7,25 @@ import {
   resetGlobalHookRunner,
 } from "../plugins/hook-runner-global.js";
 import { createMockPluginRegistry } from "../plugins/hooks.test-helpers.js";
-import { createPluginToolsMcpHandlers } from "./plugin-tools-handlers.js";
+import { createPluginToolsMcpServer } from "./plugin-tools-serve.js";
 
-const callGatewayTool = vi.hoisted(() => vi.fn());
-
-vi.mock("../agents/tools/gateway.js", () => ({
-  callGatewayTool,
-}));
+async function connectPluginToolsServer(tools: AnyAgentTool[]) {
+  const server = createPluginToolsMcpServer({ tools });
+  const client = new Client({ name: "plugin-tools-test-client", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return {
+    client,
+    close: async () => {
+      await client.close();
+      await server.close();
+    },
+  };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
-  callGatewayTool.mockReset();
   resetGlobalHookRunner();
 });
 
@@ -37,32 +47,36 @@ describe("plugin tools MCP server", () => {
       execute,
     } as unknown as AnyAgentTool;
 
-    const handlers = createPluginToolsMcpHandlers([tool]);
-    const listed = await handlers.listTools();
-    expect(listed.tools).toEqual([
-      expect.objectContaining({
-        name: "memory_recall",
-        description: "Recall stored memory",
-        inputSchema: expect.objectContaining({
-          type: "object",
-          required: ["query"],
+    const session = await connectPluginToolsServer([tool]);
+    try {
+      const listed = await session.client.listTools();
+      expect(listed.tools).toEqual([
+        expect.objectContaining({
+          name: "memory_recall",
+          description: "Recall stored memory",
+          inputSchema: expect.objectContaining({
+            type: "object",
+            required: ["query"],
+          }),
         }),
-      }),
-    ]);
+      ]);
 
-    const result = await handlers.callTool({
-      name: "memory_recall",
-      arguments: { query: "remember this" },
-    });
-    expect(execute).toHaveBeenCalledWith(
-      expect.stringMatching(/^mcp-\d+$/),
-      {
-        query: "remember this",
-      },
-      undefined,
-      undefined,
-    );
-    expect(result.content).toEqual([{ type: "text", text: "Stored." }]);
+      const result = await session.client.callTool({
+        name: "memory_recall",
+        arguments: { query: "remember this" },
+      });
+      expect(execute).toHaveBeenCalledWith(
+        expect.stringMatching(/^mcp-\d+$/),
+        {
+          query: "remember this",
+        },
+        undefined,
+        undefined,
+      );
+      expect(result.content).toEqual([{ type: "text", text: "Stored." }]);
+    } finally {
+      await session.close();
+    }
   });
 
   it("returns MCP errors for unknown tools and thrown tool errors", async () => {
@@ -73,20 +87,24 @@ describe("plugin tools MCP server", () => {
       execute: vi.fn().mockRejectedValue(new Error("boom")),
     } as unknown as AnyAgentTool;
 
-    const handlers = createPluginToolsMcpHandlers([failingTool]);
-    const unknown = await handlers.callTool({
-      name: "missing_tool",
-      arguments: {},
-    });
-    expect(unknown.isError).toBe(true);
-    expect(unknown.content).toEqual([{ type: "text", text: "Unknown tool: missing_tool" }]);
+    const session = await connectPluginToolsServer([failingTool]);
+    try {
+      const unknown = await session.client.callTool({
+        name: "missing_tool",
+        arguments: {},
+      });
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content).toEqual([{ type: "text", text: "Unknown tool: missing_tool" }]);
 
-    const failed = await handlers.callTool({
-      name: "memory_forget",
-      arguments: {},
-    });
-    expect(failed.isError).toBe(true);
-    expect(failed.content).toEqual([{ type: "text", text: "Tool error: boom" }]);
+      const failed = await session.client.callTool({
+        name: "memory_forget",
+        arguments: {},
+      });
+      expect(failed.isError).toBe(true);
+      expect(failed.content).toEqual([{ type: "text", text: "Tool error: boom" }]);
+    } finally {
+      await session.close();
+    }
   });
 
   it("blocks tool execution when before_tool_call requires approval on the MCP bridge", async () => {
@@ -111,7 +129,6 @@ describe("plugin tools MCP server", () => {
         },
       ]),
     );
-    callGatewayTool.mockRejectedValueOnce(new Error("gateway unavailable"));
     const tool = {
       name: "memory_store",
       description: "Store memory",
@@ -119,16 +136,20 @@ describe("plugin tools MCP server", () => {
       execute,
     } as unknown as AnyAgentTool;
 
-    const handlers = createPluginToolsMcpHandlers([tool]);
-    const result = await handlers.callTool({
-      name: "memory_store",
-      arguments: { text: "remember this" },
-    });
-    expect(hookCalls).toBe(1);
-    expect(execute).not.toHaveBeenCalled();
-    expect(result.isError).toBe(true);
-    expect(result.content).toEqual([
-      { type: "text", text: "Tool error: Plugin approval required (gateway unavailable)" },
-    ]);
+    const session = await connectPluginToolsServer([tool]);
+    try {
+      const result = await session.client.callTool({
+        name: "memory_store",
+        arguments: { text: "remember this" },
+      });
+      expect(hookCalls).toBe(1);
+      expect(execute).not.toHaveBeenCalled();
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        { type: "text", text: "Tool error: Plugin approval required (gateway unavailable)" },
+      ]);
+    } finally {
+      await session.close();
+    }
   });
 });

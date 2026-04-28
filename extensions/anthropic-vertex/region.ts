@@ -7,6 +7,12 @@ import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtim
 const ANTHROPIC_VERTEX_DEFAULT_REGION = "global";
 const ANTHROPIC_VERTEX_REGION_RE = /^[a-z0-9-]+$/;
 const GCP_VERTEX_CREDENTIALS_MARKER = "gcp-vertex-credentials";
+const GCLOUD_DEFAULT_ADC_PATH = join(
+  homedir(),
+  ".config",
+  "gcloud",
+  "application_default_credentials.json",
+);
 
 type AdcProjectFile = {
   project_id?: unknown;
@@ -65,28 +71,14 @@ function hasAnthropicVertexMetadataServerAdc(env: NodeJS.ProcessEnv = process.en
   );
 }
 
-function resolveAnthropicVertexHomeDir(env: NodeJS.ProcessEnv = process.env): string {
-  return (
-    normalizeOptionalSecretInput(env.HOME) ||
-    normalizeOptionalSecretInput(env.USERPROFILE) ||
-    homedir()
-  );
-}
-
 function resolveAnthropicVertexDefaultAdcPath(env: NodeJS.ProcessEnv = process.env): string {
   return platform() === "win32"
     ? join(
-        normalizeOptionalSecretInput(env.APPDATA) ??
-          join(resolveAnthropicVertexHomeDir(env), "AppData", "Roaming"),
+        env.APPDATA ?? join(homedir(), "AppData", "Roaming"),
         "gcloud",
         "application_default_credentials.json",
       )
-    : join(
-        resolveAnthropicVertexHomeDir(env),
-        ".config",
-        "gcloud",
-        "application_default_credentials.json",
-      );
+    : GCLOUD_DEFAULT_ADC_PATH;
 }
 
 function resolveAnthropicVertexAdcCredentialsPathCandidate(
@@ -95,6 +87,9 @@ function resolveAnthropicVertexAdcCredentialsPathCandidate(
   const explicit = normalizeOptionalSecretInput(env.GOOGLE_APPLICATION_CREDENTIALS);
   if (explicit) {
     return explicit;
+  }
+  if (env !== process.env) {
+    return undefined;
   }
   return resolveAnthropicVertexDefaultAdcPath(env);
 }

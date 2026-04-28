@@ -70,38 +70,6 @@ async function writeCurrentProcessLock(lockPath: string, extra?: Record<string, 
   );
 }
 
-async function withSymlinkedSessionPaths(
-  run: (params: {
-    sessionReal: string;
-    sessionLink: string;
-    realLockPath: string;
-    linkLockPath: string;
-  }) => Promise<void>,
-) {
-  if (process.platform === "win32") {
-    return;
-  }
-
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
-  try {
-    const realDir = path.join(root, "real");
-    const linkDir = path.join(root, "link");
-    await fs.mkdir(realDir, { recursive: true });
-    await fs.symlink(realDir, linkDir);
-
-    const sessionReal = path.join(realDir, "sessions.json");
-    const sessionLink = path.join(linkDir, "sessions.json");
-    await run({
-      sessionReal,
-      sessionLink,
-      realLockPath: `${sessionReal}.lock`,
-      linkLockPath: `${sessionLink}.lock`,
-    });
-  } finally {
-    await fs.rm(root, { recursive: true, force: true });
-  }
-}
-
 async function expectActiveInProcessLockIsNotReclaimed(params?: {
   legacyStarttime?: unknown;
 }): Promise<void> {
@@ -117,7 +85,7 @@ async function expectActiveInProcessLockIsNotReclaimed(params?: {
     await expect(
       acquireSessionWriteLock({
         sessionFile,
-        timeoutMs: 5,
+        timeoutMs: 50,
         allowReentrant: false,
       }),
     ).rejects.toThrow(/session file locked/);
@@ -141,88 +109,52 @@ describe("acquireSessionWriteLock", () => {
     vi.restoreAllMocks();
   });
   it("reuses locks across symlinked session paths", async () => {
-    await withSymlinkedSessionPaths(
-      async ({ sessionReal, sessionLink, realLockPath, linkLockPath }) => {
-        const lockA = await acquireSessionWriteLock({
-          sessionFile: sessionReal,
-          timeoutMs: 500,
-          allowReentrant: true,
-        });
-        const lockB = await acquireSessionWriteLock({
-          sessionFile: sessionLink,
-          timeoutMs: 500,
-          allowReentrant: true,
-        });
+    if (process.platform === "win32") {
+      return;
+    }
 
-        await expect(fs.access(realLockPath)).resolves.toBeUndefined();
-        await expect(fs.access(linkLockPath)).resolves.toBeUndefined();
-        const [realCanonicalLockPath, linkCanonicalLockPath] = await Promise.all([
-          fs.realpath(realLockPath),
-          fs.realpath(linkLockPath),
-        ]);
-        expect(linkCanonicalLockPath).toBe(realCanonicalLockPath);
-        await expectLockRemovedOnlyAfterFinalRelease({
-          lockPath: realLockPath,
-          firstLock: lockA,
-          secondLock: lockB,
-        });
-      },
-    );
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
+    try {
+      const realDir = path.join(root, "real");
+      const linkDir = path.join(root, "link");
+      await fs.mkdir(realDir, { recursive: true });
+      await fs.symlink(realDir, linkDir);
+
+      const sessionReal = path.join(realDir, "sessions.json");
+      const sessionLink = path.join(linkDir, "sessions.json");
+      const realLockPath = `${sessionReal}.lock`;
+      const linkLockPath = `${sessionLink}.lock`;
+
+      const lockA = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
+      const lockB = await acquireSessionWriteLock({ sessionFile: sessionLink, timeoutMs: 500 });
+
+      await expect(fs.access(realLockPath)).resolves.toBeUndefined();
+      await expect(fs.access(linkLockPath)).resolves.toBeUndefined();
+      const [realCanonicalLockPath, linkCanonicalLockPath] = await Promise.all([
+        fs.realpath(realLockPath),
+        fs.realpath(linkLockPath),
+      ]);
+      expect(linkCanonicalLockPath).toBe(realCanonicalLockPath);
+      await expectLockRemovedOnlyAfterFinalRelease({
+        lockPath: realLockPath,
+        firstLock: lockA,
+        secondLock: lockB,
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps the lock file until the last release", async () => {
     await withTempSessionLockFile(async ({ sessionFile, lockPath }) => {
-      const lockA = await acquireSessionWriteLock({
-        sessionFile,
-        timeoutMs: 500,
-        allowReentrant: true,
-      });
-      const lockB = await acquireSessionWriteLock({
-        sessionFile,
-        timeoutMs: 500,
-        allowReentrant: true,
-      });
+      const lockA = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      const lockB = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
 
       await expectLockRemovedOnlyAfterFinalRelease({
         lockPath,
         firstLock: lockA,
         secondLock: lockB,
       });
-    });
-  });
-
-  it("does not reenter locks by default in the same process", async () => {
-    await withTempSessionLockFile(async ({ sessionFile }) => {
-      const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
-      await expect(
-        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
-      ).rejects.toThrow(/session file locked/);
-      await lock.release();
-    });
-  });
-
-  it("does not reenter locks by default through symlinked session paths", async () => {
-    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink }) => {
-      const lock = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
-
-      await expect(
-        acquireSessionWriteLock({ sessionFile: sessionLink, timeoutMs: 5, staleMs: 60_000 }),
-      ).rejects.toThrow(/session file locked/);
-
-      await lock.release();
-    });
-  });
-
-  it("allows a new default lock acquisition after the held lock is released", async () => {
-    await withTempSessionLockFile(async ({ sessionFile }) => {
-      const lockA = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
-      await expect(
-        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
-      ).rejects.toThrow(/session file locked/);
-      await lockA.release();
-
-      const lockB = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
-      await lockB.release();
     });
   });
 
@@ -233,7 +165,7 @@ describe("acquireSessionWriteLock", () => {
       const lockPath = `${sessionFile}.lock`;
       await fs.writeFile(
         lockPath,
-        JSON.stringify({ pid: 2 ** 30, createdAt: new Date(Date.now() - 60_000).toISOString() }),
+        JSON.stringify({ pid: 123456, createdAt: new Date(Date.now() - 60_000).toISOString() }),
         "utf8",
       );
 
@@ -251,29 +183,12 @@ describe("acquireSessionWriteLock", () => {
       await fs.writeFile(lockPath, "{}", "utf8");
 
       await expect(
-        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
+        acquireSessionWriteLock({ sessionFile, timeoutMs: 50, staleMs: 60_000 }),
       ).rejects.toThrow(/session file locked/);
       await expect(fs.access(lockPath)).resolves.toBeUndefined();
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
-  });
-
-  it("reclaims payload-less orphan lock files after the short init grace", async () => {
-    await withTempSessionLockFile(async ({ sessionFile, lockPath }) => {
-      await fs.writeFile(lockPath, "", "utf8");
-      const orphanDate = new Date(Date.now() - 10_000);
-      await fs.utimes(lockPath, orphanDate, orphanDate);
-
-      const lock = await acquireSessionWriteLock({
-        sessionFile,
-        timeoutMs: 10_000,
-        staleMs: 60_000,
-      });
-      const raw = await fs.readFile(lockPath, "utf8");
-      expect(JSON.parse(raw)).toMatchObject({ pid: process.pid });
-      await lock.release();
-    });
   });
 
   it("reclaims malformed lock files once they are old enough", async () => {
@@ -290,7 +205,7 @@ describe("acquireSessionWriteLock", () => {
 
   it("watchdog releases stale in-process locks", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
-    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const sessionFile = path.join(root, "session.jsonl");
       const lockPath = `${sessionFile}.lock`;
@@ -314,7 +229,7 @@ describe("acquireSessionWriteLock", () => {
         secondLock: lockB,
       });
     } finally {
-      stderrSpy.mockRestore();
+      warnSpy.mockRestore();
       await fs.rm(root, { recursive: true, force: true });
     }
   });

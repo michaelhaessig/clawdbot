@@ -1,8 +1,7 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
+import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
+import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { kindFromMime } from "openclaw/plugin-sdk/media-runtime";
 import { resolveOutboundAttachmentFromUrl } from "openclaw/plugin-sdk/media-runtime";
-import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-runtime";
 import { stripInlineDirectiveTagsForDelivery } from "openclaw/plugin-sdk/text-runtime";
 import { resolveIMessageAccount, type ResolvedIMessageAccount } from "./accounts.js";
@@ -23,7 +22,7 @@ export type IMessageSendOpts = {
   timeoutMs?: number;
   chatId?: number;
   client?: IMessageRpcClient;
-  config: OpenClawConfig;
+  config?: ReturnType<typeof loadConfig>;
   account?: ResolvedIMessageAccount;
   resolveAttachmentImpl?: (
     mediaUrl: string,
@@ -98,9 +97,9 @@ function resolveDeliveredIMessageText(text: string, mediaContentType?: string): 
 export async function sendMessageIMessage(
   to: string,
   text: string,
-  opts: IMessageSendOpts,
+  opts: IMessageSendOpts = {},
 ): Promise<IMessageSendResult> {
-  const cfg = requireRuntimeConfig(opts.config, "iMessage send");
+  const cfg = opts.config ?? loadConfig();
   const account =
     opts.account ??
     resolveIMessageAccount({

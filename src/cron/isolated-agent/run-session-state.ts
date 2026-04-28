@@ -23,6 +23,7 @@ export function createPersistCronSessionEntry(params: {
   isFastTestEnv: boolean;
   cronSession: MutableCronSession;
   agentSessionKey: string;
+  runSessionKey: string;
   updateSessionStore: UpdateSessionStore;
 }): PersistCronSessionEntry {
   return async () => {
@@ -30,8 +31,14 @@ export function createPersistCronSessionEntry(params: {
       return;
     }
     params.cronSession.store[params.agentSessionKey] = params.cronSession.sessionEntry;
+    if (params.runSessionKey !== params.agentSessionKey) {
+      params.cronSession.store[params.runSessionKey] = params.cronSession.sessionEntry;
+    }
     await params.updateSessionStore(params.cronSession.storePath, (store) => {
       store[params.agentSessionKey] = params.cronSession.sessionEntry;
+      if (params.runSessionKey !== params.agentSessionKey) {
+        store[params.runSessionKey] = params.cronSession.sessionEntry;
+      }
     });
   };
 }

@@ -9,7 +9,6 @@ import {
   sanitizeAndNormalizeEmbedding,
   withRemoteHttpResponse,
 } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
-import { createProviderHttpError } from "openclaw/plugin-sdk/provider-http";
 import type { GeminiEmbeddingClient, GeminiTextEmbeddingRequest } from "./embedding-provider.js";
 
 export type GeminiBatchRequest = {
@@ -180,7 +179,8 @@ async function fetchGeminiBatchStatus(params: {
     },
     onResponse: async (res) => {
       if (!res.ok) {
-        throw await createProviderHttpError(res, "gemini batch status failed");
+        const text = await res.text();
+        throw new Error(`gemini batch status failed: ${res.status} ${text}`);
       }
       return (await res.json()) as GeminiBatchStatus;
     },
@@ -203,7 +203,8 @@ async function fetchGeminiFileContent(params: {
     },
     onResponse: async (res) => {
       if (!res.ok) {
-        throw await createProviderHttpError(res, "gemini batch file content failed");
+        const text = await res.text();
+        throw new Error(`gemini batch file content failed: ${res.status} ${text}`);
       }
       return await res.text();
     },

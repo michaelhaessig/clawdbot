@@ -57,75 +57,46 @@ export type ShellWrapperCommand = {
   command: string | null;
 };
 
-type ShellWrapperCandidate<TState> = {
-  argv: string[];
-  token0: string;
-  state: TState;
-};
-
-function resolveShellWrapperCandidate<TState>(params: {
-  argv: string[];
-  depth: number;
-  state: TState;
-  onDispatchUnwrap?: (state: TState, wrappedArgv: string[]) => TState;
-}): ShellWrapperCandidate<TState> | null {
-  if (!isWithinDispatchClassificationDepth(params.depth)) {
-    return null;
-  }
-
-  const token0 = params.argv[0]?.trim();
-  if (!token0) {
-    return null;
-  }
-
-  const dispatchUnwrap = unwrapKnownDispatchWrapperInvocation(params.argv);
-  if (dispatchUnwrap.kind === "blocked") {
-    return null;
-  }
-  if (dispatchUnwrap.kind === "unwrapped") {
-    return resolveShellWrapperCandidate({
-      ...params,
-      argv: dispatchUnwrap.argv,
-      depth: params.depth + 1,
-      state: params.onDispatchUnwrap?.(params.state, params.argv) ?? params.state,
-    });
-  }
-
-  const shellMultiplexerUnwrap = unwrapKnownShellMultiplexerInvocation(params.argv);
-  if (shellMultiplexerUnwrap.kind === "blocked") {
-    return null;
-  }
-  if (shellMultiplexerUnwrap.kind === "unwrapped") {
-    return resolveShellWrapperCandidate({
-      ...params,
-      argv: shellMultiplexerUnwrap.argv,
-      depth: params.depth + 1,
-    });
-  }
-
-  return { argv: params.argv, token0, state: params.state };
-}
-
 function resolveShellWrapperSpecAndArgvInternal(
   argv: string[],
   depth: number,
 ): { argv: string[]; wrapper: ShellWrapperSpec; payload: string } | null {
-  const candidate = resolveShellWrapperCandidate({ argv, depth, state: null });
-  if (!candidate) {
+  if (!isWithinDispatchClassificationDepth(depth)) {
     return null;
   }
 
-  const wrapper = findShellWrapperSpec(normalizeExecutableToken(candidate.token0));
+  const token0 = argv[0]?.trim();
+  if (!token0) {
+    return null;
+  }
+
+  const dispatchUnwrap = unwrapKnownDispatchWrapperInvocation(argv);
+  if (dispatchUnwrap.kind === "blocked") {
+    return null;
+  }
+  if (dispatchUnwrap.kind === "unwrapped") {
+    return resolveShellWrapperSpecAndArgvInternal(dispatchUnwrap.argv, depth + 1);
+  }
+
+  const shellMultiplexerUnwrap = unwrapKnownShellMultiplexerInvocation(argv);
+  if (shellMultiplexerUnwrap.kind === "blocked") {
+    return null;
+  }
+  if (shellMultiplexerUnwrap.kind === "unwrapped") {
+    return resolveShellWrapperSpecAndArgvInternal(shellMultiplexerUnwrap.argv, depth + 1);
+  }
+
+  const wrapper = findShellWrapperSpec(normalizeExecutableToken(token0));
   if (!wrapper) {
     return null;
   }
 
-  const payload = extractShellWrapperPayload(candidate.argv, wrapper);
+  const payload = extractShellWrapperPayload(argv, wrapper);
   if (!payload) {
     return null;
   }
 
-  return { argv: candidate.argv, wrapper, payload };
+  return { argv, wrapper, payload };
 }
 
 function isWithinDispatchClassificationDepth(depth: number): boolean {
@@ -137,8 +108,31 @@ export function isShellWrapperExecutable(token: string): boolean {
 }
 
 function isShellWrapperInvocationInternal(argv: string[], depth: number): boolean {
-  const candidate = resolveShellWrapperCandidate({ argv, depth, state: null });
-  return candidate ? isShellWrapperExecutable(candidate.token0) : false;
+  if (!isWithinDispatchClassificationDepth(depth)) {
+    return false;
+  }
+  const token0 = argv[0]?.trim();
+  if (!token0) {
+    return false;
+  }
+
+  const dispatchUnwrap = unwrapKnownDispatchWrapperInvocation(argv);
+  if (dispatchUnwrap.kind === "blocked") {
+    return false;
+  }
+  if (dispatchUnwrap.kind === "unwrapped") {
+    return isShellWrapperInvocationInternal(dispatchUnwrap.argv, depth + 1);
+  }
+
+  const shellMultiplexerUnwrap = unwrapKnownShellMultiplexerInvocation(argv);
+  if (shellMultiplexerUnwrap.kind === "blocked") {
+    return false;
+  }
+  if (shellMultiplexerUnwrap.kind === "unwrapped") {
+    return isShellWrapperInvocationInternal(shellMultiplexerUnwrap.argv, depth + 1);
+  }
+
+  return isShellWrapperExecutable(token0);
 }
 
 export function isShellWrapperInvocation(argv: string[]): boolean {
@@ -241,25 +235,49 @@ function hasEnvManipulationBeforeShellWrapperInternal(
   depth: number,
   envManipulationSeen: boolean,
 ): boolean {
-  const candidate = resolveShellWrapperCandidate({
-    argv,
-    depth,
-    state: envManipulationSeen,
-    onDispatchUnwrap: (state, wrappedArgv) => state || hasDispatchEnvManipulation(wrappedArgv),
-  });
-  if (!candidate) {
+  if (!isWithinDispatchClassificationDepth(depth)) {
     return false;
   }
 
-  const wrapper = findShellWrapperSpec(normalizeExecutableToken(candidate.token0));
+  const token0 = argv[0]?.trim();
+  if (!token0) {
+    return false;
+  }
+
+  const dispatchUnwrap = unwrapKnownDispatchWrapperInvocation(argv);
+  if (dispatchUnwrap.kind === "blocked") {
+    return false;
+  }
+  if (dispatchUnwrap.kind === "unwrapped") {
+    const nextEnvManipulationSeen = envManipulationSeen || hasDispatchEnvManipulation(argv);
+    return hasEnvManipulationBeforeShellWrapperInternal(
+      dispatchUnwrap.argv,
+      depth + 1,
+      nextEnvManipulationSeen,
+    );
+  }
+
+  const shellMultiplexerUnwrap = unwrapKnownShellMultiplexerInvocation(argv);
+  if (shellMultiplexerUnwrap.kind === "blocked") {
+    return false;
+  }
+  if (shellMultiplexerUnwrap.kind === "unwrapped") {
+    return hasEnvManipulationBeforeShellWrapperInternal(
+      shellMultiplexerUnwrap.argv,
+      depth + 1,
+      envManipulationSeen,
+    );
+  }
+
+  const wrapper = findShellWrapperSpec(normalizeExecutableToken(token0));
   if (!wrapper) {
     return false;
   }
-  const payload = extractShellWrapperPayload(candidate.argv, wrapper);
+  const payload = extractShellWrapperPayload(argv, wrapper);
   if (!payload) {
     return false;
   }
-  return candidate.state;
+  return envManipulationSeen;
 }
 
 export function hasEnvManipulationBeforeShellWrapper(argv: string[]): boolean {

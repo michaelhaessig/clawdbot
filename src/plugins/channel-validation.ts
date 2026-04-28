@@ -7,10 +7,24 @@ import {
   normalizeStringifiedOptionalString,
 } from "../shared/string-coerce.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
-import { pushPluginValidationDiagnostic } from "./validation-diagnostics.js";
+
+function pushChannelDiagnostic(params: {
+  level: PluginDiagnostic["level"];
+  pluginId: string;
+  source: string;
+  message: string;
+  pushDiagnostic: (diag: PluginDiagnostic) => void;
+}) {
+  params.pushDiagnostic({
+    level: params.level,
+    pluginId: params.pluginId,
+    source: params.source,
+    message: params.message,
+  });
+}
 
 function resolveBundledChannelMeta(id: string): ChannelMeta | undefined {
-  return listChatChannels().find((meta) => meta?.id === id);
+  return listChatChannels().find((meta) => meta.id === id);
 }
 
 function collectMissingChannelMetaFields(meta?: Partial<ChannelMeta> | null): string[] {
@@ -41,7 +55,7 @@ export function normalizeRegisteredChannelPlugin(params: {
     normalizeStringifiedOptionalString(params.plugin?.id) ??
     "";
   if (!id) {
-    pushPluginValidationDiagnostic({
+    pushChannelDiagnostic({
       level: "error",
       pluginId: params.pluginId,
       source: params.source,
@@ -54,7 +68,7 @@ export function normalizeRegisteredChannelPlugin(params: {
   const rawMeta = params.plugin.meta as Partial<ChannelMeta> | undefined;
   const rawMetaId = normalizeOptionalString(rawMeta?.id);
   if (rawMetaId && rawMetaId !== id) {
-    pushPluginValidationDiagnostic({
+    pushChannelDiagnostic({
       level: "warn",
       pluginId: params.pluginId,
       source: params.source,
@@ -65,7 +79,7 @@ export function normalizeRegisteredChannelPlugin(params: {
 
   const missingFields = collectMissingChannelMetaFields(rawMeta);
   if (missingFields.length > 0) {
-    pushPluginValidationDiagnostic({
+    pushChannelDiagnostic({
       level: "warn",
       pluginId: params.pluginId,
       source: params.source,

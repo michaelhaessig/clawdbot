@@ -184,27 +184,33 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         await res.text();
       }
 
-      await expectAgentSessionKeyMatch({
-        body: { model: "openclaw", messages: [{ role: "user", content: "hi" }] },
-        headers: { "x-openclaw-agent-id": "beta" },
-        matcher: /^agent:beta:/,
-      });
+      {
+        await expectAgentSessionKeyMatch({
+          body: { model: "openclaw", messages: [{ role: "user", content: "hi" }] },
+          headers: { "x-openclaw-agent-id": "beta" },
+          matcher: /^agent:beta:/,
+        });
+      }
 
-      await expectAgentSessionKeyMatch({
-        body: {
-          model: "openclaw/beta",
-          messages: [{ role: "user", content: "hi" }],
-        },
-        matcher: /^agent:beta:/,
-      });
+      {
+        await expectAgentSessionKeyMatch({
+          body: {
+            model: "openclaw/beta",
+            messages: [{ role: "user", content: "hi" }],
+          },
+          matcher: /^agent:beta:/,
+        });
+      }
 
-      await expectAgentSessionKeyMatch({
-        body: {
-          model: "openclaw/default",
-          messages: [{ role: "user", content: "hi" }],
-        },
-        matcher: /^agent:main:/,
-      });
+      {
+        await expectAgentSessionKeyMatch({
+          body: {
+            model: "openclaw/default",
+            messages: [{ role: "user", content: "hi" }],
+          },
+          matcher: /^agent:main:/,
+        });
+      }
 
       {
         mockAgentOnce([{ text: "hello" }]);
@@ -411,17 +417,19 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         await res.text();
       }
 
-      await expectInvalidRequestNoDispatch([
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: "https://example.com/image.png" },
-            },
-          ],
-        },
-      ]);
+      {
+        await expectInvalidRequestNoDispatch([
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: "https://example.com/image.png" },
+              },
+            ],
+          },
+        ]);
+      }
 
       {
         mockAgentOnce([{ text: "I can see the image" }]);
@@ -514,17 +522,19 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         await res.text();
       }
 
-      await expectInvalidRequestNoDispatch([
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: "data:application/pdf;base64,QUJDRA==" },
-            },
-          ],
-        },
-      ]);
+      {
+        await expectInvalidRequestNoDispatch([
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: "data:application/pdf;base64,QUJDRA==" },
+              },
+            ],
+          },
+        ]);
+      }
 
       {
         const manyImageParts = Array.from({ length: 9 }).map(() => ({

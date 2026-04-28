@@ -92,14 +92,14 @@ export const baseStatusSummary = {
   sessions: {
     count: 2,
     paths: ["store.json"],
-    defaults: { model: "gpt-5.5", contextTokens: 12_000 },
+    defaults: { model: "gpt-5.4", contextTokens: 12_000 },
     recent: [
       {
         key: "session-key",
         kind: "direct",
         updatedAt: 1,
         age: 5_000,
-        model: "gpt-5.5",
+        model: "gpt-5.4",
         totalTokens: 12_000,
         totalTokensFresh: true,
         remainingTokens: 4_000,
@@ -141,27 +141,8 @@ export function createStatusLastHeartbeat(): HeartbeatEventPayload {
   return {
     ts: Date.now() - 30_000,
     status: "ok-token",
-    channel: "quietchat",
+    channel: "discord",
     accountId: "acct",
-  };
-}
-
-export function createStatusHealth() {
-  return {
-    ok: true as const,
-    ts: Date.now(),
-    durationMs: 42,
-    channels: {},
-    channelOrder: [],
-    channelLabels: {},
-    heartbeatSeconds: 60,
-    defaultAgentId: "main",
-    agents: [],
-    sessions: {
-      path: "store.json",
-      count: 2,
-      recent: [{ key: "session-key", updatedAt: 1, age: 5_000 }],
-    },
   };
 }
 
@@ -179,7 +160,7 @@ export const statusTestFormatting = {
   formatKTokens: (value: number) => `${Math.round(value / 1000)}k`,
   formatTokensCompact: () => "12k",
   formatPromptCacheCompact: () => "cache ok",
-  formatHealthChannelLines: () => ["QuietChat: OK · ready"],
+  formatHealthChannelLines: () => ["Discord: OK · ready"],
   formatPluginCompatibilityNotice: (notice: { message?: unknown }) => String(notice.message),
   formatUpdateAvailableHint: () => "update available",
 };
@@ -205,7 +186,22 @@ export function createStatusCommandOverviewRowsParams(
     surface: baseStatusOverviewSurface,
     osLabel: "macOS",
     summary: baseStatusSummary,
-    health: createStatusHealth(),
+    health: {
+      ok: true,
+      ts: Date.now(),
+      durationMs: 42,
+      channels: {},
+      channelOrder: [],
+      channelLabels: {},
+      heartbeatSeconds: 60,
+      defaultAgentId: "main",
+      agents: [],
+      sessions: {
+        path: "store.json",
+        count: 2,
+        recent: [{ key: "session-key", updatedAt: 1, age: 5_000 }],
+      },
+    },
     lastHeartbeat: createStatusLastHeartbeat(),
     agentStatus: baseStatusAgentStatus,
     memory: baseStatusMemory,
@@ -239,18 +235,33 @@ export function createStatusCommandReportDataParams(
         },
       ],
     },
-    health: createStatusHealth(),
+    health: {
+      ok: true,
+      ts: Date.now(),
+      durationMs: 42,
+      channels: {},
+      channelOrder: [],
+      channelLabels: {},
+      heartbeatSeconds: 60,
+      defaultAgentId: "main",
+      agents: [],
+      sessions: {
+        path: "store.json",
+        count: 2,
+        recent: [{ key: "session-key", updatedAt: 1, age: 5_000 }],
+      },
+    },
     usageLines: ["usage line"],
     lastHeartbeat: createStatusLastHeartbeat(),
     agentStatus: baseStatusAgentStatus,
     channels: {
-      rows: [{ id: "quietchat", label: "QuietChat", enabled: true, state: "ok", detail: "ready" }],
+      rows: [{ id: "discord", label: "Discord", enabled: true, state: "ok", detail: "ready" }],
     },
-    channelIssues: [{ channel: "quietchat", message: "warn msg" }],
+    channelIssues: [{ channel: "discord", message: "warn msg" }],
     memory: baseStatusMemory,
     memoryPlugin: baseStatusMemoryPlugin,
     pluginCompatibility: baseStatusPluginCompatibility,
-    pairingRecovery: { requestId: "req-1", reason: null, remediationHint: null },
+    pairingRecovery: { requestId: "req-1" },
     tableWidth: 120,
     ...statusTestDecorators,
     ...statusTestFormatting,

@@ -1,31 +1,6 @@
 // Manual facade. Keep loader boundary explicit.
-import type { OpenClawConfig } from "../config/types.js";
-import type { GroupToolPolicyConfig } from "../config/types.tools.js";
+type FacadeModule = typeof import("@openclaw/bluebubbles/api.js");
 import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-loader.js";
-
-type BlueBubblesGroupContext = {
-  cfg: OpenClawConfig;
-  accountId?: string | null;
-  groupId?: string | null;
-  senderId?: string | null;
-  senderName?: string | null;
-  senderUsername?: string | null;
-  senderE164?: string | null;
-};
-
-type FacadeModule = {
-  isAllowedBlueBubblesSender: (params: {
-    allowFrom: Array<string | number>;
-    sender: string;
-    chatId?: number | null;
-    chatGuid?: string | null;
-    chatIdentifier?: string | null;
-  }) => boolean;
-  resolveBlueBubblesGroupRequireMention: (params: BlueBubblesGroupContext) => boolean;
-  resolveBlueBubblesGroupToolPolicy: (
-    params: BlueBubblesGroupContext,
-  ) => GroupToolPolicyConfig | undefined;
-};
 
 function loadFacadeModule(): FacadeModule {
   return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({

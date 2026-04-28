@@ -4,16 +4,10 @@ import type { MatrixClient } from "../sdk.js";
 import * as sendModule from "../send.js";
 import { editMatrixMessage, readMatrixMessages } from "./messages.js";
 
-const MATRIX_ACTION_TEST_CFG = {
-  channels: {
-    matrix: {},
-  },
-};
-
 function installMatrixActionTestRuntime(): void {
   setMatrixRuntime({
     config: {
-      current: () => ({}),
+      loadConfig: () => ({}),
     },
     channel: {
       text: {
@@ -95,36 +89,18 @@ function createMessagesClient(params: {
   };
 }
 
-function createEditClient(originalContent: Record<string, unknown>) {
-  const sendMessage = vi.fn().mockResolvedValue("evt-edit");
-  const client = {
-    getEvent: vi.fn().mockResolvedValue({ content: originalContent }),
-    getJoinedRoomMembers: vi.fn().mockResolvedValue([]),
-    getUserId: vi.fn().mockResolvedValue("@bot:example.org"),
-    sendMessage,
-    prepareForOneOff: vi.fn(async () => undefined),
-    start: vi.fn(async () => undefined),
-    stop: vi.fn(() => undefined),
-    stopAndPersist: vi.fn(async () => undefined),
-  } as unknown as MatrixClient;
-
-  return { client, sendMessage };
-}
-
 describe("matrix message actions", () => {
   it("forwards timeoutMs to the shared Matrix edit helper", async () => {
     const editSpy = vi.spyOn(sendModule, "editMessageMatrix").mockResolvedValue("evt-edit");
 
     try {
-      const cfg = {} as never;
       const result = await editMatrixMessage("!room:example.org", "$original", "hello", {
-        cfg,
         timeoutMs: 12_345,
       });
 
       expect(result).toEqual({ eventId: "evt-edit" });
       expect(editSpy).toHaveBeenCalledWith("!room:example.org", "$original", "hello", {
-        cfg,
+        cfg: undefined,
         accountId: undefined,
         client: undefined,
         timeoutMs: 12_345,
@@ -136,16 +112,28 @@ describe("matrix message actions", () => {
 
   it("routes edits through the shared Matrix edit helper so mentions are preserved", async () => {
     installMatrixActionTestRuntime();
-    const { client, sendMessage } = createEditClient({
-      body: "hello @alice:example.org",
-      "m.mentions": { user_ids: ["@alice:example.org"] },
-    });
+    const sendMessage = vi.fn().mockResolvedValue("evt-edit");
+    const client = {
+      getEvent: vi.fn().mockResolvedValue({
+        content: {
+          body: "hello @alice:example.org",
+          "m.mentions": { user_ids: ["@alice:example.org"] },
+        },
+      }),
+      getJoinedRoomMembers: vi.fn().mockResolvedValue([]),
+      getUserId: vi.fn().mockResolvedValue("@bot:example.org"),
+      sendMessage,
+      prepareForOneOff: vi.fn(async () => undefined),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(() => undefined),
+      stopAndPersist: vi.fn(async () => undefined),
+    } as unknown as MatrixClient;
 
     const result = await editMatrixMessage(
       "!room:example.org",
       "$original",
       "hello @alice:example.org and @bob:example.org",
-      { cfg: MATRIX_ACTION_TEST_CFG, client },
+      { client },
     );
 
     expect(result).toEqual({ eventId: "evt-edit" });
@@ -162,15 +150,27 @@ describe("matrix message actions", () => {
 
   it("does not re-notify legacy mentions when action edits target pre-m.mentions messages", async () => {
     installMatrixActionTestRuntime();
-    const { client, sendMessage } = createEditClient({
-      body: "hello @alice:example.org",
-    });
+    const sendMessage = vi.fn().mockResolvedValue("evt-edit");
+    const client = {
+      getEvent: vi.fn().mockResolvedValue({
+        content: {
+          body: "hello @alice:example.org",
+        },
+      }),
+      getJoinedRoomMembers: vi.fn().mockResolvedValue([]),
+      getUserId: vi.fn().mockResolvedValue("@bot:example.org"),
+      sendMessage,
+      prepareForOneOff: vi.fn(async () => undefined),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(() => undefined),
+      stopAndPersist: vi.fn(async () => undefined),
+    } as unknown as MatrixClient;
 
     const result = await editMatrixMessage(
       "!room:example.org",
       "$original",
       "hello again @alice:example.org",
-      { cfg: MATRIX_ACTION_TEST_CFG, client },
+      { client },
     );
 
     expect(result).toEqual({ eventId: "evt-edit" });

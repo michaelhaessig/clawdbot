@@ -100,7 +100,7 @@ function resolveClaudeCliUsage(raw: ClaudeCliUsage) {
 }
 
 function cloneJsonValue<T>(value: T): T {
-  return structuredClone(value);
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function normalizeClaudeCliContent(

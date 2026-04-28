@@ -1240,7 +1240,7 @@ private fun queryInstalledApps(
     .mapNotNull { packageName ->
       runCatching {
         val appInfo = packageManager.getApplicationInfo(packageName, 0)
-        val label = packageManager.getApplicationLabel(appInfo).toString().trim()
+        val label = packageManager.getApplicationLabel(appInfo)?.toString()?.trim().orEmpty()
         InstalledApp(
           label = if (label.isEmpty()) packageName else label,
           packageName = packageName,

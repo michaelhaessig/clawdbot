@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 
 export const execSchema = Type.Object({
   command: Type.String({ description: "Shell command to execute" }),

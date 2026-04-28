@@ -13,8 +13,6 @@ export {
   disposeSessionMcpRuntime,
   getOrCreateSessionMcpRuntime,
   getSessionMcpRuntimeManager,
-  retireSessionMcpRuntime,
-  retireSessionMcpRuntimeForSessionKey,
 } from "./pi-bundle-mcp-runtime.js";
 export {
   createBundleMcpToolRuntime,

@@ -1,5 +1,4 @@
 import {
-  autocomplete,
   autocompleteMultiselect,
   cancel,
   confirm,
@@ -63,31 +62,17 @@ export function createClackPrompter(): WizardPrompter {
     note: async (message, title) => {
       emitNote(message, title);
     },
-    select: async (params) => {
-      const options = params.options.map((opt) => {
-        const base = { value: opt.value, label: opt.label };
-        return opt.hint === undefined ? base : { ...base, hint: stylePromptHint(opt.hint) };
-      }) as Option<(typeof params.options)[number]["value"]>[];
-
-      if (params.searchable) {
-        return guardCancel(
-          await autocomplete({
-            message: stylePromptMessage(params.message),
-            options,
-            initialValue: params.initialValue,
-            filter: tokenizedOptionFilter,
-          }),
-        );
-      }
-
-      return guardCancel(
+    select: async (params) =>
+      guardCancel(
         await select({
           message: stylePromptMessage(params.message),
-          options,
+          options: params.options.map((opt) => {
+            const base = { value: opt.value, label: opt.label };
+            return opt.hint === undefined ? base : { ...base, hint: stylePromptHint(opt.hint) };
+          }) as Option<(typeof params.options)[number]["value"]>[],
           initialValue: params.initialValue,
         }),
-      );
-    },
+      ),
     multiselect: async (params) => {
       const options = params.options.map((opt) => {
         const base = { value: opt.value, label: opt.label };
@@ -147,11 +132,7 @@ export function createClackPrompter(): WizardPrompter {
         },
         stop: (message) => {
           osc.done();
-          if (message === undefined) {
-            spin.clear();
-          } else {
-            spin.stop(message);
-          }
+          spin.stop(message);
         },
       };
     },

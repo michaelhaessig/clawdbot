@@ -60,7 +60,6 @@ describe("matrix account path propagation", () => {
     );
 
     await pairingText.notify({
-      cfg: {} as never,
       id: "@user:example.org",
       message: pairingText.message,
       accountId: "poe",
@@ -69,7 +68,7 @@ describe("matrix account path propagation", () => {
     expect(sendMessageMatrixMock).toHaveBeenCalledWith(
       "user:@user:example.org",
       expect.any(String),
-      { cfg: {}, accountId: "poe" },
+      { accountId: "poe" },
     );
   });
 

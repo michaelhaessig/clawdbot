@@ -1,5 +1,4 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import { resolveSessionAgentIds } from "../../agents/agent-scope.js";
 import { resolveBootstrapContextForRun } from "../../agents/bootstrap-files.js";
 import { canExecRequestNode } from "../../agents/exec-defaults.js";
@@ -14,10 +13,8 @@ import { buildSystemPromptParams } from "../../agents/system-prompt-params.js";
 import { buildAgentSystemPrompt } from "../../agents/system-prompt.js";
 import type { WorkspaceBootstrapFile } from "../../agents/workspace.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
-import { listRegisteredPluginAgentPromptGuidance } from "../../plugins/command-registry-state.js";
 import { buildTtsSystemPromptHint } from "../../tts/tts.js";
 import type { HandleCommandsParams } from "./commands-types.js";
-import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 
 export type CommandsSystemPromptBundle = {
   systemPrompt: string;
@@ -46,16 +43,7 @@ export async function resolveCommandsSystemPromptBundle(
   });
   const sandboxRuntime = resolveSandboxRuntimeStatus({
     cfg: params.cfg,
-    sessionKey: resolveRuntimePolicySessionKey({
-      cfg: params.cfg,
-      ctx: params.ctx,
-      sessionKey: params.sessionKey ?? params.ctx.SessionKey,
-    }),
-  });
-  const toolPolicySessionKey = resolveRuntimePolicySessionKey({
-    cfg: params.cfg,
-    ctx: params.ctx,
-    sessionKey: params.sessionKey,
+    sessionKey: params.sessionKey ?? params.ctx.SessionKey,
   });
   const skillsSnapshot = (() => {
     try {
@@ -85,7 +73,7 @@ export async function resolveCommandsSystemPromptBundle(
         config: params.cfg,
         agentId: sessionAgentId,
         workspaceDir,
-        sessionKey: toolPolicySessionKey,
+        sessionKey: params.sessionKey,
         allowGatewaySubagentBinding: true,
         messageProvider: params.command.channel,
         groupId: targetSessionEntry?.groupId ?? undefined,
@@ -146,7 +134,7 @@ export async function resolveCommandsSystemPromptBundle(
         },
       }
     : { enabled: false };
-  const ttsHint = params.cfg ? buildTtsSystemPromptHint(params.cfg, sessionAgentId) : undefined;
+  const ttsHint = params.cfg ? buildTtsSystemPromptHint(params.cfg) : undefined;
 
   const systemPrompt = buildAgentSystemPrompt({
     workspaceDir,
@@ -164,11 +152,7 @@ export async function resolveCommandsSystemPromptBundle(
     skillsPrompt,
     heartbeatPrompt: undefined,
     ttsHint,
-    acpEnabled: isAcpRuntimeSpawnAvailable({
-      config: params.cfg,
-      sandboxed: sandboxRuntime.sandboxed,
-    }),
-    nativeCommandGuidanceLines: listRegisteredPluginAgentPromptGuidance(),
+    acpEnabled: params.cfg?.acp?.enabled !== false,
     runtimeInfo,
     sandboxInfo,
     memoryCitationsMode: params.cfg?.memory?.citations,

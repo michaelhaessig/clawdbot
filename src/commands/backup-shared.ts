@@ -160,12 +160,13 @@ export async function resolveBackupPlanFromPaths(params: {
   const candidates: BackupAssetCandidate[] = await Promise.all(
     rawCandidates.map(async (candidate) => {
       const exists = await pathExists(candidate.sourcePath);
-      return Object.assign({}, candidate, {
+      return {
+        ...candidate,
         exists,
         canonicalPath: exists
           ? await canonicalizeExistingPath(candidate.sourcePath)
           : path.resolve(candidate.sourcePath),
-      });
+      };
     }),
   );
 

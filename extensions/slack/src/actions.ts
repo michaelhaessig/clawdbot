@@ -1,18 +1,16 @@
 import type { Block, KnownBlock, WebClient } from "@slack/web-api";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
-import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
+import { loadConfig } from "openclaw/plugin-sdk/config-runtime";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveSlackAccount } from "./accounts.js";
 import { buildSlackBlocksFallbackText } from "./blocks-fallback.js";
 import { validateSlackBlocksArray } from "./blocks-input.js";
-import { createSlackWebClient, getSlackWriteClient } from "./client.js";
+import { createSlackWebClient, createSlackWriteClient } from "./client.js";
 import { resolveSlackMedia } from "./monitor/media.js";
 import type { SlackMediaResult } from "./monitor/media.js";
 import { sendMessageSlack } from "./send.js";
 import { resolveSlackBotToken } from "./token.js";
 
 export type SlackActionClientOpts = {
-  cfg?: OpenClawConfig;
   accountId?: string;
   token?: string;
   client?: WebClient;
@@ -43,21 +41,10 @@ export type SlackPin = {
   file?: { id?: string; name?: string };
 };
 
-function resolveToken(explicit?: string, accountId?: string, cfg?: OpenClawConfig): string {
-  if (explicit?.trim()) {
-    const token = resolveSlackBotToken(explicit);
-    if (token) {
-      return token;
-    }
-  }
-  if (!cfg) {
-    throw new Error(
-      "Slack actions requires a resolved runtime config. Load and resolve config at the command or gateway boundary, then pass cfg through the runtime path.",
-    );
-  }
-  const resolvedCfg = requireRuntimeConfig(cfg, "Slack actions");
-  const account = resolveSlackAccount({ cfg: resolvedCfg, accountId });
-  const token = resolveSlackBotToken(account.botToken ?? undefined);
+function resolveToken(explicit?: string, accountId?: string) {
+  const cfg = loadConfig();
+  const account = resolveSlackAccount({ cfg, accountId });
+  const token = resolveSlackBotToken(explicit ?? account.botToken ?? undefined);
   if (!token) {
     logVerbose(
       `slack actions: missing bot token for account=${account.accountId} explicit=${Boolean(
@@ -81,8 +68,8 @@ async function getClient(opts: SlackActionClientOpts = {}, mode: "read" | "write
   if (opts.client) {
     return opts.client;
   }
-  const token = resolveToken(opts.token, opts.accountId, opts.cfg);
-  return mode === "write" ? getSlackWriteClient(token) : createSlackWebClient(token);
+  const token = resolveToken(opts.token, opts.accountId);
+  return mode === "write" ? createSlackWriteClient(token) : createSlackWebClient(token);
 }
 
 async function resolveBotUserId(client: WebClient) {
@@ -173,8 +160,7 @@ export async function listSlackReactions(
 export async function sendSlackMessage(
   to: string,
   content: string,
-  opts: Omit<SlackActionClientOpts, "cfg"> & {
-    cfg: OpenClawConfig;
+  opts: SlackActionClientOpts & {
     mediaUrl?: string;
     mediaAccess?: {
       localRoots?: readonly string[];
@@ -186,11 +172,10 @@ export async function sendSlackMessage(
     uploadFileName?: string;
     uploadTitle?: string;
     blocks?: (Block | KnownBlock)[];
-  },
+  } = {},
 ) {
   return await sendMessageSlack(to, content, {
     accountId: opts.accountId,
-    cfg: opts.cfg,
     token: opts.token,
     mediaUrl: opts.mediaUrl,
     mediaAccess: opts.mediaAccess,
@@ -443,7 +428,7 @@ export async function downloadSlackFile(
   fileId: string,
   opts: SlackActionClientOpts & { maxBytes: number; channelId?: string; threadId?: string },
 ): Promise<SlackMediaResult | null> {
-  const token = resolveToken(opts.token, opts.accountId, opts.cfg);
+  const token = resolveToken(opts.token, opts.accountId);
   const client = await getClient(opts);
 
   // Fetch fresh file metadata (includes a current url_private_download).

@@ -28,7 +28,6 @@ let formatPluginCompatibilityNotice: typeof import("./status.js").formatPluginCo
 let summarizePluginCompatibility: typeof import("./status.js").summarizePluginCompatibility;
 
 vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: () => loadConfigMock(),
   loadConfig: () => loadConfigMock(),
 }));
 
@@ -112,7 +111,6 @@ function expectPluginLoaderCall(params: {
   autoEnabledReasons?: Record<string, string[]>;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  logger?: unknown;
   loadModules?: boolean;
 }) {
   expect(loadOpenClawPluginsMock).toHaveBeenCalledWith(
@@ -126,7 +124,6 @@ function expectPluginLoaderCall(params: {
         : {}),
       ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
       ...(params.env ? { env: params.env } : {}),
-      ...(params.logger !== undefined ? { logger: params.logger } : {}),
       ...(params.loadModules !== undefined ? { loadModules: params.loadModules } : {}),
     }),
   );
@@ -137,7 +134,6 @@ function expectMetadataSnapshotLoaderCall(params: {
   activationSourceConfig?: unknown;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  logger?: unknown;
   loadModules?: boolean;
 }) {
   expect(loadPluginMetadataRegistrySnapshotMock).toHaveBeenCalledWith(
@@ -148,7 +144,6 @@ function expectMetadataSnapshotLoaderCall(params: {
         : {}),
       ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
       ...(params.env ? { env: params.env } : {}),
-      ...(params.logger !== undefined ? { logger: params.logger } : {}),
       ...(params.loadModules !== undefined ? { loadModules: params.loadModules } : {}),
     }),
   );
@@ -372,27 +367,6 @@ describe("plugin status reports", () => {
     });
   });
 
-  it("forwards an explicit logger to plugin loading", () => {
-    const logger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    buildPluginSnapshotReport({
-      config: {},
-      logger,
-      workspaceDir: "/workspace",
-    });
-
-    expectMetadataSnapshotLoaderCall({
-      config: {},
-      logger,
-      workspaceDir: "/workspace",
-      loadModules: false,
-    });
-  });
-
   it("uses a metadata snapshot load for snapshot reports", () => {
     buildPluginSnapshotReport({ config: {}, workspaceDir: "/workspace" });
 
@@ -438,7 +412,7 @@ describe("plugin status reports", () => {
           enabled: true,
           subagent: {
             allowModelOverride: true,
-            allowedModels: ["openai/gpt-5.5"],
+            allowedModels: ["openai/gpt-5.4"],
             hasAllowedModelsConfig: true,
           },
         },
@@ -467,9 +441,8 @@ describe("plugin status reports", () => {
     expect(inspect).not.toBeNull();
     expectInspectPolicy(inspect!, {
       allowPromptInjection: undefined,
-      allowConversationAccess: undefined,
       allowModelOverride: true,
-      allowedModels: ["openai/gpt-5.5"],
+      allowedModels: ["openai/gpt-5.4"],
       hasAllowedModelsConfig: true,
     });
     expectPluginLoaderCall({ loadModules: true });
@@ -585,10 +558,10 @@ describe("plugin status reports", () => {
       plugins: {
         entries: {
           google: {
-            hooks: { allowPromptInjection: false, allowConversationAccess: true },
+            hooks: { allowPromptInjection: false },
             subagent: {
               allowModelOverride: true,
-              allowedModels: ["openai/gpt-5.5"],
+              allowedModels: ["openai/gpt-5.4"],
             },
           },
         },
@@ -625,9 +598,8 @@ describe("plugin status reports", () => {
     ]);
     expectInspectPolicy(inspect!, {
       allowPromptInjection: false,
-      allowConversationAccess: true,
       allowModelOverride: true,
-      allowedModels: ["openai/gpt-5.5"],
+      allowedModels: ["openai/gpt-5.4"],
       hasAllowedModelsConfig: true,
     });
     expect(inspect?.diagnostics).toEqual([

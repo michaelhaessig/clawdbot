@@ -3,31 +3,31 @@ import { createHookRunnerWithRegistry } from "./hooks.test-helpers.js";
 
 const inboundClaimEvent = {
   content: "who are you",
-  channel: "guildchat",
+  channel: "discord",
   accountId: "default",
   conversationId: "channel:1",
   isGroup: true,
 };
 
 const inboundClaimCtx = {
-  channelId: "guildchat",
+  channelId: "discord",
   accountId: "default",
   conversationId: "channel:1",
 };
 
-function createInboundClaimForumEvent() {
+function createInboundClaimTelegramEvent() {
   return {
     content: "who are you",
-    channel: "forum",
+    channel: "telegram",
     accountId: "default",
     conversationId: "123:topic:77",
     isGroup: true,
   };
 }
 
-function createInboundClaimForumCtx() {
+function createInboundClaimTelegramCtx() {
   return {
-    channelId: "forum",
+    channelId: "telegram",
     accountId: "default",
     conversationId: "123:topic:77",
   };
@@ -43,8 +43,8 @@ describe("inbound_claim hook runner", () => {
     ]);
 
     const result = await runner.runInboundClaim(
-      createInboundClaimForumEvent(),
-      createInboundClaimForumCtx(),
+      createInboundClaimTelegramEvent(),
+      createInboundClaimTelegramCtx(),
     );
 
     expect(result).toEqual({ handled: true });
@@ -69,20 +69,20 @@ describe("inbound_claim hook runner", () => {
 
     const result = await runner.runInboundClaim(
       {
-        ...createInboundClaimForumEvent(),
+        ...createInboundClaimTelegramEvent(),
         content: "hi",
         conversationId: "123",
         isGroup: false,
       },
       {
-        ...createInboundClaimForumCtx(),
+        ...createInboundClaimTelegramCtx(),
         conversationId: "123",
       },
     );
 
     expect(result).toEqual({ handled: true });
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining("inbound_claim handler from test-plugin failed: boom"),
+      expect.stringContaining("inbound_claim handler from test-plugin failed: Error: boom"),
     );
     expect(succeeding).toHaveBeenCalledTimes(1);
   });

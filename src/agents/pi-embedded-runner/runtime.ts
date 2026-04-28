@@ -4,16 +4,13 @@ export type EmbeddedAgentHarnessFallback = "pi" | "none";
 export function normalizeEmbeddedAgentRuntime(raw: string | undefined): EmbeddedAgentRuntime {
   const value = raw?.trim();
   if (!value) {
-    return "pi";
+    return "auto";
   }
   if (value === "pi") {
     return "pi";
   }
   if (value === "auto") {
     return "auto";
-  }
-  if (value === "codex-app-server") {
-    return "codex";
   }
   return value;
 }

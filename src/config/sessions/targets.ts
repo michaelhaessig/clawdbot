@@ -248,9 +248,7 @@ export async function resolveAllAgentSessionStoreTargets(
           agentsRoot,
           realAgentsRoot,
         });
-        return validatedStorePath
-          ? Object.assign({}, target, { storePath: validatedStorePath })
-          : undefined;
+        return validatedStorePath ? { ...target, storePath: validatedStorePath } : undefined;
       }),
     )
   ).filter((target): target is SessionStoreTarget => Boolean(target));

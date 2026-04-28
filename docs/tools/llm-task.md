@@ -3,8 +3,10 @@ summary: "JSON-only LLM tasks for workflows (optional plugin tool)"
 read_when:
   - You want a JSON-only LLM step inside workflows
   - You need schema-validated LLM output for automation
-title: "LLM task"
+title: "LLM Task"
 ---
+
+# LLM Task
 
 `llm-task` is an **optional plugin tool** that runs a JSON-only LLM task and
 returns structured output (optionally validated against JSON Schema).
@@ -51,9 +53,9 @@ without writing custom OpenClaw code for each workflow.
         "enabled": true,
         "config": {
           "defaultProvider": "openai-codex",
-          "defaultModel": "gpt-5.5",
+          "defaultModel": "gpt-5.4",
           "defaultAuthProfileId": "main",
-          "allowedModels": ["openai/gpt-5.4"],
+          "allowedModels": ["openai-codex/gpt-5.4"],
           "maxTokens": 800,
           "timeoutMs": 30000
         }
@@ -115,9 +117,3 @@ openclaw.invoke --tool llm-task --action json --args-json '{
 - No tools are exposed to the model for this run.
 - Treat output as untrusted unless you validate with `schema`.
 - Put approvals before any side-effecting step (send, post, exec).
-
-## Related
-
-- [Thinking levels](/tools/thinking)
-- [Sub-agents](/tools/subagents)
-- [Slash commands](/tools/slash-commands)

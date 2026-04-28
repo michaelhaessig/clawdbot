@@ -1,4 +1,3 @@
-import { resolveComparableTargetForLoadedChannel } from "../channels/plugins/target-parsing-loaded.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
@@ -94,31 +93,20 @@ function deliveryContextFromSession(entry?: DeliveryContextSource): DeliveryCont
   });
 }
 
-function stripThreadRouteSuffix(target: string): string {
-  return /^(.*):topic:[^:]+$/u.exec(target)?.[1] ?? target;
-}
-
-function normalizeAnnounceRouteTarget(context?: DeliveryContext): string | undefined {
-  const rawTo = normalizeOptionalString(context?.to);
-  if (!rawTo) {
+function normalizeTelegramAnnounceTarget(target: string | undefined): string | undefined {
+  const trimmed = target?.trim();
+  if (!trimmed) {
     return undefined;
   }
-  const channel = normalizeOptionalLowercaseString(context?.channel);
-  const parsed = channel
-    ? resolveComparableTargetForLoadedChannel({
-        channel,
-        rawTarget: rawTo,
-        fallbackThreadId: context?.threadId,
-      })
-    : null;
-  let route = stripThreadRouteSuffix(parsed?.to ?? rawTo);
-  if (channel && route.toLowerCase().startsWith(`${channel}:`)) {
-    route = route.slice(channel.length + 1);
+  if (trimmed.startsWith("group:")) {
+    return `telegram:${trimmed.slice("group:".length)}`;
   }
-  if (route.startsWith("group:") || route.startsWith("channel:")) {
-    route = route.slice(route.indexOf(":") + 1);
+  if (!trimmed.startsWith("telegram:")) {
+    return undefined;
   }
-  return route || undefined;
+  const raw = trimmed.slice("telegram:".length);
+  const topicMatch = /^(.*):topic:[^:]+$/u.exec(raw);
+  return `telegram:${topicMatch?.[1] ?? raw}`;
 }
 
 function shouldStripThreadFromAnnounceEntry(
@@ -132,8 +120,16 @@ function shouldStripThreadFromAnnounceEntry(
   ) {
     return false;
   }
-  const requesterTarget = normalizeAnnounceRouteTarget(normalizedRequester);
-  const entryTarget = normalizeAnnounceRouteTarget(normalizedEntry);
+  const requesterChannel = normalizeOptionalLowercaseString(normalizedRequester.channel);
+  if (requesterChannel === "telegram") {
+    const requesterTarget = normalizeTelegramAnnounceTarget(normalizedRequester.to);
+    const entryTarget = normalizeTelegramAnnounceTarget(normalizedEntry?.to);
+    if (requesterTarget && entryTarget) {
+      return requesterTarget !== entryTarget;
+    }
+  }
+  const requesterTarget = normalizeOptionalString(normalizedRequester.to);
+  const entryTarget = normalizeOptionalString(normalizedEntry?.to);
   if (requesterTarget && entryTarget) {
     return requesterTarget !== entryTarget;
   }

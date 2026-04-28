@@ -23,7 +23,6 @@ const previousMatrixEnv = Object.fromEntries(
   MATRIX_ENV_KEYS.map((key) => [key, process.env[key]]),
 ) as Record<(typeof MATRIX_ENV_KEYS)[number], string | undefined>;
 
-// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Test helper lets callers ascribe plugin runtime shape.
 function createNonExitingTypedRuntimeEnv<TRuntime>(): TRuntime {
   return {
     log: vi.fn(),
@@ -295,7 +294,6 @@ export function createMatrixNamedAccountsConfig(params: {
     {
       homeserver: string;
       accessToken?: string;
-      encryption?: boolean;
     }
   >;
 }): CoreConfig {

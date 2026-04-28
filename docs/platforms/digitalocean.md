@@ -3,7 +3,7 @@ summary: "OpenClaw on DigitalOcean (simple paid VPS option)"
 read_when:
   - Setting up OpenClaw on DigitalOcean
   - Looking for cheap VPS hosting for OpenClaw
-title: "DigitalOcean (platform)"
+title: "DigitalOcean (Platform)"
 ---
 
 # OpenClaw on DigitalOcean
@@ -14,7 +14,7 @@ Run a persistent OpenClaw Gateway on DigitalOcean for **$6/month** (or $4/mo wit
 
 If you want a $0/month option and don’t mind ARM + provider-specific setup, see the [Oracle Cloud guide](/platforms/oracle).
 
-## Cost comparison (2026)
+## Cost Comparison (2026)
 
 | Provider     | Plan            | Specs                  | Price/mo    | Notes                                 |
 | ------------ | --------------- | ---------------------- | ----------- | ------------------------------------- |
@@ -209,7 +209,7 @@ openclaw backup create
 
 ---
 
-## Oracle Cloud free alternative
+## Oracle Cloud Free Alternative
 
 Oracle Cloud offers **Always Free** ARM instances that are significantly more powerful than any paid option here — for $0/month.
 
@@ -258,7 +258,7 @@ free -h
 
 ---
 
-## Related
+## See Also
 
 - [Hetzner guide](/install/hetzner) — cheaper, more powerful
 - [Docker install](/install/docker) — containerized setup
