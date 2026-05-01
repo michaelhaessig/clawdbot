@@ -4,6 +4,11 @@
 id: active-memory-preprompt-recall
 title: Active Memory pre-reply recall
 surface: memory
+coverage:
+  primary:
+    - memory.active-recall
+  secondary:
+    - memory.recall
 objective: Verify Active Memory surfaces a memory-only preference before the main reply, and that the same question stays unresolved when the plugin is off.
 plugins:
   - active-memory
@@ -40,7 +45,7 @@ execution:
   config:
     baselineConversationId: qa-active-memory-off
     activeConversationId: qa-active-memory-on
-    memoryFact: "Stable QA movie night snack preference: lemon pepper wings with blue cheese."
+    memoryFact: "Stable QA movie night usual favorite snack preference: lemon pepper wings with blue cheese."
     memoryQuery: "QA movie night snack lemon pepper wings blue cheese"
     expectedNeedle: lemon pepper wings
     prompt: "Silent snack recall check: what snack do I usually want for QA movie night? Reply in one short sentence."

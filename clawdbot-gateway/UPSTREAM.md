@@ -4,7 +4,7 @@
 
 - **Repo:** `https://github.com/openclaw/openclaw`
 - **Git remote:** `upstream` (set via `git remote set-url upstream https://github.com/openclaw/openclaw.git`)
-- **Last synced:** `upstream/main` @ 2026-04-17 (`474b08bfbd`) — v2026.4.26 sync was reverted (v3.1.8 withdrawn) due to startup hang in `config.auth` phase
+- **Last synced:** `v2026.4.29` (`c263d0edde`) — release notes call out slow-host startup fixes: bounded local discovery advertisement (#73865), background model-catalog reload (#74135), opt-in startup diagnostics timeline, opt-in QMD startup refresh (`memory.qmd.update.startup`), event-loop readiness diagnostics in `/readyz`. v2026.4.26 sync had been reverted (v3.1.8 withdrawn) due to startup hang in `config.auth` phase on aarch64 HA host; v2026.4.29 expected to fix this.
 
 Previously at `https://github.com/clawdbot/clawdbot` (moved in v2026.1.29 rebrand).
 

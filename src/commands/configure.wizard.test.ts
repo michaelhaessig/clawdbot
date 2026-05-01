@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
     clackText: vi.fn(),
     clackConfirm: vi.fn(),
     resolveSearchProviderOptions: vi.fn(),
+    resolvePluginContributionOwners: vi.fn(),
     setupSearch: vi.fn(),
     readConfigFileSnapshot: vi.fn(),
     writeConfigFile,
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => {
     isCodexNativeWebSearchRelevant: vi.fn(({ config }: { config: OpenClawConfig }) =>
       Boolean(config.auth?.profiles?.["openai-codex:default"]),
     ),
+    setupChannels: vi.fn(async (cfg: OpenClawConfig) => cfg),
   };
 });
 
@@ -104,12 +106,16 @@ vi.mock("./onboard-skills.js", () => ({
 }));
 
 vi.mock("./onboard-channels.js", () => ({
-  setupChannels: vi.fn(),
+  setupChannels: mocks.setupChannels,
 }));
 
 vi.mock("./onboard-search.js", () => ({
   resolveSearchProviderOptions: mocks.resolveSearchProviderOptions,
   setupSearch: mocks.setupSearch,
+}));
+
+vi.mock("../plugins/plugin-registry.js", () => ({
+  resolvePluginContributionOwners: mocks.resolvePluginContributionOwners,
 }));
 
 vi.mock("../agents/codex-native-web-search.js", () => ({
@@ -209,6 +215,7 @@ describe("runConfigureWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.ensureControlUiAssetsBuilt.mockResolvedValue({ ok: true });
+    mocks.resolvePluginContributionOwners.mockReturnValue(["firecrawl"]);
     mocks.resolveSearchProviderOptions.mockReturnValue([
       {
         id: "firecrawl",
@@ -237,6 +244,38 @@ describe("runConfigureWizard", () => {
     expect(mocks.writeConfigFile).toHaveBeenCalledWith(
       expect.objectContaining({
         gateway: expect.objectContaining({ mode: "local" }),
+      }),
+    );
+  });
+
+  it("keeps startup gateway hint probes bounded", async () => {
+    setupBaseWizardState({
+      gateway: {
+        mode: "local",
+        remote: {
+          url: "wss://gateway.example.test",
+          token: "token",
+        },
+      },
+    });
+    queueWizardPrompts({
+      select: ["local", "__continue"],
+      confirm: [],
+    });
+
+    await runConfigureWizard({ command: "configure" }, createRuntime());
+
+    expect(mocks.probeGatewayReachable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "ws://127.0.0.1:18789",
+        timeoutMs: 300,
+      }),
+    );
+    expect(mocks.probeGatewayReachable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "wss://gateway.example.test",
+        token: "token",
+        timeoutMs: 300,
       }),
     );
   });
@@ -323,6 +362,47 @@ describe("runConfigureWizard", () => {
             }),
           }),
         }),
+      }),
+    );
+  });
+
+  it("does not load managed search provider options when web search is disabled", async () => {
+    setupBaseWizardState();
+    queueWizardPrompts({
+      select: ["local"],
+      confirm: [false, true],
+    });
+
+    await runWebConfigureWizard();
+
+    expect(mocks.resolvePluginContributionOwners).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contribution: "contracts",
+        matches: "webSearchProviders",
+      }),
+    );
+    expect(mocks.resolveSearchProviderOptions).not.toHaveBeenCalled();
+    expect(mocks.setupSearch).not.toHaveBeenCalled();
+  });
+
+  it("defers channel status checks until a channel is selected", async () => {
+    setupBaseWizardState();
+    queueWizardPrompts({
+      select: ["local", "configure"],
+      confirm: [],
+    });
+
+    await runConfigureWizard({ command: "configure", sections: ["channels"] }, createRuntime());
+
+    expect(mocks.setupChannels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gateway: expect.objectContaining({ mode: "local" }),
+      }),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        deferStatusUntilSelection: true,
+        skipStatusNote: true,
       }),
     );
   });

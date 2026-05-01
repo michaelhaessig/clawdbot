@@ -8,6 +8,7 @@ import {
 } from "openclaw/plugin-sdk/account-resolution";
 import { safeParseJsonWithSchema, safeParseWithSchema } from "openclaw/plugin-sdk/extension-shared";
 import { isSecretRef } from "openclaw/plugin-sdk/secret-input";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { z } from "zod";
 import type { GoogleChatAccountConfig } from "./types.config.js";
 
@@ -23,17 +24,13 @@ export type ResolvedGoogleChatAccount = {
   credentialsFile?: string;
 };
 
+export type GoogleChatConfigAccessorAccount = {
+  config: GoogleChatAccountConfig;
+};
+
 const ENV_SERVICE_ACCOUNT = "GOOGLE_CHAT_SERVICE_ACCOUNT";
 const ENV_SERVICE_ACCOUNT_FILE = "GOOGLE_CHAT_SERVICE_ACCOUNT_FILE";
 const JsonRecordSchema = z.record(z.string(), z.unknown());
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
 
 const {
   listAccountIds: listGoogleChatAccountIds,
@@ -41,7 +38,7 @@ const {
 } = createAccountListHelpers("googlechat");
 export { listGoogleChatAccountIds, resolveDefaultGoogleChatAccountId };
 
-function mergeGoogleChatAccountConfig(
+export function mergeGoogleChatAccountConfig(
   cfg: OpenClawConfig,
   accountId: string,
 ): GoogleChatAccountConfig {
@@ -67,6 +64,16 @@ function mergeGoogleChatAccountConfig(
   // In multi-account setups, allow accounts.default to provide shared defaults
   // (for example webhook/audience fields) while preserving top-level and account overrides.
   return { ...defaultAccountShared, ...base } as GoogleChatAccountConfig;
+}
+
+export function resolveGoogleChatConfigAccessorAccount(params: {
+  cfg: OpenClawConfig;
+  accountId?: string | null;
+}): GoogleChatConfigAccessorAccount {
+  const accountId = normalizeAccountId(
+    params.accountId ?? params.cfg.channels?.googlechat?.defaultAccount,
+  );
+  return { config: mergeGoogleChatAccountConfig(params.cfg, accountId) };
 }
 
 function parseServiceAccount(value: unknown): Record<string, unknown> | null {

@@ -1,5 +1,8 @@
+import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
+import { i18n } from "../i18n/index.ts";
 import { md, toSanitizedMarkdownHtml } from "./markdown.ts";
+import { renderMarkdownSidebar } from "./views/markdown-sidebar.ts";
 
 describe("toSanitizedMarkdownHtml", () => {
   // ── Original tests from before markdown-it migration ──
@@ -315,6 +318,23 @@ describe("toSanitizedMarkdownHtml", () => {
       expect(html).toContain("data-code=");
     });
 
+    it("keeps localized copy labels fresh after locale changes", async () => {
+      const markdown = "```ts\nconst localizedCopy = true;\n```";
+      await i18n.setLocale("en");
+      const english = toSanitizedMarkdownHtml(markdown);
+
+      try {
+        await i18n.setLocale("zh-CN");
+        const chinese = toSanitizedMarkdownHtml(markdown);
+
+        expect(english).toContain(">Copy<");
+        expect(chinese).toContain(">复制<");
+        expect(chinese).not.toContain(">Copy<");
+      } finally {
+        await i18n.setLocale("en");
+      }
+    });
+
     it("collapses JSON code blocks", () => {
       const html = toSanitizedMarkdownHtml('```json\n{"key": "value"}\n```');
       expect(html).toContain("<details");
@@ -424,8 +444,10 @@ describe("toSanitizedMarkdownHtml", () => {
   describe("ReDoS protection", () => {
     it("does not throw on deeply nested emphasis markers (#36213)", () => {
       const nested = "*".repeat(500) + "text" + "*".repeat(500);
-      expect(() => toSanitizedMarkdownHtml(nested)).not.toThrow();
-      const html = toSanitizedMarkdownHtml(nested);
+      let html = "";
+      expect(() => {
+        html = toSanitizedMarkdownHtml(nested);
+      }).not.toThrow();
       expect(html).toContain("text");
     });
 
@@ -467,7 +489,7 @@ describe("toSanitizedMarkdownHtml", () => {
     it("uses plain text fallback for oversized content", () => {
       // MARKDOWN_PARSE_LIMIT is 40_000 chars
       const input = Array.from(
-        { length: 320 },
+        { length: 220 },
         (_, i) => `Paragraph ${i + 1}: ${"Long plain-text reply. ".repeat(8)}`,
       ).join("\n\n");
       const html = toSanitizedMarkdownHtml(input);
@@ -475,7 +497,7 @@ describe("toSanitizedMarkdownHtml", () => {
     });
 
     it("preserves indentation in plain text fallback", () => {
-      const input = `${"Header line\n".repeat(5000)}\n    indented log line\n        deeper indent`;
+      const input = `${"Header line\n".repeat(3400)}\n    indented log line\n        deeper indent`;
       const html = toSanitizedMarkdownHtml(input);
       expect(html).toContain('class="markdown-plain-text-fallback"');
       expect(html).toContain("    indented log line");
@@ -506,5 +528,25 @@ describe("toSanitizedMarkdownHtml", () => {
         warnSpy.mockRestore();
       }
     });
+  });
+});
+
+describe("renderMarkdownSidebar", () => {
+  it("renders sanitized markdown content", () => {
+    const container = document.createElement("div");
+
+    render(
+      renderMarkdownSidebar({
+        content: { kind: "markdown", content: "Hello **world**" },
+        error: null,
+        onClose: () => undefined,
+        onViewRawText: () => undefined,
+      }),
+      container,
+    );
+
+    expect(container.querySelector(".sidebar-markdown strong")?.textContent).toBe("world");
+    expect(container.textContent).toContain("Rendered Markdown");
+    expect(container.textContent).toContain("View Raw Text");
   });
 });

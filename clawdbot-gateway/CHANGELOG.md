@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.9
+
+- Sync upstream to `v2026.4.29` (`c263d0edde`)
+- Targets the v3.1.8 startup hang via upstream slow-host fixes: bounded local discovery (#73865), background model-catalog reload (#74135), opt-in QMD refresh (`memory.qmd.update.startup`), event-loop readiness diagnostics in `/readyz`
+
 ## 3.1.8 — withdrawn
 
 The 3.1.8 build hung in the gateway `config.auth` startup phase on aarch64 HA hosts, blocking Telegram and WhatsApp. Reverted in the repo back to v3.1.7's tree (upstream `474b08bfbd`); v3.1.8 image remains in GHCR but is unsupported.
