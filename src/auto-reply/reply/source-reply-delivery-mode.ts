@@ -25,13 +25,12 @@ export function resolveSourceReplyDeliveryMode(params: {
   messageToolAvailable?: boolean;
   defaultVisibleReplies?: "automatic" | "message_tool";
 }): SourceReplyDeliveryMode {
-  let mode: SourceReplyDeliveryMode;
   if (params.requested) {
     return params.messageToolAvailable === false && params.requested === "message_tool_only"
       ? "automatic"
       : params.requested;
   }
-  if (mode === "message_tool_only" && params.messageToolAvailable === false) {
+  if (params.ctx.CommandSource === "native") {
     return "automatic";
   }
   const chatType = normalizeChatType(params.ctx.ChatType);

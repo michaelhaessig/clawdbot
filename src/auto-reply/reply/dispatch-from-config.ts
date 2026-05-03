@@ -18,11 +18,6 @@ import {
 } from "../../agents/subagent-capabilities.js";
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../agents/tool-policy.js";
 import {
-  isToolAllowedByPolicies,
-  resolveEffectiveToolPolicy,
-} from "../../agents/pi-tools.policy.js";
-import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../agents/tool-policy.js";
-import {
   resolveConversationBindingRecord,
   touchConversationBindingRecord,
 } from "../../bindings/records.js";

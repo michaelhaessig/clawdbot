@@ -280,18 +280,6 @@ function findTaskSessionEntry(
   return findSessionEntryByKey(getSessionStoreLookup(storePath, context), childSessionKey);
 }
 
-function findTaskSessionEntry(task: TaskRecord): SessionEntry | undefined {
-  const childSessionKey = task.childSessionKey?.trim();
-  if (!childSessionKey) {
-    return undefined;
-  }
-  const agentId = taskRegistryMaintenanceRuntime.parseAgentSessionKey(childSessionKey)?.agentId;
-  const storePath = taskRegistryMaintenanceRuntime.resolveStorePath(undefined, { agentId });
-  const store = taskRegistryMaintenanceRuntime.loadSessionStore(storePath);
-  const entry = findSessionEntryByKey(store, childSessionKey);
-  return entry && typeof entry === "object" ? (entry as SessionEntry) : undefined;
-}
-
 function isActiveTask(task: TaskRecord): boolean {
   return task.status === "queued" || task.status === "running";
 }
