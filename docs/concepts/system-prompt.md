@@ -109,6 +109,37 @@ section when the direct/group chat context already includes the resolved
 conversation-specific `NO_REPLY` behavior. This avoids repeating token mechanics
 in both the global system prompt and channel context.
 
+## Prompt snapshots
+
+OpenClaw keeps committed happy-path prompt snapshots for the Codex/message-tool
+runtime under `test/fixtures/agents/prompt-snapshots/happy-path/`. They render
+selected app-server thread/turn params plus a reconstructed model-bound prompt
+layer stack for Telegram direct, Discord group, and heartbeat turns. That stack
+includes a pinned Codex `gpt-5.5` model prompt fixture generated from Codex's
+model catalog/cache shape, the Codex happy-path permission developer text,
+OpenClaw developer instructions, user turn input, and references to the dynamic
+tool specs.
+
+Refresh the pinned Codex model prompt fixture with
+`pnpm prompt:snapshots:sync-codex-model`. By default, the script looks for
+Codex's runtime cache at `$CODEX_HOME/models_cache.json`, then
+`~/.codex/models_cache.json`, and only then falls back to the maintainer Codex
+checkout convention at `~/code/codex/codex-rs/models-manager/models.json`. If
+none of those sources exist, the command exits without changing the committed
+fixture. Pass `--catalog <path>` to refresh from a specific `models_cache.json`
+or `models.json` file.
+
+These snapshots are still not a byte-for-byte raw OpenAI request capture. Codex
+can add runtime-owned workspace context such as `AGENTS.md`, environment
+context, memories, app/plugin instructions, and future collaboration-mode
+instructions inside the Codex runtime after OpenClaw sends thread and turn
+params.
+
+Regenerate them with `pnpm prompt:snapshots:gen` and verify drift with
+`pnpm prompt:snapshots:check`. CI runs the drift check in the additional
+boundary shard so prompt changes and snapshot updates stay attached to the same
+PR.
+
 ## Workspace bootstrap injection
 
 Bootstrap files are trimmed and appended under **Project Context** so the model sees identity and profile context without needing explicit reads:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.1.10
+
+- Sync upstream to `v2026.5.2` (`8b2a6e57fe`) — skips v2026.4.30 (beta only)
+- Pulls in npm-first plugin install/repair, leaner gateway/agent startup paths, `openclaw gateway restart --force`/`--wait`, and Control UI/messaging fixes
+
 ## 3.1.9
 
 - Sync upstream to `v2026.4.29` (`c263d0edde`)

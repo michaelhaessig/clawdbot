@@ -86,6 +86,23 @@ describe("resolveSourceReplyDeliveryMode", () => {
     }
   });
 
+  it("allows harnesses to default direct chats to message-tool-only delivery", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "direct" },
+        defaultVisibleReplies: "message_tool",
+      }),
+    ).toBe("message_tool_only");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: { messages: { visibleReplies: "automatic" } },
+        ctx: { ChatType: "direct" },
+        defaultVisibleReplies: "message_tool",
+      }),
+    ).toBe("automatic");
+  });
+
   it("lets group/channel config override the global visible reply mode", () => {
     expect(
       resolveSourceReplyDeliveryMode({
@@ -151,6 +168,47 @@ describe("resolveSourceReplyDeliveryMode", () => {
       }),
     ).toBe("message_tool_only");
     expect(loggerMocks.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to automatic when message tool is unavailable", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group" },
+        messageToolAvailable: false,
+      }),
+    ).toBe("automatic");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: globalToolOnlyReplyConfig,
+        ctx: { ChatType: "direct" },
+        messageToolAvailable: false,
+      }),
+    ).toBe("automatic");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel" },
+        requested: "message_tool_only",
+        messageToolAvailable: false,
+      }),
+    ).toBe("automatic");
+  });
+
+  it("keeps message-tool-only delivery when message tool availability is unknown", () => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "group" },
+        messageToolAvailable: true,
+      }),
+    ).toBe("message_tool_only");
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx: { ChatType: "channel" },
+      }),
+    ).toBe("message_tool_only");
   });
 });
 
@@ -294,7 +352,6 @@ describe("resolveSourceReplyVisibilityPolicy", () => {
       suppressTyping: false,
     });
   });
-
   it("keeps delivery automatic when message-tool-only mode cannot send visibly", () => {
     expect(
       resolveSourceReplyVisibilityPolicy({

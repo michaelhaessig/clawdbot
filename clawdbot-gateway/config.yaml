@@ -1,5 +1,5 @@
 name: OpenClaw Gateway
-version: "3.1.9"
+version: "3.1.10"
 slug: clawdbot-gateway
 description: Pre-built WhatsApp gateway with AI agent capabilities
 url: https://github.com/openclaw/openclaw
